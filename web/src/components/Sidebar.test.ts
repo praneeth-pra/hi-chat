@@ -7,6 +7,7 @@ const chat = (id: string, updatedAt: number) => ({
   id,
   title: id,
   model: null,
+  instructions: '',
   createdAt: updatedAt,
   updatedAt
 });

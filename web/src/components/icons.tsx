@@ -13,6 +13,18 @@ const base = (props: SVGProps<SVGSVGElement>) => ({
   ...props
 });
 
+export const IconNote = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+    <path d="M14 3v6h6M8 13h8M8 17h5" />
+  </svg>
+);
+export const IconCube = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
+    <path d="M3 8l9 5 9-5M12 13v8" />
+  </svg>
+);
 export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M12 5v14M5 12h14" />

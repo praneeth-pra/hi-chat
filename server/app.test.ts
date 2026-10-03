@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createApp, titleFrom, NEW_CHAT_TITLE } from './app.js';
+import { buildContext, createApp, titleFrom, NEW_CHAT_TITLE } from './app.js';
 import { Store } from './db.js';
 import { LlmError, type ChatTurn, type LlmClient } from './llm.js';
 
@@ -139,6 +139,69 @@ describe('chats', () => {
     expect(llm.calls[0].messages[0]).toEqual({ role: 'system', content: 'Be brief.' });
   });
 
+  it('adds chat instructions after the system prompt', async () => {
+    const app = make();
+    const put = { method: 'PUT', headers: { 'Content-Type': 'application/json' } };
+    await app.request('/api/settings', {
+      ...put,
+      body: JSON.stringify({ systemPrompt: 'Be brief.' })
+    });
+    const chat = await (
+      await app.request('/api/chats', json({ instructions: 'You are a tutor.' }))
+    ).json();
+    expect(chat.instructions).toBe('You are a tutor.');
+    await (await app.request(`/api/chats/${chat.id}/messages`, json({ content: 'hi' }))).text();
+    expect(llm.calls[0].messages[0]).toEqual({
+      role: 'system',
+      content: 'Be brief.\n\nYou are a tutor.'
+    });
+
+    const res = await app.request(`/api/chats/${chat.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instructions: '' })
+    });
+    expect((await res.json()).instructions).toBe('');
+  });
+
+  it('limits how many earlier messages are sent', async () => {
+    const app = make();
+    const put = { method: 'PUT', headers: { 'Content-Type': 'application/json' } };
+    const saved = await (
+      await app.request('/api/settings', { ...put, body: JSON.stringify({ contextMessages: 2 }) })
+    ).json();
+    expect(saved.contextMessages).toBe(2);
+    const chat = await (await app.request('/api/chats', json({}))).json();
+    for (const content of ['one', 'two', 'three']) {
+      await (await app.request(`/api/chats/${chat.id}/messages`, json({ content }))).text();
+    }
+    expect(llm.calls[2].messages.map((m) => m.content)).toEqual(['three']);
+
+    const bad = await app.request('/api/settings', {
+      ...put,
+      body: JSON.stringify({ contextMessages: -1 })
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('saves which models are enabled', async () => {
+    const app = make();
+    const put = { method: 'PUT', headers: { 'Content-Type': 'application/json' } };
+    expect((await (await app.request('/api/settings')).json()).enabledModels).toEqual([]);
+    const saved = await (
+      await app.request('/api/settings', {
+        ...put,
+        body: JSON.stringify({ enabledModels: ['openai/gpt-oss-20b', 'openai/gpt-oss-20b'] })
+      })
+    ).json();
+    expect(saved.enabledModels).toEqual(['openai/gpt-oss-20b']);
+    const bad = await app.request('/api/settings', {
+      ...put,
+      body: JSON.stringify({ enabledModels: 'all' })
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('reports upstream errors and keeps the partial reply', async () => {
     const app = make();
     llm.failAfter = 1;
@@ -184,5 +247,32 @@ describe('models', () => {
       models: ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b'],
       defaultModel: 'llama-3.3-70b-versatile'
     });
+  });
+});
+
+describe('buildContext', () => {
+  const msgs = [
+    { role: 'user' as const, content: 'q1' },
+    { role: 'assistant' as const, content: 'a1' },
+    { role: 'user' as const, content: 'q2' },
+    { role: 'assistant' as const, content: 'a2' },
+    { role: 'user' as const, content: 'q3' }
+  ];
+
+  it('sends everything when the limit is 0', () => {
+    expect(buildContext(msgs, [], 0)).toHaveLength(5);
+  });
+
+  it('keeps the last messages and never starts with a reply', () => {
+    expect(buildContext(msgs, [], 4).map((m) => m.content)).toEqual(['q2', 'a2', 'q3']);
+    expect(buildContext(msgs, [], 3).map((m) => m.content)).toEqual(['q2', 'a2', 'q3']);
+  });
+
+  it('joins non-empty system texts into one system message', () => {
+    expect(buildContext(msgs.slice(0, 1), [' ', 'A', 'B '], 0)[0]).toEqual({
+      role: 'system',
+      content: 'A\n\nB'
+    });
+    expect(buildContext(msgs.slice(0, 1), ['', '  '], 0)[0].role).toBe('user');
   });
 });

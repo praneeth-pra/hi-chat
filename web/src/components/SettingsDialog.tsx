@@ -4,6 +4,8 @@ import type { Settings } from '../api';
 
 export type Theme = 'system' | 'light' | 'dark';
 
+const CONTEXT_OPTIONS = [0, 2, 4, 10, 20, 50];
+
 interface Props {
   open: boolean;
   settings: Settings;
@@ -84,6 +86,23 @@ export function SettingsDialog({
             value={draft.systemPrompt}
             onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
           />
+        </label>
+
+        <label>
+          <span>Context: earlier messages sent with each reply</span>
+          <select
+            value={draft.contextMessages}
+            onChange={(e) => setDraft({ ...draft, contextMessages: Number(e.target.value) })}
+          >
+            {(CONTEXT_OPTIONS.includes(draft.contextMessages)
+              ? CONTEXT_OPTIONS
+              : [...CONTEXT_OPTIONS, draft.contextMessages]
+            ).map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? 'All messages' : `Last ${n} messages`}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label>
