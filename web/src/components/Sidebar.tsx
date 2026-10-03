@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import type { Chat } from '../api';
-import { IconPencil, IconPlus, IconSettings, IconTrash } from './icons';
+import { IconCube, IconPencil, IconPlus, IconSettings, IconTrash } from './icons';
 
 interface Props {
   chats: Chat[];
@@ -11,6 +11,8 @@ interface Props {
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onOpenSettings: () => void;
+  onOpenModels: () => void;
+  modelsActive?: boolean;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -39,7 +41,9 @@ export function Sidebar({
   onNew,
   onRename,
   onDelete,
-  onOpenSettings
+  onOpenSettings,
+  onOpenModels,
+  modelsActive
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -128,6 +132,13 @@ export function Sidebar({
           <div className="chat-empty">{filter ? 'No matching chats' : 'No chats yet'}</div>
         )}
       </nav>
+      <button
+        type="button"
+        className={`sidebar-footer ${modelsActive ? 'active' : ''}`}
+        onClick={onOpenModels}
+      >
+        <IconCube /> Models
+      </button>
       <button type="button" className="sidebar-footer" onClick={onOpenSettings}>
         <IconSettings /> Settings
       </button>

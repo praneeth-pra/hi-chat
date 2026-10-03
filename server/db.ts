@@ -7,6 +7,7 @@ export interface Chat {
   id: string;
   title: string;
   model: string | null;
+  instructions: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -50,6 +51,7 @@ const toChat = (r: Row): Chat => ({
   id: r.id as string,
   title: r.title as string,
   model: (r.model as string | null) ?? null,
+  instructions: (r.instructions as string | null) ?? '',
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at)
 });
@@ -72,6 +74,14 @@ export class Store {
     this.clock = clock;
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  private migrate() {
+    const columns = this.db.prepare('PRAGMA table_info(chats)').all() as Row[];
+    if (!columns.some((c) => c.name === 'instructions')) {
+      this.db.exec("ALTER TABLE chats ADD COLUMN instructions TEXT NOT NULL DEFAULT ''");
+    }
   }
 
   close() {
@@ -90,24 +100,36 @@ export class Store {
     return r ? toChat(r as Row) : null;
   }
 
-  createChat(title: string, model: string | null): Chat {
+  createChat(title: string, model: string | null, instructions = ''): Chat {
     const now = this.clock();
-    const chat: Chat = { id: randomUUID(), title, model, createdAt: now, updatedAt: now };
+    const chat: Chat = {
+      id: randomUUID(),
+      title,
+      model,
+      instructions,
+      createdAt: now,
+      updatedAt: now
+    };
     this.db
       .prepare(
-        'INSERT INTO chats (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO chats (id, title, model, instructions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
       )
-      .run(chat.id, chat.title, chat.model, now, now);
+      .run(chat.id, chat.title, chat.model, instructions, now, now);
     return chat;
   }
 
-  updateChat(id: string, patch: { title?: string; model?: string | null }): Chat | null {
+  updateChat(
+    id: string,
+    patch: { title?: string; model?: string | null; instructions?: string }
+  ): Chat | null {
     const chat = this.getChat(id);
     if (!chat) return null;
     const next = { ...chat, ...patch, updatedAt: this.clock() };
     this.db
-      .prepare('UPDATE chats SET title = ?, model = ?, updated_at = ? WHERE id = ?')
-      .run(next.title, next.model, next.updatedAt, id);
+      .prepare(
+        'UPDATE chats SET title = ?, model = ?, instructions = ?, updated_at = ? WHERE id = ?'
+      )
+      .run(next.title, next.model, next.instructions, next.updatedAt, id);
     return next;
   }
 

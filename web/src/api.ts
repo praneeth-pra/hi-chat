@@ -2,6 +2,7 @@ export interface Chat {
   id: string;
   title: string;
   model: string | null;
+  instructions: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -18,7 +19,17 @@ export interface Message {
 export interface Settings {
   defaultModel: string;
   systemPrompt: string;
+  /** How many earlier messages each reply sees; 0 means all. */
+  contextMessages: number;
+  /** Models shown in the picker; empty means all. */
+  enabledModels: string[];
 }
+
+/** The models to offer in the picker: the enabled ones that still exist, or all of them. */
+export const pickerModels = (all: string[], enabled: string[]) => {
+  const kept = all.filter((m) => enabled.includes(m));
+  return kept.length ? kept : all;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -54,8 +65,9 @@ export const api = {
   settings: () => request<Settings>('/api/settings'),
   saveSettings: (s: Partial<Settings>) => request<Settings>('/api/settings', send('PUT', s)),
   chats: () => request<Chat[]>('/api/chats'),
-  createChat: (model?: string) => request<Chat>('/api/chats', send('POST', { model })),
-  updateChat: (id: string, patch: { title?: string; model?: string }) =>
+  createChat: (model?: string, instructions?: string) =>
+    request<Chat>('/api/chats', send('POST', { model, instructions })),
+  updateChat: (id: string, patch: { title?: string; model?: string; instructions?: string }) =>
     request<Chat>(`/api/chats/${id}`, send('PATCH', patch)),
   deleteChat: (id: string) => request<void>(`/api/chats/${id}`, send('DELETE')),
   messages: (chatId: string) => request<Message[]>(`/api/chats/${chatId}/messages`),

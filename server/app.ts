@@ -5,7 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { Chat, Store } from './db.js';
+import type { Chat, Message, Store } from './db.js';
 import { LlmError, type ChatTurn, type LlmClient } from './llm.js';
 import {
   SESSION_COOKIE,
@@ -32,6 +32,32 @@ export function titleFrom(content: string): string {
   const oneLine = content.replace(/\s+/g, ' ').trim();
   if (!oneLine) return NEW_CHAT_TITLE;
   return oneLine.length > MAX_TITLE ? `${oneLine.slice(0, MAX_TITLE - 1)}…` : oneLine;
+}
+
+export const MAX_CONTEXT_MESSAGES = 200;
+
+/**
+ * Builds the turns sent to the model: the non-empty system texts joined into one system
+ * message, then the last `limit` messages (all when limit is 0). A trimmed history never
+ * starts with an assistant reply.
+ */
+export function buildContext(
+  messages: Pick<Message, 'role' | 'content'>[],
+  systemTexts: string[],
+  limit: number
+): ChatTurn[] {
+  let recent = limit > 0 ? messages.slice(-limit) : messages;
+  if (recent.length < messages.length) {
+    const firstUser = recent.findIndex((m) => m.role === 'user');
+    recent = firstUser === -1 ? recent.slice(-1) : recent.slice(firstUser);
+  }
+  const turns: ChatTurn[] = recent.map(({ role, content }) => ({ role, content }));
+  const system = systemTexts
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  if (system) turns.unshift({ role: 'system', content: system });
+  return turns;
 }
 
 export function createApp(store: Store, llm: LlmClient, config: AppConfig) {
@@ -84,9 +110,28 @@ export function createApp(store: Store, llm: LlmClient, config: AppConfig) {
     }
   });
 
-  app.get('/api/settings', (c) =>
-    c.json({ defaultModel: defaultModel(), systemPrompt: store.getSetting('systemPrompt') ?? '' })
-  );
+  const contextMessages = () => {
+    const n = Number(store.getSetting('contextMessages') ?? 0);
+    return Number.isInteger(n) && n > 0 ? n : 0;
+  };
+
+  const enabledModels = (): string[] => {
+    try {
+      const list = JSON.parse(store.getSetting('enabledModels') ?? '[]');
+      return Array.isArray(list) ? list.filter((m) => typeof m === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const currentSettings = () => ({
+    defaultModel: defaultModel(),
+    systemPrompt: store.getSetting('systemPrompt') ?? '',
+    contextMessages: contextMessages(),
+    enabledModels: enabledModels()
+  });
+
+  app.get('/api/settings', (c) => c.json(currentSettings()));
 
   app.put('/api/settings', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -96,25 +141,45 @@ export function createApp(store: Store, llm: LlmClient, config: AppConfig) {
     if (typeof body.systemPrompt === 'string') {
       store.setSetting('systemPrompt', body.systemPrompt);
     }
-    return c.json({
-      defaultModel: defaultModel(),
-      systemPrompt: store.getSetting('systemPrompt') ?? ''
-    });
+    if (body.contextMessages !== undefined) {
+      const n = Number(body.contextMessages);
+      if (!Number.isInteger(n) || n < 0 || n > MAX_CONTEXT_MESSAGES) {
+        return c.json({ error: `contextMessages must be 0 to ${MAX_CONTEXT_MESSAGES}` }, 400);
+      }
+      store.setSetting('contextMessages', String(n));
+    }
+    if (body.enabledModels !== undefined) {
+      const list = body.enabledModels;
+      if (!Array.isArray(list) || !list.every((m) => typeof m === 'string' && m)) {
+        return c.json({ error: 'enabledModels must be a list of model ids' }, 400);
+      }
+      store.setSetting('enabledModels', JSON.stringify([...new Set(list)]));
+    }
+    return c.json(currentSettings());
   });
 
   app.get('/api/chats', (c) => c.json(store.listChats()));
 
   app.post('/api/chats', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { model?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      model?: unknown;
+      instructions?: unknown;
+    };
     const model = typeof body.model === 'string' && body.model ? body.model : defaultModel();
-    return c.json(store.createChat(NEW_CHAT_TITLE, model), 201);
+    const instructions = typeof body.instructions === 'string' ? body.instructions : '';
+    return c.json(store.createChat(NEW_CHAT_TITLE, model, instructions), 201);
   });
 
   app.patch('/api/chats/:id', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { title?: unknown; model?: unknown };
-    const patch: { title?: string; model?: string } = {};
+    const body = (await c.req.json().catch(() => ({}))) as {
+      title?: unknown;
+      model?: unknown;
+      instructions?: unknown;
+    };
+    const patch: { title?: string; model?: string; instructions?: string } = {};
     if (typeof body.title === 'string' && body.title.trim()) patch.title = body.title.trim();
     if (typeof body.model === 'string' && body.model) patch.model = body.model;
+    if (typeof body.instructions === 'string') patch.instructions = body.instructions;
     const chat = store.updateChat(c.req.param('id'), patch);
     return chat ? c.json(chat) : c.json({ error: 'Chat not found' }, 404);
   });
@@ -138,11 +203,11 @@ export function createApp(store: Store, llm: LlmClient, config: AppConfig) {
 
       if (userMessage) await stream.writeSSE({ event: 'user', data: JSON.stringify(userMessage) });
 
-      const systemPrompt = store.getSetting('systemPrompt')?.trim();
-      const history: ChatTurn[] = store
-        .listMessages(chat.id)
-        .map(({ role, content }) => ({ role, content }));
-      if (systemPrompt) history.unshift({ role: 'system', content: systemPrompt });
+      const history = buildContext(
+        store.listMessages(chat.id),
+        [store.getSetting('systemPrompt') ?? '', chat.instructions],
+        contextMessages()
+      );
 
       let text = '';
       let errorMessage: string | null = null;

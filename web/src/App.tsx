@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   api,
   ApiError,
+  pickerModels,
   streamMessage,
   streamRegenerate,
   type Chat,
@@ -12,10 +13,12 @@ import {
 } from './api';
 import { ChatView, type PendingReply } from './components/ChatView';
 import { Composer } from './components/Composer';
+import { InstructionsDialog } from './components/InstructionsDialog';
 import { Login } from './components/Login';
+import { ModelsPage } from './components/ModelsPage';
 import { SettingsDialog, type Theme } from './components/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
-import { IconPlus, IconSidebar } from './components/icons';
+import { IconNote, IconPlus, IconSidebar } from './components/icons';
 
 const THEME_KEY = 'hc-theme';
 
@@ -40,7 +43,16 @@ export default function App() {
   const [pending, setPending] = useState<PendingReply | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
-  const [settings, setSettings] = useState<Settings>({ defaultModel: '', systemPrompt: '' });
+  const [settings, setSettings] = useState<Settings>({
+    defaultModel: '',
+    systemPrompt: '',
+    contextMessages: 0,
+    enabledModels: []
+  });
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [view, setView] = useState<'chat' | 'models'>('chat');
+  const [draftInstructions, setDraftInstructions] = useState('');
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -72,8 +84,14 @@ export default function App() {
     setModel(prefs.defaultModel);
     api
       .models()
-      .then((m) => setModels(m.models))
-      .catch((err) => setNotice((err as Error).message));
+      .then((m) => {
+        setModels(m.models);
+        setModelsError(null);
+      })
+      .catch((err) => {
+        setModelsError((err as Error).message);
+        setNotice((err as Error).message);
+      });
   }, []);
 
   useEffect(() => {
@@ -98,8 +116,10 @@ export default function App() {
       abortRef.current?.abort();
       setPending(null);
       setSidebarOpen(false);
+      setView('chat');
       setActiveId(id);
       if (!id) {
+        setDraftInstructions('');
         setMessages([]);
         setLoaded(true);
         setModel(settings.defaultModel);
@@ -175,7 +195,8 @@ export default function App() {
       let chatId = activeId;
       try {
         if (!chatId) {
-          const chat = await api.createChat(model);
+          const chat = await api.createChat(model, draftInstructions);
+          setDraftInstructions('');
           chatId = chat.id;
           setChats((list) => [chat, ...list]);
           setActiveId(chat.id);
@@ -199,7 +220,7 @@ export default function App() {
       const id = chatId!;
       await runStream(id, (h, signal) => streamMessage(id, text, model, h, signal), tempId);
     },
-    [activeId, model, runStream, handleError]
+    [activeId, model, draftInstructions, runStream, handleError]
   );
 
   const regenerate = useCallback(async () => {
@@ -248,6 +269,34 @@ export default function App() {
     [activeId, handleError]
   );
 
+  const saveInstructions = useCallback(
+    async (instructions: string) => {
+      if (!activeId) return setDraftInstructions(instructions);
+      try {
+        const chat = await api.updateChat(activeId, { instructions });
+        setChats((list) => list.map((c) => (c.id === chat.id ? chat : c)));
+      } catch (err) {
+        handleError(err);
+      }
+    },
+    [activeId, handleError]
+  );
+
+  const saveModels = useCallback(
+    async (enabledModels: string[], defaultModel: string) => {
+      try {
+        const saved = await api.saveSettings({ enabledModels, defaultModel });
+        setSettings(saved);
+        const offered = pickerModels(models, saved.enabledModels);
+        if (!activeId || !offered.includes(model)) setModel(saved.defaultModel);
+      } catch (err) {
+        handleError(err);
+        throw err;
+      }
+    },
+    [models, activeId, model, handleError]
+  );
+
   if (session === 'loading') return <div className="splash" />;
   if (session === 'login') {
     return (
@@ -261,6 +310,8 @@ export default function App() {
   }
 
   const activeChat = chats.find((c) => c.id === activeId);
+  const instructions = activeChat ? activeChat.instructions : draftInstructions;
+  const offeredModels = pickerModels(models, settings.enabledModels);
 
   return (
     <div className={`app ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -285,6 +336,11 @@ export default function App() {
           }
         }}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenModels={() => {
+          setSidebarOpen(false);
+          setView('models');
+        }}
+        modelsActive={view === 'models'}
       />
       <div className="sidebar-scrim" onClick={() => setSidebarOpen(false)} />
       <main className="main">
@@ -297,7 +353,21 @@ export default function App() {
           >
             <IconSidebar />
           </button>
-          <div className="topbar-title">{activeChat?.title ?? 'New chat'}</div>
+          <div className="topbar-title">
+            {view === 'models' ? 'Models' : (activeChat?.title ?? 'New chat')}
+          </div>
+          {view === 'chat' && (
+            <button
+              type="button"
+              className={`context-button ${instructions.trim() ? 'active' : ''}`}
+              aria-label="Chat context"
+              title="Chat context"
+              onClick={() => setInstructionsOpen(true)}
+            >
+              <IconNote />
+              <span>{instructions.trim() ? 'Context on' : 'Context'}</span>
+            </button>
+          )}
           <button
             type="button"
             className="icon-button mobile-only"
@@ -315,27 +385,44 @@ export default function App() {
             </button>
           </div>
         )}
-        <ChatView
-          chatKey={activeId ?? 'new'}
-          loaded={loaded}
-          messages={messages}
-          pending={pending}
-          busy={busy}
-          onRegenerate={regenerate}
-          onDeleteFrom={deleteFrom}
-          composer={
-            <Composer
-              busy={busy}
-              models={models}
-              model={model}
-              onModelChange={changeModel}
-              onSend={send}
-              onStop={stop}
-              autoFocusKey={activeId}
-            />
-          }
-        />
+        {view === 'models' ? (
+          <ModelsPage
+            models={models}
+            enabled={settings.enabledModels}
+            defaultModel={settings.defaultModel}
+            error={modelsError}
+            onSave={saveModels}
+            onClose={() => setView('chat')}
+          />
+        ) : (
+          <ChatView
+            chatKey={activeId ?? 'new'}
+            loaded={loaded}
+            messages={messages}
+            pending={pending}
+            busy={busy}
+            onRegenerate={regenerate}
+            onDeleteFrom={deleteFrom}
+            composer={
+              <Composer
+                busy={busy}
+                models={offeredModels}
+                model={model}
+                onModelChange={changeModel}
+                onSend={send}
+                onStop={stop}
+                autoFocusKey={activeId}
+              />
+            }
+          />
+        )}
       </main>
+      <InstructionsDialog
+        open={instructionsOpen}
+        instructions={instructions}
+        onSave={saveInstructions}
+        onClose={() => setInstructionsOpen(false)}
+      />
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
