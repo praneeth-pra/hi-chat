@@ -11,6 +11,7 @@ import {
   fetchLiveToken,
   keyTerms,
   relayToken,
+  reportClip,
 } from '@/lib/speakerCaptureSession'
 import { GrokLiveTranscriber, LiveTranscriber } from '@/lib/speakerLive'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
@@ -171,8 +172,16 @@ registerProcessor('dictation-tap', DictationTap)
  */
 const PIECE_MIN_MS = 4000
 const PAUSE_MS = 600
-/** Below this loudness a block counts as a pause (used only to split). */
-const SILENCE_RMS = 0.004
+/**
+ * A block counts as a pause (used only to split) when it is this much quieter
+ * than your recent speech, so it works whatever the mic's level. A fixed
+ * 0.004 counted all of a quiet mic's speech as pause and cut every 4 s.
+ */
+const PAUSE_SHARE = 0.15
+/** Never a pause above this loudness... */
+const SILENCE_FLOOR = 0.0003
+/** ...and the recent-speech level fades by this much per block (~6 s half-life). */
+const PEAK_DECAY = 0.995
 
 type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'>
 
@@ -187,6 +196,8 @@ export type Recording = {
   chunks: Float32Array[]
   /** Silence at the end of chunks, in ms */
   quietMs: number
+  /** Recent speech loudness, fading slowly */
+  peak?: number
   /** The text of each piece sent so far, in order */
   pieces: Promise<string>[]
   limit: ReturnType<typeof setTimeout>
@@ -404,7 +415,9 @@ export function onBlock(rec: Recording, block: Float32Array) {
   }
   rec.chunks.push(block)
   const blockMs = (block.length / rec.rate) * 1000
-  rec.quietMs = level < SILENCE_RMS ? rec.quietMs + blockMs : 0
+  rec.peak = Math.max(level, (rec.peak ?? 0) * PEAK_DECAY)
+  const quiet = level < Math.max(SILENCE_FLOOR, rec.peak * PAUSE_SHARE)
+  rec.quietMs = quiet ? rec.quietMs + blockMs : 0
   const heldMs = (rec.chunks.length * block.length * 1000) / rec.rate
   if (rec.quietMs >= PAUSE_MS && heldMs >= PIECE_MIN_MS) {
     const piece = rec.chunks
@@ -558,6 +571,8 @@ export async function stopDictation() {
     return
   }
   useDictation.setState({ status: 'transcribing', level: 0 })
+  const stoppedAt = Date.now()
+  const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
   try {
     const batch = () =>
       Promise.all([
@@ -567,29 +582,69 @@ export async function stopDictation() {
     let text: string
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
+      const took: Partial<Record<DictationEngine, number>> = {}
+      const timed = (engine: DictationEngine, text: Promise<string>) => ({
+        engine,
+        text: text.then((t) => {
+          took[engine] = Date.now() - stoppedAt
+          return t
+        }),
+      })
       const results = await gatherAuto([
-        { engine: 'aqua', text: batch() },
-        ...autoLive.map((l) => ({
-          engine: l.engine,
-          text: l.stream.finish(LIVE_FINISH_MS),
-        })),
+        timed('aqua', batch()),
+        ...autoLive.map((l) =>
+          timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
+        ),
       ])
       const best = pickBest(results)
+      const judgeStart = Date.now()
       const judged =
         best && (await judgeDictation(results, best.text, keyTerms()))
-      console.info('Auto dictation:', judged ? 'judge' : best?.engine, results)
       text = judged ?? best?.text ?? ''
+      reportAuto(results, took, {
+        sent: judged ? 'judge' : (best?.engine ?? 'none'),
+        totalMs: Date.now() - stoppedAt,
+        judgeMs: best ? Date.now() - judgeStart : undefined,
+        judged,
+      })
     } else text = await batch()
-    if (text) useSpeakerTranscription.getState().enqueue(text)
-    else
-      toast(
-        `${DICTATION_ENGINES.find((e) => e.value === engine)?.label} heard nothing`
+    if (!autoLive)
+      reportClip(
+        `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
+    if (text) useSpeakerTranscription.getState().enqueue(text)
+    else toast(`${label} heard nothing`)
   } catch (err) {
     toast(`Dictation failed: ${(err as Error).message}`)
   } finally {
     useDictation.setState({ status: 'idle', level: 0 })
   }
+}
+
+/**
+ * One line per Auto dictation in the server log: what each engine heard,
+ * how long after you stopped it answered, and which text was sent.
+ */
+function reportAuto(
+  results: EngineText[],
+  took: Partial<Record<DictationEngine, number>>,
+  info: { sent: string; totalMs: number; judgeMs?: number; judged?: string }
+) {
+  const engines: DictationEngine[] = ['aqua', 'grok', 'elevenlabs']
+  const times = engines
+    .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
+    .join(' ')
+  const texts = engines
+    .map((e) => {
+      const r = results.find((x) => x.engine === e)
+      return `${e}: ${r ? JSON.stringify(r.text) : '-'}`
+    })
+    .join(' | ')
+  reportClip(
+    `dictation auto: sent=${info.sent} total=${info.totalMs}ms ${times}` +
+      `${info.judgeMs !== undefined ? ` judge=${info.judgeMs}ms` : ''}` +
+      ` | ${texts}${info.judged ? ` | judge: ${JSON.stringify(info.judged)}` : ''}`
+  )
 }
 
 /** Throws the recording away without sending it. */

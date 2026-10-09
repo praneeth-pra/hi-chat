@@ -75,6 +75,27 @@ describe('dictation', () => {
     vi.unstubAllGlobals()
   })
 
+  it('a quiet mic is split at its pauses, not every 4 s', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
+    )
+    const rec = {
+      rate: 16000,
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
+    } as unknown as Recording
+    // Speech at 0.003 is under the old fixed 0.004 pause level
+    const speech = new Float32Array(2048).fill(0.003)
+    const pause = new Float32Array(2048).fill(0.0001)
+    for (let i = 0; i < 40; i++) onBlock(rec, speech) // 5 s, no pause
+    expect(rec.pieces).toHaveLength(0)
+    for (let i = 0; i < 5; i++) onBlock(rec, pause)
+    expect(rec.pieces).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+
   it('sends Grok pieces to the transcribe route and reads its result', async () => {
     const fetchMock = vi.fn(
       async (_url: string, _init: RequestInit) =>
