@@ -11,6 +11,9 @@ import {
   startDictation,
   cancelDictation,
   readyMicEarly,
+  pickBest,
+  gatherAuto,
+  textAgreement,
   type Recording,
 } from '../dictation'
 
@@ -221,5 +224,77 @@ describe('dictation', () => {
     expect(track.stop).toHaveBeenCalled()
     localStorage.removeItem('dictation-keep-mic')
     vi.unstubAllGlobals()
+  })
+
+  it('Auto picks the text the other engines agree with most', () => {
+    expect(textAgreement('What is EKS?', 'what is eks')).toBe(1)
+    expect(textAgreement('a b c d', 'a x c d')).toBe(0.75)
+    expect(
+      pickBest([
+        { engine: 'aqua', text: 'What is cube cuddle?' },
+        { engine: 'grok', text: 'What is kubectl?' },
+        { engine: 'elevenlabs', text: 'What is kubectl.' },
+      ])?.engine
+    ).toBe('grok')
+    // Two answers (or a tie): Aqua first
+    expect(
+      pickBest([
+        { engine: 'aqua', text: 'one' },
+        { engine: 'grok', text: 'two' },
+      ])?.engine
+    ).toBe('aqua')
+    expect(
+      pickBest([
+        { engine: 'aqua', text: '' },
+        { engine: 'grok', text: 'two' },
+      ])?.text
+    ).toBe('two')
+  })
+
+  it('Auto streams to both live engines and still sends Aqua pieces', () => {
+    const grok = { push: vi.fn() }
+    const eleven = { push: vi.fn() }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
+    )
+    const rec = {
+      rate: 16000,
+      engine: 'auto',
+      autoLive: [
+        { engine: 'grok', stream: grok },
+        { engine: 'elevenlabs', stream: eleven },
+      ],
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
+    } as unknown as Recording
+    const loud = new Float32Array(2048).fill(0.2)
+    for (let i = 0; i < 35; i++) onBlock(rec, loud)
+    for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
+    expect(grok.push).toHaveBeenCalledTimes(40)
+    expect(eleven.push).toHaveBeenCalledTimes(40)
+    expect(rec.pieces).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('Auto gives the slower engines a short grace once one has answered', async () => {
+    vi.useFakeTimers()
+    try {
+      const results = gatherAuto([
+        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'grok', text: Promise.resolve('fast') },
+        { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
+      ])
+      await vi.advanceTimersByTimeAsync(1200)
+      await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
+      await expect(
+        gatherAuto([
+          { engine: 'aqua', text: Promise.reject(new Error('no key')) },
+        ])
+      ).rejects.toThrow('aqua: no key')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

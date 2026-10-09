@@ -15,6 +15,7 @@ import {
 import { GrokLiveTranscriber, LiveTranscriber } from '@/lib/speakerLive'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { judgeDictation, textAgreement } from '@/lib/dictationJudge'
 
 /**
  * Dictation: your own voice, recorded here and turned into text by Aqua's
@@ -25,10 +26,13 @@ import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 
 /**
  * Which service turns your voice into text. Only Aqua applies your Aqua
- * dictionary and replacements; ElevenLabs streams live while you talk.
+ * dictionary and replacements; Grok and ElevenLabs stream live while you
+ * talk. Auto runs all three; a judge model writes the best version when they
+ * differ, else the text the others agree with most is sent.
  */
-export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs'
+export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs' | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
+  { value: 'auto', label: 'Auto (best of all three)' },
   { value: 'aqua', label: 'Aqua' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
@@ -79,6 +83,8 @@ export function setKeepMicReady(on: boolean) {
 
 /** Live engines: how long to wait for the last words after stopping. */
 const LIVE_FINISH_MS = 8000
+/** Auto: once one engine has answered, how long the others get. */
+const AUTO_GRACE_MS = 1200
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -175,6 +181,8 @@ export type Recording = {
   engine: DictationEngine
   /** Live engines: the stream that gets every block as it comes */
   live?: LiveStream
+  /** Auto: the live engines running alongside Aqua's pieces */
+  autoLive?: { engine: DictationEngine; stream: LiveStream }[]
   /** Audio not yet sent */
   chunks: Float32Array[]
   /** Silence at the end of chunks, in ms */
@@ -279,6 +287,7 @@ function release() {
   if (recording) {
     clearTimeout(recording.limit)
     recording.live?.abort()
+    recording.autoLive?.forEach((l) => l.stream.abort())
     recording = undefined
   }
   if (!getKeepMicReady()) closeMic()
@@ -389,6 +398,10 @@ export function onBlock(rec: Recording, block: Float32Array) {
     rec.live.push(downsample(block, rec.rate / TARGET_SAMPLE_RATE))
     return
   }
+  if (rec.autoLive?.length) {
+    const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
+    rec.autoLive.forEach((l) => l.stream.push(down))
+  }
   rec.chunks.push(block)
   const blockMs = (block.length / rec.rate) * 1000
   rec.quietMs = level < SILENCE_RMS ? rec.quietMs + blockMs : 0
@@ -397,7 +410,7 @@ export function onBlock(rec: Recording, block: Float32Array) {
     const piece = rec.chunks
     rec.chunks = []
     rec.quietMs = 0
-    const text = transcribe(piece, rec.rate, rec.engine)
+    const text = transcribe(piece, rec.rate, batchEngine(rec.engine))
     text.catch(() => {}) // reported when the dictation is sent
     rec.pieces.push(text)
   }
@@ -416,12 +429,80 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
   return undefined
 }
 
+/** Auto sends Aqua pieces while you talk; the live engines stream. */
+function batchEngine(engine: DictationEngine): DictationEngine {
+  return engine === 'auto' ? 'aqua' : engine
+}
+
+function autoLiveStreams() {
+  return (['grok', 'elevenlabs'] as const).map((engine) => ({
+    engine,
+    stream: liveStream(engine)!,
+  }))
+}
+
+export type EngineText = { engine: DictationEngine; text: string }
+export { textAgreement }
+
+/**
+ * Auto: the text the other engines agree with most, since a word one engine
+ * mishears the others usually get right. With a tie (or only two answers)
+ * the earlier one wins: Aqua first, as it applies your dictionary.
+ */
+export function pickBest(results: EngineText[]): EngineText | undefined {
+  const heard = results.filter((r) => r.text)
+  if (heard.length < 3) return heard[0]
+  let best = heard[0]
+  let bestScore = -1
+  for (const r of heard) {
+    const score = heard
+      .filter((o) => o !== r)
+      .reduce((sum, o) => sum + textAgreement(r.text, o.text), 0)
+    if (score > bestScore + 1e-9) {
+      best = r
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/** Waits for every engine, but only AUTO_GRACE_MS once the first has text. */
+export function gatherAuto(
+  jobs: { engine: DictationEngine; text: Promise<string> }[]
+): Promise<EngineText[]> {
+  return new Promise((resolve, reject) => {
+    const done: EngineText[] = []
+    const errors: string[] = []
+    let left = jobs.length
+    let grace: ReturnType<typeof setTimeout> | undefined
+    const finish = () => {
+      clearTimeout(grace)
+      if (!done.length && errors.length) reject(new Error(errors.join('; ')))
+      // Keep the engines' order, so ties go to Aqua
+      else
+        resolve(jobs.flatMap((j) => done.filter((d) => d.engine === j.engine)))
+    }
+    jobs.forEach(({ engine, text }) =>
+      text
+        .then((t) => {
+          done.push({ engine, text: t.trim() })
+          if (t.trim() && !grace) grace = setTimeout(finish, AUTO_GRACE_MS)
+        })
+        .catch((err) => errors.push(`${engine}: ${(err as Error).message}`))
+        .finally(() => {
+          if (--left === 0) finish()
+        })
+    )
+  })
+}
+
 function begin(m: Mic) {
   const engine = getDictationEngine()
   const rec: Recording = {
     rate: m.ctx.sampleRate,
     engine,
     live: liveStream(engine),
+    autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
     chunks: [],
     quietMs: 0,
     pieces: [],
@@ -465,22 +546,40 @@ export async function stopDictation() {
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { chunks, rate, pieces, engine, live } = recording
-  // Keep the live stream open for its last words; release() would end it
+  const { chunks, rate, pieces, engine, live, autoLive } = recording
+  // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
+  recording.autoLive = undefined
   release()
   if (Date.now() - startedAt < MIN_DICTATION_MS) {
     live?.abort()
+    autoLive?.forEach((l) => l.stream.abort())
     useDictation.setState({ status: 'idle', level: 0 })
     return
   }
   useDictation.setState({ status: 'transcribing', level: 0 })
   try {
-    const text = live
-      ? (await live.finish(LIVE_FINISH_MS)).trim()
-      : (await Promise.all([...pieces, transcribe(chunks, rate, engine)]))
-          .filter(Boolean)
-          .join(' ')
+    const batch = () =>
+      Promise.all([
+        ...pieces,
+        transcribe(chunks, rate, batchEngine(engine)),
+      ]).then((texts) => texts.filter(Boolean).join(' '))
+    let text: string
+    if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
+    else if (autoLive) {
+      const results = await gatherAuto([
+        { engine: 'aqua', text: batch() },
+        ...autoLive.map((l) => ({
+          engine: l.engine,
+          text: l.stream.finish(LIVE_FINISH_MS),
+        })),
+      ])
+      const best = pickBest(results)
+      const judged =
+        best && (await judgeDictation(results, best.text, keyTerms()))
+      console.info('Auto dictation:', judged ? 'judge' : best?.engine, results)
+      text = judged ?? best?.text ?? ''
+    } else text = await batch()
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else
       toast(
