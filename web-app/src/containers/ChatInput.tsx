@@ -14,7 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
-  TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
@@ -808,18 +807,6 @@ const ChatInput = ({
     }
   }
 
-  const formatBytes = (bytes?: number): string => {
-    if (!bytes || bytes <= 0) return ''
-    const units = ['B', 'KB', 'MB', 'GB']
-    let i = 0
-    let val = bytes
-    while (val >= 1024 && i < units.length - 1) {
-      val /= 1024
-      i++
-    }
-    return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-  }
-
   const processImageFiles = async (files: File[]) => {
     const maxSize = 10 * 1024 * 1024 // 10MB in bytes
     const oversizedFiles: string[] = []
@@ -1267,26 +1254,6 @@ const ChatInput = ({
                                   )}
                                 </div>
                               </TooltipTrigger>
-                              <TooltipContent>
-                                <div className="text-xs">
-                                  <div
-                                    className="font-medium truncate max-w-52"
-                                    title={att.name}
-                                  >
-                                    {att.name}
-                                  </div>
-                                  <div className="opacity-70">
-                                    {isImage
-                                      ? att.mimeType || 'image'
-                                      : ext
-                                        ? `.${ext}`
-                                        : 'document'}
-                                    {att.size
-                                      ? ` · ${formatBytes(att.size)}`
-                                      : ''}
-                                  </div>
-                                </div>
-                              </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
 
@@ -1401,13 +1368,6 @@ const ChatInput = ({
                             )}
                           </div>
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            {ingestingDocs
-                              ? 'Indexing documents…'
-                              : 'Attach documents'}
-                          </p>
-                        </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   )}
@@ -1426,9 +1386,6 @@ const ChatInput = ({
                           />
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{t('embeddings')}</p>
-                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}
@@ -1466,15 +1423,6 @@ const ChatInput = ({
                             )}
                           </div>
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p>
-                            {isJanBrowserMCPLoading
-                              ? 'Starting...'
-                              : janBrowserMCPActive
-                                ? 'Browse (Active)'
-                                : 'Browse'}
-                          </p>
-                        </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   )}
@@ -1539,9 +1487,6 @@ const ChatInput = ({
                             </DropdownToolsAvailable>
                           </div>
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{t('tools')}</p>
-                        </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   ))}
@@ -1556,9 +1501,6 @@ const ChatInput = ({
                           />
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Web Search</p>
-                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}
@@ -1573,9 +1515,6 @@ const ChatInput = ({
                           />
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{t('reasoning')}</p>
-                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}

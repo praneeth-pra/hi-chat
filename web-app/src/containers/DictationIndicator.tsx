@@ -15,7 +15,6 @@ import {
 } from '@/lib/dictation'
 import {
   Tooltip,
-  TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
@@ -134,13 +133,6 @@ export function DictationButton() {
             )}
           </button>
         </TooltipTrigger>
-        <TooltipContent>
-          <p>
-            {recording
-              ? 'Stop and send what you said'
-              : 'Dictate (engine in Settings). Or tap Left Control (Hammerspoon).'}
-          </p>
-        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )

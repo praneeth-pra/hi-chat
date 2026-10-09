@@ -142,6 +142,9 @@ let keyTermsSource: () => string[] = () => []
 export function setKeyTermsSource(source: () => string[]) {
   keyTermsSource = source
 }
+export function keyTerms(): string[] {
+  return keyTermsSource()
+}
 
 /** Live mode with Grok streaming beside ElevenLabs. */
 export function grokLive(): boolean {

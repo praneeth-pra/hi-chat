@@ -71,7 +71,6 @@ setKeyTermsSource(speakerKeyTerms)
 import { isPlatformTauri } from '@/lib/platform/utils'
 import {
   Tooltip,
-  TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
@@ -87,14 +86,6 @@ const LABELS: Record<SpeakerStatus, string> = {
   'blocked': 'Allow audio access',
   'unsupported': 'Not supported here',
   'error': 'Speaker error',
-}
-
-const HINTS: Partial<Record<SpeakerStatus, string>> = {
-  'no-device':
-    'Install BlackHole 2ch and route the Mac output through it (Multi-Output Device).',
-  'blocked': 'Allow microphone access for this site so it can read BlackHole.',
-  'needs-click':
-    'Browsers start audio only after you click or type on the page.',
 }
 
 const ENGINE_NAMES: Record<string, string> = {
@@ -329,12 +320,6 @@ export function SpeakerSuggestions() {
                   {text}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-80">
-                  The two judges disagreed on this one. Click to send it: “
-                  {text}”
-                </p>
-              </TooltipContent>
             </Tooltip>
             <button
               type="button"
@@ -353,25 +338,14 @@ export function SpeakerSuggestions() {
 
 /** Small on/off chip in the chat box showing what the speaker listener is doing. */
 export function SpeakerListenIndicator() {
-  const {
-    enabled,
-    status,
-    error,
-    clips,
-    setEnabled,
-    coding,
-    setCoding,
-  } = useSpeakerTranscription()
+  const { enabled, status, setEnabled, coding, setCoding } =
+    useSpeakerTranscription()
   if (isPlatformTauri()) return null
 
   const active = ['listening', 'hearing', 'transcribing'].includes(status)
   const problem = ['no-device', 'blocked', 'unsupported', 'error'].includes(
     status
   )
-  const hint =
-    (status === 'error' ? error : HINTS[status]) ??
-    (enabled ? 'Click to stop listening' : 'Click to listen to the speaker')
-
   return (
     <TooltipProvider>
       {enabled && (
@@ -391,13 +365,6 @@ export function SpeakerListenIndicator() {
               {coding && <span className="hidden sm:inline">Coding</span>}
             </button>
           </TooltipTrigger>
-          <TooltipContent>
-            <p>
-              {coding
-                ? 'Coding mode on: screen-share chatter (what happened, scroll, read this line) is skipped; tasks and real questions still go through. Click to turn off.'
-                : "Coding mode: while you code on a shared screen, skip the interviewer's running commentary."}
-            </p>
-          </TooltipContent>
         </Tooltip>
       )}
       <Tooltip>
@@ -426,22 +393,6 @@ export function SpeakerListenIndicator() {
             </span>
           </button>
         </TooltipTrigger>
-        <TooltipContent>
-          <p>{hint}</p>
-          {enabled && clips.length > 0 && (
-            <div className="mt-1 max-w-80 space-y-1 opacity-70">
-              <p>Last clips heard, newest first:</p>
-              {clips.map((clip, i) => (
-                <p key={i}>
-                  “{clip.text}” ({clip.sent ? 'sent' : 'skipped'})
-                  <br />
-                  {describeClip(clip)}
-                  {clip.note ? ` · ${clip.note}` : ''}
-                </p>
-              ))}
-            </div>
-          )}
-        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
