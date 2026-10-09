@@ -478,7 +478,12 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
 test('dictation: sends the WAV to Aqua with its key and returns the text', async () => {
   const calls = []
   const fetchImpl = async (url, init) => {
-    calls.push({ url, headers: init.headers, audio: init.body.get('audio') })
+    calls.push({
+      url,
+      headers: init.headers,
+      audio: init.body.get('audio'),
+      language: init.body.get('language'),
+    })
     return new Response(JSON.stringify({ raw_text: 'cube ctl', text: 'kubectl' }))
   }
   const server = createRelay({ env: { AQUA_API_KEY: 'a' }, fetchImpl }).listen(
@@ -505,6 +510,7 @@ test('dictation: sends the WAV to Aqua with its key and returns the text', async
     assert.equal(calls[0].url, 'https://api.aquavoice.com/v1/dictations')
     assert.equal(calls[0].headers.Authorization, 'Bearer a')
     assert.equal(calls[0].audio.size, 4)
+    assert.equal(calls[0].language, 'en')
   } finally {
     server.close()
   }

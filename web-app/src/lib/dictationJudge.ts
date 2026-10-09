@@ -36,6 +36,8 @@ export function textAgreement(a: string, b: string): number {
 
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 2000
+/** Texts this alike (a word or so apart) skip the judge. */
+const SKIP_AGREEMENT = 0.97
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
@@ -79,8 +81,11 @@ export async function judgeDictation(
   fetcher: typeof fetch = groqFetch
 ): Promise<string | undefined> {
   const heard = results.filter((r) => r.text)
-  const distinct = new Set(heard.map((r) => words(r.text).join(' ')))
-  if (distinct.size < 2) return undefined
+  // Nothing to judge when they (nearly) agree: the vote is sent at once
+  const agree = heard.every((a) =>
+    heard.every((b) => textAgreement(a.text, b.text) >= SKIP_AGREEMENT)
+  )
+  if (heard.length < 2 || agree) return undefined
   const target = judgeTarget()
   if (!target) return undefined
   const controller = new AbortController()

@@ -293,6 +293,8 @@ export async function dictate(audio, { env = process.env, fetchImpl = fetch, sig
     throw Object.assign(new Error('AQUA_API_KEY not set'), { status: 503 })
   const form = new FormData()
   form.append('audio', audio, 'dictation.wav')
+  // Saves Aqua detecting the language
+  form.append('language', 'en')
   const res = await fetchImpl('https://api.aquavoice.com/v1/dictations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}` },

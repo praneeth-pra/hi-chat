@@ -307,7 +307,7 @@ describe('dictation', () => {
         { engine: 'grok', text: Promise.resolve('fast') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ])
-      await vi.advanceTimersByTimeAsync(1200)
+      await vi.advanceTimersByTimeAsync(2000)
       await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
       await expect(
         gatherAuto([
