@@ -204,18 +204,35 @@ function micAlive(m: Mic) {
   )
 }
 
-// A new audio context each time the mic opens, made once the mic is open
-// (Safari doesn't reliably restart a suspended one, so it's never suspended).
-async function openMic(): Promise<Mic> {
+async function getMicStream(): Promise<MediaStream> {
   const media = navigator.mediaDevices
   const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
-  const stream = await media.getUserMedia({
+  return media.getUserMedia({
     audio: {
       ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
       echoCancellation: true,
       noiseSuppression: true,
     },
   })
+}
+
+/** A mic stream opened when Jan loads, before any click allows audio. */
+let early: { stream: MediaStream; device: string } | undefined
+
+function takeEarlyStream(): MediaStream | undefined {
+  const e = early
+  early = undefined
+  if (!e) return undefined
+  const live = e.stream.getAudioTracks().some((t) => t.readyState === 'live')
+  if (live && e.device === getMicDevice()) return e.stream
+  e.stream.getTracks().forEach((t) => t.stop())
+  return undefined
+}
+
+// A new audio context each time the mic opens, made once the mic is open
+// (Safari doesn't reliably restart a suspended one, so it's never suspended).
+async function openMic(): Promise<Mic> {
+  const stream = takeEarlyStream() ?? (await getMicStream())
   let ctx: AudioContext | undefined
   try {
     ctx = new AudioContext()
@@ -247,6 +264,9 @@ async function openMic(): Promise<Mic> {
 }
 
 function closeMic() {
+  takeEarlyStream()
+    ?.getTracks()
+    .forEach((t) => t.stop())
   if (!mic) return
   mic.tap.port.onmessage = null
   mic.tap.disconnect()
@@ -262,6 +282,67 @@ function release() {
     recording = undefined
   }
   if (!getKeepMicReady()) closeMic()
+}
+
+let opening: Promise<Mic> | undefined
+
+/** The open mic, opening it if needed (one open at a time). */
+function ensureMic(): Promise<Mic> {
+  if (mic && micAlive(mic)) return Promise.resolve(mic)
+  if (!opening) {
+    if (mic) closeMic()
+    opening = openMic()
+      .then((opened) => (mic = opened))
+      .finally(() => (opening = undefined))
+  }
+  return opening
+}
+
+async function micAllowed(): Promise<boolean> {
+  try {
+    const status = await navigator.permissions.query({
+      name: 'microphone' as PermissionName,
+    })
+    return status.state === 'granted'
+  } catch {
+    return false
+  }
+}
+
+let readied = false
+
+/**
+ * Gets the mic ready before the first dictation, when "keep the mic ready"
+ * is on and the mic is already allowed for this site (never asks). Browsers
+ * only start audio after a click or key press, so the mic itself opens when
+ * Jan loads and the audio part follows the first click or key press anywhere.
+ */
+export function readyMicEarly() {
+  if (readied || typeof window === 'undefined') return
+  readied = true
+  if (!navigator.mediaDevices?.getUserMedia) return
+  if (typeof AudioWorkletNode === 'undefined') return
+  const wanted = async () => getKeepMicReady() && (await micAllowed())
+  void wanted().then(async (yes) => {
+    if (!yes || early || mic || opening) return
+    try {
+      const stream = await getMicStream()
+      if (early || mic || opening || !getKeepMicReady()) {
+        stream.getTracks().forEach((t) => t.stop())
+      } else early = { stream, device: getMicDevice() }
+    } catch {
+      // Opens on the first dictation instead
+    }
+  })
+  const onGesture = () => {
+    window.removeEventListener('pointerdown', onGesture, true)
+    window.removeEventListener('keydown', onGesture, true)
+    void wanted().then((yes) => {
+      if (yes && !recording) ensureMic().catch(() => {})
+    })
+  }
+  window.addEventListener('pointerdown', onGesture, true)
+  window.addEventListener('keydown', onGesture, true)
 }
 
 /** Posts one piece of audio through the relay; resolves to its text. */
@@ -353,23 +434,23 @@ function begin(m: Mic) {
 
 export async function startDictation() {
   if (useDictation.getState().status !== 'idle') return
-  if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === 'undefined') {
+  if (
+    !navigator.mediaDevices?.getUserMedia ||
+    typeof AudioWorkletNode === 'undefined'
+  ) {
     toast('This browser cannot record the microphone')
     return
   }
-  // The mic is still open from the last dictation: start right away
+  // The mic is already open: start right away
   if (mic && micAlive(mic)) return begin(mic)
-  closeMic()
   useDictation.setState({ status: 'starting', level: 0 })
   try {
-    const m = await openMic()
+    const m = await ensureMic()
     // Cancelled while the mic was opening
     if (useDictation.getState().status !== 'starting') {
-      mic = m
       if (!getKeepMicReady()) closeMic()
       return
     }
-    mic = m
     begin(m)
   } catch (err) {
     release()

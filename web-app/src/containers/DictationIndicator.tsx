@@ -10,6 +10,7 @@ import {
   DICTATION_ENGINES,
   cancelDictation,
   getDictationEngine,
+  readyMicEarly,
   toggleDictation,
   useDictation,
 } from '@/lib/dictation'
@@ -108,6 +109,9 @@ export function DictationBanner() {
 /** Mic button next to the speaker: click to dictate, click again to send. */
 export function DictationButton() {
   const status = useDictation((s) => s.status)
+  useEffect(() => {
+    if (!isPlatformTauri()) readyMicEarly()
+  }, [])
   if (isPlatformTauri()) return null
   const recording = status === 'recording' || status === 'starting'
 
