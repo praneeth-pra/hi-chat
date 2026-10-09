@@ -4,6 +4,8 @@ import {
   toggleDictation,
   stopDictation,
   useDictation,
+  onBlock,
+  type Recording,
 } from '../dictation'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
@@ -36,5 +38,31 @@ describe('dictation', () => {
     useDictation.setState({ status: 'starting' })
     await stopDictation()
     expect(useDictation.getState().status).toBe('idle')
+  })
+
+  it('sends a piece to Aqua at a pause once 4 s are held', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ text: 'first part.' }), { status: 200 })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const rec = {
+      rate: 16000,
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
+    } as unknown as Recording
+    const loud = new Float32Array(2048).fill(0.2)
+    const quiet = new Float32Array(2048)
+    for (let i = 0; i < 20; i++) onBlock(rec, loud) // 2.6 s
+    for (let i = 0; i < 5; i++) onBlock(rec, quiet) // a pause, but too soon
+    expect(rec.pieces).toHaveLength(0)
+    for (let i = 0; i < 15; i++) onBlock(rec, loud) // now past 4 s
+    for (let i = 0; i < 5; i++) onBlock(rec, quiet)
+    expect(rec.pieces).toHaveLength(1)
+    expect(rec.chunks).toHaveLength(0)
+    expect(await rec.pieces[0]).toBe('first part.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
   })
 })
