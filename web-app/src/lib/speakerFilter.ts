@@ -1049,7 +1049,7 @@ async function withSecondOpinion(
     const other =
       b === undefined
         ? 'second judge failed'
-        : `second judge ${secondInfo?.model ?? second} said ${sends(b) ? 'yes' : 'no'}`
+        : `second judge ${secondInfo?.model ?? second}${secondInfo ? ` ${(secondInfo.ms / 1000).toFixed(1)} s` : ''} said ${sends(b) ? 'yes' : 'no'}`
     onCheck?.(
       withNote(
         firstInfo,
