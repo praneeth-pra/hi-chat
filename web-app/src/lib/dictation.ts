@@ -15,6 +15,7 @@ import {
 import { GrokLiveTranscriber, LiveTranscriber } from '@/lib/speakerLive'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { judgeDictation, textAgreement } from '@/lib/dictationJudge'
 
 /**
  * Dictation: your own voice, recorded here and turned into text by Aqua's
@@ -26,7 +27,8 @@ import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 /**
  * Which service turns your voice into text. Only Aqua applies your Aqua
  * dictionary and replacements; Grok and ElevenLabs stream live while you
- * talk. Auto runs all three and sends the text the others agree with most.
+ * talk. Auto runs all three; a judge model writes the best version when they
+ * differ, else the text the others agree with most is sent.
  */
 export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs' | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
@@ -439,31 +441,8 @@ function autoLiveStreams() {
   }))
 }
 
-function words(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}']+/gu, ' ')
-    .split(' ')
-    .filter(Boolean)
-}
-
-/** How alike two texts are word by word, 0-1 (shared words in order). */
-export function textAgreement(a: string, b: string): number {
-  const x = words(a)
-  const y = words(b)
-  if (!x.length && !y.length) return 1
-  if (!x.length || !y.length) return 0
-  let prev = new Array<number>(y.length + 1).fill(0)
-  for (const w of x) {
-    const row = [0]
-    for (let j = 0; j < y.length; j++)
-      row.push(w === y[j] ? prev[j] + 1 : Math.max(prev[j + 1], row[j]))
-    prev = row
-  }
-  return (2 * prev[y.length]) / (x.length + y.length)
-}
-
 export type EngineText = { engine: DictationEngine; text: string }
+export { textAgreement }
 
 /**
  * Auto: the text the other engines agree with most, since a word one engine
@@ -596,8 +575,10 @@ export async function stopDictation() {
         })),
       ])
       const best = pickBest(results)
-      console.info('Auto dictation picked', best?.engine, results)
-      text = best?.text ?? ''
+      const judged =
+        best && (await judgeDictation(results, best.text, keyTerms()))
+      console.info('Auto dictation:', judged ? 'judge' : best?.engine, results)
+      text = judged ?? best?.text ?? ''
     } else text = await batch()
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else
