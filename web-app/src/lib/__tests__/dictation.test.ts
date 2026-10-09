@@ -5,6 +5,8 @@ import {
   stopDictation,
   useDictation,
   onBlock,
+  getDictationEngine,
+  setDictationEngine,
   type Recording,
 } from '../dictation'
 
@@ -64,5 +66,55 @@ describe('dictation', () => {
     expect(await rec.pieces[0]).toBe('first part.')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     vi.unstubAllGlobals()
+  })
+
+  it('sends Grok pieces to the transcribe route and reads its result', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({ results: [{ ok: true, text: 'grok text' }] }),
+          { status: 200 }
+        )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const rec = {
+      rate: 16000,
+      engine: 'grok',
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
+    } as unknown as Recording
+    const loud = new Float32Array(2048).fill(0.2)
+    for (let i = 0; i < 35; i++) onBlock(rec, loud)
+    for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
+    expect(await rec.pieces[0]).toBe('grok text')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/transcribe')
+    expect((init.body as FormData).get('engines')).toBe('grok')
+    vi.unstubAllGlobals()
+  })
+
+  it('streams every block to ElevenLabs live instead of making pieces', () => {
+    const push = vi.fn()
+    const rec = {
+      rate: 48000,
+      engine: 'elevenlabs',
+      live: { push },
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
+    } as unknown as Recording
+    onBlock(rec, new Float32Array(2048).fill(0.2))
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push.mock.calls[0][0]).toHaveLength(682) // 48 kHz to 16 kHz
+    expect(rec.chunks).toHaveLength(0)
+  })
+
+  it('remembers the chosen engine, Aqua by default', () => {
+    localStorage.removeItem('dictation-engine')
+    expect(getDictationEngine()).toBe('aqua')
+    setDictationEngine('elevenlabs')
+    expect(getDictationEngine()).toBe('elevenlabs')
+    localStorage.removeItem('dictation-engine')
   })
 })

@@ -6,7 +6,13 @@ import {
 } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { isPlatformTauri } from '@/lib/platform/utils'
-import { cancelDictation, toggleDictation, useDictation } from '@/lib/dictation'
+import {
+  DICTATION_ENGINES,
+  cancelDictation,
+  getDictationEngine,
+  toggleDictation,
+  useDictation,
+} from '@/lib/dictation'
 import {
   Tooltip,
   TooltipContent,
@@ -57,7 +63,14 @@ export function DictationBanner() {
       {status === 'transcribing' ? (
         <>
           <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-          <span>Transcribing with Aqua…</span>
+          <span>
+            Transcribing with{' '}
+            {
+              DICTATION_ENGINES.find((e) => e.value === getDictationEngine())
+                ?.label
+            }
+            …
+          </span>
         </>
       ) : (
         <>
@@ -125,7 +138,7 @@ export function DictationButton() {
           <p>
             {recording
               ? 'Stop and send what you said'
-              : 'Dictate with Aqua (your dictionary applies). Or tap Left Control (Hammerspoon).'}
+              : 'Dictate (engine in Settings). Or tap Left Control (Hammerspoon).'}
           </p>
         </TooltipContent>
       </Tooltip>

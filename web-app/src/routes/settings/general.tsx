@@ -32,6 +32,11 @@ import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
 import { isRootDir } from '@/utils/path'
 import { getLiveMode, setLiveMode } from '@/lib/speakerLive'
+import {
+  DICTATION_ENGINES,
+  getDictationEngine,
+  setDictationEngine,
+} from '@/lib/dictation'
 import { Textarea } from '@/components/ui/textarea'
 import {
   availableJudges,
@@ -147,6 +152,8 @@ function General() {
   const [transcribeMode, setTranscribeModeState] =
     useState<TranscribeMode>(getTranscribeMode)
   const [liveMode, setLiveModeState] = useState(getLiveMode)
+  const [dictationEngine, setDictationEngineState] =
+    useState(getDictationEngine)
   const [judgeModel, setJudgeModelState] = useState<JudgeModel>(getJudgeModel)
   const [secondJudge, setSecondJudgeState] = useState<JudgeModel | undefined>(
     getSecondJudge
@@ -742,6 +749,41 @@ function General() {
                           }}
                         >
                           {l.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                }
+              />
+            </Card>
+
+            {/* Dictation */}
+            <Card title="Dictation">
+              <CardItem
+                title="Dictation engine"
+                description="Turns your own voice into text when you tap Left Control or the mic button. Aqua applies your Aqua dictionary; ElevenLabs streams while you talk, so it's fastest."
+                actions={
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                        {
+                          DICTATION_ENGINES.find(
+                            (e) => e.value === dictationEngine
+                          )?.label
+                        }
+                      </span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {DICTATION_ENGINES.map((e) => (
+                        <DropdownMenuItem
+                          key={e.value}
+                          className={`cursor-pointer my-0.5 ${dictationEngine === e.value ? 'bg-main-view-fg/5' : ''}`}
+                          onClick={() => {
+                            setDictationEngine(e.value)
+                            setDictationEngineState(e.value)
+                          }}
+                        >
+                          {e.label}
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuContent>

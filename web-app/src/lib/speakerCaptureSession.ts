@@ -215,7 +215,7 @@ export const LIVE_TOKEN_URL = '/api/live-token'
 /** Tokens last 15 minutes; a spare older than this is replaced. */
 const LIVE_TOKEN_MAX_AGE_MS = 10 * 60 * 1000
 
-async function fetchLiveToken(
+export async function fetchLiveToken(
   engine: LiveEngine = 'elevenlabs'
 ): Promise<string> {
   const res = await fetch(LIVE_TOKEN_URL, {
