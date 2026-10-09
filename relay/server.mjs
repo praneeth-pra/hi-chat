@@ -423,6 +423,20 @@ export function speakerLogLine(body) {
   return line ? `speaker ${line}` : null
 }
 
+/**
+ * Logged Auto dictations (each engine's text) for Settings > Dictation judge
+ * test. Served behind the relay token, not bundled, since they are interviews.
+ */
+export function judgeSamples(
+  file = fileURLToPath(new URL('./judge-samples.json', import.meta.url))
+) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return []
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
@@ -453,10 +467,13 @@ export function createRelay(options = {}) {
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
       req.url !== '/api/speaker-log' &&
+      req.url !== '/api/judge-samples' &&
       req.url !== '/api/dictate'
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
+    if (req.url === '/api/judge-samples')
+      return send(res, 200, judgeSamples())
     if (req.url === '/api/speaker-log') {
       try {
         const line = speakerLogLine(await readBody(req))

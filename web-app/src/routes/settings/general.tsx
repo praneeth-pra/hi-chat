@@ -61,6 +61,12 @@ import {
   type ReplayResult,
 } from '@/lib/replayBench'
 import {
+  loadJudgeSamples,
+  runJudgeTest,
+  judgeTestSummary,
+  type JudgeTestRow,
+} from '@/lib/judgeTest'
+import {
   getJudgeModel,
   getWaitMode,
   getClipTypes,
@@ -186,6 +192,34 @@ function General() {
       )
     } finally {
       setBenchRunning(false)
+    }
+  }
+  const [judgeTest, setJudgeTest] = useState<JudgeTestRow[] | null>(null)
+  const [judgeTestProgress, setJudgeTestProgress] = useState<string | null>(
+    null
+  )
+  const runJudgeTestNow = async () => {
+    const providers = useModelProvider.getState()
+    if (
+      !providers.getProviderByName('cerebras')?.api_key &&
+      !providers.getProviderByName('groq')?.api_key
+    ) {
+      toast.error('Add a Cerebras or Groq key first')
+      return
+    }
+    setJudgeTest(null)
+    setJudgeTestProgress('Loading...')
+    try {
+      const samples = await loadJudgeSamples()
+      setJudgeTest(
+        await runJudgeTest(samples, (done, total) =>
+          setJudgeTestProgress(`${done}/${total}`)
+        )
+      )
+    } catch (err) {
+      toast.error(`Judge test failed: ${(err as Error).message}`)
+    } finally {
+      setJudgeTestProgress(null)
     }
   }
   const [replay, setReplay] = useState<ReplayResult | null>(null)
@@ -1019,6 +1053,28 @@ function General() {
 
             {/* Speaker test */}
             <Card title="Speaker test">
+              <CardItem
+                title="Dictation judge test"
+                description="Runs your logged Auto dictations through today's judge and a faster version that only rewrites the words the engines disagree on, and shows how often they match. Nothing changes in dictation."
+                actions={
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0"
+                    disabled={judgeTestProgress !== null}
+                    onClick={runJudgeTestNow}
+                  >
+                    <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
+                      {judgeTestProgress ?? 'Run test'}
+                    </div>
+                  </Button>
+                }
+              />
+              {judgeTest && (
+                <div className="text-sm text-main-view-fg/80 px-1 pb-2">
+                  {judgeTestSummary(judgeTest)}
+                </div>
+              )}
               <CardItem
                 title="Compare judgement models"
                 description="Runs each judgement model you have a key for on 58 recorded clips and shows how many it gets right, and how fast."
