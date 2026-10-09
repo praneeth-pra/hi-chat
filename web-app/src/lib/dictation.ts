@@ -28,12 +28,12 @@ import { judgeDictation, textAgreement } from '@/lib/dictationJudge'
 /**
  * Which service turns your voice into text. Only Aqua applies your Aqua
  * dictionary and replacements; Grok and ElevenLabs stream live while you
- * talk. Auto runs all three; a judge model writes the best version when they
- * differ, else the text the others agree with most is sent.
+ * talk. Auto runs ElevenLabs and Aqua (Grok was the least accurate); when
+ * they differ a judge model writes the best version, else Aqua's is sent.
  */
 export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs' | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (best of all three)' },
+  { value: 'auto', label: 'Auto (ElevenLabs + Aqua)' },
   { value: 'aqua', label: 'Aqua' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
@@ -84,8 +84,12 @@ export function setKeepMicReady(on: boolean) {
 
 /** Live engines: how long to wait for the last words after stopping. */
 const LIVE_FINISH_MS = 8000
-/** Auto: once one engine has answered, how long the others get. */
-const AUTO_GRACE_MS = 1200
+/**
+ * Auto: once one engine has answered, how long the others get. ElevenLabs
+ * answers in ~0.4 s; Aqua only starts on the last piece when you stop and
+ * took up to 2 s, so it needs this long to reach the judge.
+ */
+const AUTO_GRACE_MS = 2000
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -448,7 +452,7 @@ function batchEngine(engine: DictationEngine): DictationEngine {
 }
 
 function autoLiveStreams() {
-  return (['grok', 'elevenlabs'] as const).map((engine) => ({
+  return (['elevenlabs'] as const).map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
@@ -630,7 +634,7 @@ function reportAuto(
   took: Partial<Record<DictationEngine, number>>,
   info: { sent: string; totalMs: number; judgeMs?: number; judged?: string }
 ) {
-  const engines: DictationEngine[] = ['aqua', 'grok', 'elevenlabs']
+  const engines: DictationEngine[] = ['aqua', 'elevenlabs']
   const times = engines
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')

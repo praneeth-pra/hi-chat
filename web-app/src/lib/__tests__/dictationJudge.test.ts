@@ -63,6 +63,29 @@ describe('judgeDictation', () => {
     ).toBeUndefined()
   })
 
+  it('skips the judge when the texts are a comma apart', async () => {
+    const fetcher = reply('x')
+    const near = [
+      {
+        engine: 'aqua',
+        text: 'Okay, so did you face any issues in your past?',
+      },
+      {
+        engine: 'elevenlabs',
+        text: 'Okay so did you face any issues in your past?',
+      },
+    ]
+    expect(
+      await judgeDictation(
+        near,
+        near[0].text,
+        [],
+        fetcher as unknown as typeof fetch
+      )
+    ).toBeUndefined()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('falls back to Groq, and to the vote with no key', async () => {
     delete providers.cerebras
     providers.groq = { api_key: 'gsk' }
