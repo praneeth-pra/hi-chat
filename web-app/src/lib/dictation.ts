@@ -184,6 +184,8 @@ export async function stopDictation() {
   useDictation.setState({ status: 'transcribing', level: 0 })
   try {
     const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
+    // The mic had sent (almost) nothing yet; Aqua rejects an empty file
+    if (samples.length < TARGET_SAMPLE_RATE / 20) return
     const body = new FormData()
     body.append(
       'audio',
