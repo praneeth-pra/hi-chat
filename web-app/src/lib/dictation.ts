@@ -638,18 +638,21 @@ export async function stopDictation() {
           return t
         }),
       })
-      const results = await gatherAuto([
+      const jobs = [
         timed('aqua', batch()),
         ...autoLive.map((l) =>
           timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
         ),
-      ])
+      ]
+      const results = await gatherAuto(jobs)
       const best = pickBest(results)
       const judgeStart = Date.now()
       const judged =
         best && (await judgeDictation(results, best.text, keyTerms()))
       text = judged ?? best?.text ?? ''
-      reportAuto(results, took, {
+      // Logged once every engine has answered (or given up), so the ones
+      // that lost the race still show what they heard
+      void reportAuto(jobs, took, {
         sent: judged ? 'judge' : (best?.engine ?? 'none'),
         totalMs: Date.now() - stoppedAt,
         judgeMs: best ? Date.now() - judgeStart : undefined,
@@ -669,15 +672,34 @@ export async function stopDictation() {
   }
 }
 
+/** How long the log waits for engines that lost the race. */
+const REPORT_WAIT_MS = 10000
+
 /**
- * One line per Auto dictation in the server log: what each engine heard,
- * how long after you stopped it answered, and which text was sent.
+ * One line per Auto dictation in the server log: what each engine heard
+ * (including the ones that answered after the text was sent), how long
+ * after you stopped it answered, and which text was sent.
  */
-function reportAuto(
-  results: EngineText[],
+export async function reportAuto(
+  jobs: { engine: DictationEngine; text: Promise<string> }[],
   took: Partial<Record<DictationEngine, number>>,
-  info: { sent: string; totalMs: number; judgeMs?: number; judged?: string }
+  info: { sent: string; totalMs: number; judgeMs?: number; judged?: string },
+  waitMs = REPORT_WAIT_MS
 ) {
+  const heard = new Map<DictationEngine, string>()
+  let wait: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    Promise.allSettled(
+      jobs.map(({ engine, text }) =>
+        text.then(
+          (t) => heard.set(engine, JSON.stringify(t.trim())),
+          (err: Error) => heard.set(engine, `failed (${err.message})`)
+        )
+      )
+    ),
+    new Promise((r) => (wait = setTimeout(r, waitMs))),
+  ])
+  clearTimeout(wait)
   const engines: DictationEngine[] = [
     'aqua',
     'soniox',
@@ -687,12 +709,7 @@ function reportAuto(
   const times = engines
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')
-  const texts = engines
-    .map((e) => {
-      const r = results.find((x) => x.engine === e)
-      return `${e}: ${r ? JSON.stringify(r.text) : '-'}`
-    })
-    .join(' | ')
+  const texts = engines.map((e) => `${e}: ${heard.get(e) ?? '-'}`).join(' | ')
   reportClip(
     `dictation auto: sent=${info.sent} total=${info.totalMs}ms ${times}` +
       `${info.judgeMs !== undefined ? ` judge=${info.judgeMs}ms` : ''}` +

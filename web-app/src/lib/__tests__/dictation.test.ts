@@ -13,11 +13,17 @@ import {
   readyMicEarly,
   pickBest,
   gatherAuto,
+  reportAuto,
   textAgreement,
   type Recording,
 } from '../dictation'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
+const reportClip = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/speakerCaptureSession', async (orig) => ({
+  ...(await orig<object>()),
+  reportClip,
+}))
 
 describe('dictation', () => {
   it('encodes 16-bit mono WAV with a correct header', () => {
@@ -328,5 +334,25 @@ describe('dictation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('logs the engines that lost the race once they answer', async () => {
+    let lateAqua!: (t: string) => void
+    const done = reportAuto(
+      [
+        { engine: 'aqua', text: new Promise((r) => (lateAqua = r)) },
+        { engine: 'soniox', text: Promise.resolve('What is EKS?') },
+        { engine: 'cartesia', text: Promise.resolve('What is EKS?') },
+        { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
+      ],
+      { soniox: 300, cartesia: 120 },
+      { sent: 'soniox', totalMs: 310 }
+    )
+    lateAqua('What is EKS? ')
+    await done
+    const line = reportClip.mock.calls.at(-1)?.[0] as string
+    expect(line).toContain('sent=soniox total=310ms')
+    expect(line).toContain('aqua: "What is EKS?"')
+    expect(line).toContain('elevenlabs: failed (down)')
   })
 })
