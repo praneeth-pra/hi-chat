@@ -171,6 +171,8 @@ export async function startDictation() {
 /** Stops recording and sends the text Aqua returns, like a question. */
 export async function stopDictation() {
   const { status, startedAt } = useDictation.getState()
+  // Let go before the mic opened: nothing was said yet
+  if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
   const { ctx, chunks } = recording
   const rate = ctx.sampleRate

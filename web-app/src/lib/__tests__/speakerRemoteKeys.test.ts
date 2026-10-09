@@ -9,8 +9,12 @@ import {
 } from '../speakerRemoteKeys'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
-const toggleDictation = vi.fn()
-vi.mock('@/lib/dictation', () => ({ toggleDictation: () => toggleDictation() }))
+const startDictation = vi.fn()
+const stopDictation = vi.fn()
+vi.mock('@/lib/dictation', () => ({
+  startDictation: () => startDictation(),
+  stopDictation: () => stopDictation(),
+}))
 
 describe('speaker remote keys', () => {
   beforeEach(() =>
@@ -82,13 +86,18 @@ describe('speaker remote keys', () => {
     button.remove()
   })
 
-  it('F14 starts and stops dictation, also by key code', () => {
+  it('F14 starts dictation and F13 stops it, also by key code', () => {
     const stop = listenForSpeakerKeys()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F14' }))
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 125 })
     )
-    expect(toggleDictation).toHaveBeenCalledTimes(2)
+    expect(startDictation).toHaveBeenCalledTimes(2)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F13' }))
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 124 })
+    )
+    expect(stopDictation).toHaveBeenCalledTimes(2)
     stop()
   })
 

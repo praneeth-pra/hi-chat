@@ -408,18 +408,12 @@ describe('ChatInput', () => {
     expect(sendButton).toBeInTheDocument()
   })
 
-  it('handles file upload', async () => {
-    const user = userEvent.setup()
+  it('has no image picker button (images can still be pasted or dropped)', async () => {
     await act(async () => {
       renderWithRouter()
     })
 
-    // Wait for async effects to complete (mmproj check)
-    await waitFor(() => {
-      // File upload is rendered as hidden input element
-      const fileInput = document.querySelector('input[type="file"]')
-      expect(fileInput).toBeInTheDocument()
-    })
+    expect(document.querySelector('input[type="file"]')).toBeNull()
   })
 
   it('shows tools dropdown when model supports tools and MCP servers are connected', async () => {

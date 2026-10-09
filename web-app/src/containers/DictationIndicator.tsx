@@ -75,7 +75,7 @@ export function DictationBanner() {
                 {elapsed(Math.max(0, now - startedAt))}
               </span>
               <span className="hidden sm:inline opacity-70">
-                · fn + Space or click stop to send
+                · let go of fn + Space or click stop to send
               </span>
             </>
           )}
@@ -125,7 +125,7 @@ export function DictationButton() {
           <p>
             {recording
               ? 'Stop and send what you said'
-              : 'Dictate with Aqua (your dictionary applies). fn + Space from Hammerspoon.'}
+              : 'Dictate with Aqua (your dictionary applies). Or hold fn + Space (Hammerspoon).'}
           </p>
         </TooltipContent>
       </Tooltip>
