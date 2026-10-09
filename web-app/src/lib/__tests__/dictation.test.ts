@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { wavBytes, toggleDictation, useDictation } from '../dictation'
+import {
+  wavBytes,
+  toggleDictation,
+  stopDictation,
+  useDictation,
+} from '../dictation'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 
@@ -25,5 +30,11 @@ describe('dictation', () => {
     toggleDictation()
     expect(useDictation.getState().status).toBe('transcribing')
     useDictation.setState({ status: 'idle' })
+  })
+
+  it('letting go before the mic opens throws the recording away', async () => {
+    useDictation.setState({ status: 'starting' })
+    await stopDictation()
+    expect(useDictation.getState().status).toBe('idle')
   })
 })

@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/tooltip'
 import { ArrowRight } from 'lucide-react'
 import {
-  IconPhoto,
   IconAtom,
   IconTool,
   IconCodeCircle2,
@@ -68,7 +67,6 @@ import { useAttachments } from '@/hooks/useAttachments'
 import { toast } from 'sonner'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
-import { isPlatformTauri } from '@/lib/platform/utils'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { useAttachmentIngestionPrompt } from '@/hooks/useAttachmentIngestionPrompt'
 import {
@@ -1000,74 +998,6 @@ const ChatInput = ({
     }
   }
 
-  const handleImagePickerClick = async () => {
-    if (isPlatformTauri()) {
-      try {
-        const selected = await serviceHub.dialog().open({
-          multiple: true,
-          filters: [
-            {
-              name: 'Images',
-              extensions: ['jpg', 'jpeg', 'png'],
-            },
-          ],
-        })
-
-        if (selected) {
-          const paths = Array.isArray(selected) ? selected : [selected]
-          const files: File[] = []
-
-          for (const path of paths) {
-            try {
-              // Use Tauri's convertFileSrc to create a valid URL for the file
-              const { convertFileSrc } = await import('@tauri-apps/api/core')
-              const fileUrl = convertFileSrc(path)
-
-              // Fetch the file as blob
-              const response = await fetch(fileUrl)
-              if (!response.ok) {
-                throw new Error(`Failed to fetch file: ${response.statusText}`)
-              }
-
-              const blob = await response.blob()
-              const fileName =
-                path.split(/[\\/]/).filter(Boolean).pop() || 'image'
-              const ext = fileName.toLowerCase().split('.').pop()
-              const mimeType =
-                ext === 'png'
-                  ? 'image/png'
-                  : ext === 'jpg' || ext === 'jpeg'
-                    ? 'image/jpeg'
-                    : 'image/jpeg'
-
-              const file = new File([blob], fileName, { type: mimeType })
-              files.push(file)
-            } catch (error) {
-              console.error('Failed to read file:', error)
-              toast.error('Failed to read file', {
-                description:
-                  error instanceof Error ? error.message : String(error),
-              })
-            }
-          }
-
-          if (files.length > 0) {
-            await processImageFiles(files)
-          }
-        }
-      } catch (error) {
-        console.error('Failed to open file dialog:', error)
-      }
-
-      if (textareaRef.current) {
-        textareaRef.current.focus()
-      }
-    } else {
-      // Fallback to input click for web
-      fileInputRef.current?.click()
-    }
-  }
-
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1447,34 +1377,6 @@ const ChatInput = ({
                     model={model}
                     useLastUsedModel={initialMessage}
                   />
-                )}
-                {/* Vision image attachment - show only for models with mmproj */}
-                {hasMmproj && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div
-                          className="h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1"
-                          onClick={handleImagePickerClick}
-                        >
-                          <IconPhoto
-                            size={18}
-                            className="text-main-view-fg/50"
-                          />
-                          <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            multiple
-                            onChange={handleFileChange}
-                          />
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{t('vision')}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
                 )}
                 {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                 {selectedModel?.capabilities?.includes('tools') &&

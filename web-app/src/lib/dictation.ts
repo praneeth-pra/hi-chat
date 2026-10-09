@@ -171,6 +171,8 @@ export async function startDictation() {
 /** Stops recording and sends the text Aqua returns, like a question. */
 export async function stopDictation() {
   const { status, startedAt } = useDictation.getState()
+  // Stopped before the mic opened: nothing was said yet
+  if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
   const { ctx, chunks } = recording
   const rate = ctx.sampleRate
@@ -182,6 +184,8 @@ export async function stopDictation() {
   useDictation.setState({ status: 'transcribing', level: 0 })
   try {
     const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
+    // The mic had sent (almost) nothing yet; Aqua rejects an empty file
+    if (samples.length < TARGET_SAMPLE_RATE / 20) return
     const body = new FormData()
     body.append(
       'audio',
@@ -219,5 +223,5 @@ export function cancelDictation() {
 export function toggleDictation() {
   const { status } = useDictation.getState()
   if (status === 'idle') void startDictation()
-  else if (status === 'recording') void stopDictation()
+  else if (status === 'recording' || status === 'starting') void stopDictation()
 }
