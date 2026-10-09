@@ -6,6 +6,8 @@ import {
   ASSEMBLY_LIVE_URL,
   LiveTranscriber,
   LIVE_URL,
+  CartesiaLiveTranscriber,
+  cartesiaTerms,
   SONIOX_LIVE_URL,
   SonioxLiveTranscriber,
   sonioxTerms,
@@ -415,5 +417,78 @@ describe('SonioxLiveTranscriber', () => {
     const out = sonioxTerms(many)
     expect(out.join(', ').length).toBeLessThan(9000)
     expect(out[0]).toBe('term number 0')
+  })
+})
+
+describe('CartesiaLiveTranscriber', () => {
+  class CartesiaSocket extends FakeSocket {
+    raw: (ArrayBuffer | string)[] = []
+    send(data: string) {
+      this.raw.push(data)
+    }
+  }
+  const connect = async () => {
+    let socket!: CartesiaSocket
+    const live = new CartesiaLiveTranscriber(
+      Promise.resolve({ token: 'cart_tok', terms: ['kubectl', 'S3 bucket'] }),
+      (url) => {
+        socket = new CartesiaSocket(url)
+        return socket
+      },
+      ['VPC']
+    )
+    await tick()
+    return { live, socket }
+  }
+
+  it('connects with the token and key terms, joins final pieces, and ends on flush_done', async () => {
+    const { live, socket } = await connect()
+    const url = new URL(socket.url)
+    expect(url.origin + url.pathname).toBe(
+      'wss://api.cartesia.ai/stt/websocket'
+    )
+    expect(url.searchParams.get('model')).toBe('ink-2')
+    expect(url.searchParams.get('encoding')).toBe('pcm_s16le')
+    expect(url.searchParams.get('sample_rate')).toBe('16000')
+    expect(url.searchParams.get('access_token')).toBe('cart_tok')
+    expect(url.searchParams.getAll('keyterm')).toEqual([
+      'VPC',
+      'kubectl',
+      'S3 bucket',
+    ])
+    live.push(new Float32Array(1600).fill(0.1))
+    socket.open()
+    expect(socket.raw[0]).toBeInstanceOf(ArrayBuffer)
+    socket.reply({ type: 'transcript', is_final: true, text: 'What is' })
+    socket.reply({ type: 'transcript', is_final: false, text: ' an S3' })
+    const text = live.finish()
+    expect(socket.raw.at(-1)).toBe('finalize')
+    socket.reply({ type: 'transcript', is_final: true, text: ' an S3 bucket?' })
+    socket.reply({ type: 'flush_done', request_id: 'r' })
+    await expect(text).resolves.toBe('What is an S3 bucket?')
+    expect(socket.raw.at(-1)).toBe('close')
+    expect(socket.closed).toBe(true)
+  })
+
+  it('fails on a Cartesia error', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    const text = live.finish()
+    socket.reply({ type: 'error', status_code: 401, message: 'Bad token' })
+    await expect(text).rejects.toThrow('Cartesia live: Bad token')
+  })
+
+  it('fits the dictionary into 100 terms, technical words first', () => {
+    const dictionary = [
+      'environment',
+      'ec2 instance',
+      'RBAC',
+      'kubectl',
+      ...Array.from({ length: 300 }, (_, i) => `word${i}`),
+    ]
+    const out = cartesiaTerms(dictionary, ['Grafana'])
+    expect(out).toHaveLength(100)
+    expect(out.slice(0, 3)).toEqual(['Grafana', 'RBAC', 'word0'])
+    expect(out.join('').length).toBeLessThanOrEqual(1200)
   })
 })

@@ -572,3 +572,45 @@ test('dictionary: one term per line, split at commas outside brackets', () => {
   // Soniox's context limit is ~10,000 characters
   assert.ok(terms.join(', ').length < 10000)
 })
+
+test('cartesia live: an STT-only access token plus the dictionary', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({
+      url,
+      auth: init.headers.Authorization,
+      version: init.headers['Cartesia-Version'],
+      body: JSON.parse(init.body),
+    })
+    return new Response(JSON.stringify({ token: 'cart_tok' }))
+  }
+  const server = createRelay({ env: { CARTESIA_API_KEY: 'c' }, fetchImpl }).listen(
+    0,
+    '127.0.0.1'
+  )
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/live-token`,
+      { method: 'POST', body: JSON.stringify({ engine: 'cartesia' }) }
+    )
+    assert.equal(res.status, 200)
+    const { token, terms } = await res.json()
+    assert.equal(token, 'cart_tok')
+    assert.ok(terms.includes('kubectl'))
+    assert.deepEqual(calls, [
+      {
+        url: 'https://api.cartesia.ai/access-token',
+        auth: 'Bearer c',
+        version: '2026-08-14',
+        body: { grants: { stt: true }, expires_in: 600 },
+      },
+    ])
+  } finally {
+    server.close()
+  }
+  await assert.rejects(
+    liveToken({ env: {}, engine: 'cartesia' }),
+    (err) => err.status === 503
+  )
+})

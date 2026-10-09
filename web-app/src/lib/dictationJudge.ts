@@ -52,6 +52,7 @@ const ENGINE_NAMES: Record<string, string> = {
   grok: 'Grok',
   elevenlabs: 'ElevenLabs',
   soniox: 'Soniox',
+  cartesia: 'Cartesia',
 }
 
 function judgeTarget() {

@@ -9,12 +9,13 @@ import {
 import {
   RELAY_TOKEN_HEADER,
   fetchLiveToken,
-  fetchSonioxKey,
+  fetchLiveKeyWithTerms,
   keyTerms,
   relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
+  CartesiaLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
   SonioxLiveTranscriber,
@@ -36,16 +37,24 @@ import {
 
 /**
  * Which service turns your voice into text. Aqua applies your Aqua
- * dictionary and replacements, and Soniox gets the same words as context
- * terms; Soniox, Grok and ElevenLabs stream live while you talk. Auto runs
- * Soniox, ElevenLabs and Aqua (Grok was the least accurate): as soon as two
- * agree their text is sent, else a judge model writes the best version.
+ * dictionary and replacements, Soniox gets the same words as context terms
+ * and Cartesia the 100 that fit; Soniox, Cartesia, Grok and ElevenLabs
+ * stream live while you talk. Auto runs Soniox, Cartesia, ElevenLabs and
+ * Aqua (Grok was the least accurate): as soon as two agree their text is
+ * sent, else a judge model writes the best version.
  */
-export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs' | 'soniox' | 'auto'
+export type DictationEngine =
+  | 'aqua'
+  | 'grok'
+  | 'elevenlabs'
+  | 'soniox'
+  | 'cartesia'
+  | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (Soniox + ElevenLabs + Aqua)' },
+  { value: 'auto', label: 'Auto (Soniox + Cartesia + ElevenLabs + Aqua)' },
   { value: 'aqua', label: 'Aqua' },
   { value: 'soniox', label: 'Soniox (live)' },
+  { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
@@ -455,7 +464,17 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       keyTerms()
     )
   if (engine === 'soniox')
-    return new SonioxLiveTranscriber(fetchSonioxKey(), undefined, keyTerms())
+    return new SonioxLiveTranscriber(
+      fetchLiveKeyWithTerms('soniox'),
+      undefined,
+      keyTerms()
+    )
+  if (engine === 'cartesia')
+    return new CartesiaLiveTranscriber(
+      fetchLiveKeyWithTerms('cartesia'),
+      undefined,
+      keyTerms()
+    )
   return undefined
 }
 
@@ -465,9 +484,9 @@ function batchEngine(engine: DictationEngine): DictationEngine {
 }
 
 function autoLiveStreams() {
-  // Soniox first: when the two live engines agree, its text (with your
-  // dictionary) is the one sent
-  return (['soniox', 'elevenlabs'] as const).map((engine) => ({
+  // Soniox first: when it agrees with another live engine, its text (with
+  // your whole dictionary) is the one sent
+  return (['soniox', 'cartesia', 'elevenlabs'] as const).map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
@@ -659,7 +678,12 @@ function reportAuto(
   took: Partial<Record<DictationEngine, number>>,
   info: { sent: string; totalMs: number; judgeMs?: number; judged?: string }
 ) {
-  const engines: DictationEngine[] = ['aqua', 'soniox', 'elevenlabs']
+  const engines: DictationEngine[] = [
+    'aqua',
+    'soniox',
+    'cartesia',
+    'elevenlabs',
+  ]
   const times = engines
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')
