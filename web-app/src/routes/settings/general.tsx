@@ -35,7 +35,9 @@ import { getLiveMode, setLiveMode } from '@/lib/speakerLive'
 import {
   DICTATION_ENGINES,
   getDictationEngine,
+  getKeepMicReady,
   setDictationEngine,
+  setKeepMicReady,
 } from '@/lib/dictation'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -154,6 +156,7 @@ function General() {
   const [liveMode, setLiveModeState] = useState(getLiveMode)
   const [dictationEngine, setDictationEngineState] =
     useState(getDictationEngine)
+  const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [judgeModel, setJudgeModelState] = useState<JudgeModel>(getJudgeModel)
   const [secondJudge, setSecondJudgeState] = useState<JudgeModel | undefined>(
     getSecondJudge
@@ -761,7 +764,7 @@ function General() {
             <Card title="Dictation">
               <CardItem
                 title="Dictation engine"
-                description="Turns your own voice into text when you tap Left Control or the mic button. Aqua applies your Aqua dictionary; ElevenLabs streams while you talk, so it's fastest."
+                description="Turns your own voice into text when you tap Left Control or the mic button. Aqua applies your Aqua dictionary; Grok (live) gets your assistant's key terms; the live ones stream while you talk, so they're fastest."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -788,6 +791,19 @@ function General() {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                }
+              />
+              <CardItem
+                title="Keep the mic ready"
+                description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Jan is open."
+                actions={
+                  <Switch
+                    checked={keepMic}
+                    onCheckedChange={(on) => {
+                      setKeepMicReady(on)
+                      setKeepMicState(on)
+                    }}
+                  />
                 }
               />
             </Card>

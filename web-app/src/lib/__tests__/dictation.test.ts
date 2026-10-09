@@ -7,6 +7,9 @@ import {
   onBlock,
   getDictationEngine,
   setDictationEngine,
+  setKeepMicReady,
+  startDictation,
+  cancelDictation,
   type Recording,
 } from '../dictation'
 
@@ -116,5 +119,50 @@ describe('dictation', () => {
     setDictationEngine('elevenlabs')
     expect(getDictationEngine()).toBe('elevenlabs')
     localStorage.removeItem('dictation-engine')
+  })
+
+  it('keeps the mic open so the next dictation starts instantly', async () => {
+    const track = { readyState: 'live', stop: vi.fn() }
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] }
+    const getUserMedia = vi.fn(async () => stream)
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia, enumerateDevices: async () => [] },
+    })
+    class FakeContext {
+      state = 'running'
+      sampleRate = 48000
+      destination = {}
+      audioWorklet = { addModule: async () => {} }
+      createMediaStreamSource = () => ({ connect: () => {} })
+      resume = async () => {}
+      close = async () => {}
+    }
+    class FakeNode {
+      port = { onmessage: null }
+      connect() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('AudioContext', FakeContext)
+    vi.stubGlobal('AudioWorkletNode', FakeNode)
+    URL.createObjectURL = () => 'blob:x'
+    URL.revokeObjectURL = () => {}
+    setKeepMicReady(true)
+    useDictation.setState({ status: 'idle' })
+
+    await startDictation()
+    expect(useDictation.getState().status).toBe('recording')
+    cancelDictation()
+    expect(track.stop).not.toHaveBeenCalled()
+
+    void startDictation()
+    // No await: the mic is already open
+    expect(useDictation.getState().status).toBe('recording')
+    expect(getUserMedia).toHaveBeenCalledTimes(1)
+    cancelDictation()
+
+    setKeepMicReady(false)
+    expect(track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
   })
 })

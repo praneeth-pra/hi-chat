@@ -9,9 +9,10 @@ import {
 import {
   RELAY_TOKEN_HEADER,
   fetchLiveToken,
+  keyTerms,
   relayToken,
 } from '@/lib/speakerCaptureSession'
-import { LiveTranscriber } from '@/lib/speakerLive'
+import { GrokLiveTranscriber, LiveTranscriber } from '@/lib/speakerLive'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 
@@ -29,7 +30,7 @@ import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'aqua', label: 'Aqua' },
-  { value: 'grok', label: 'Grok' },
+  { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
@@ -53,7 +54,30 @@ export function setDictationEngine(engine: DictationEngine) {
   }
 }
 
-/** ElevenLabs live: how long to wait for the last words after stopping. */
+const KEEP_MIC_STORAGE_KEY = 'dictation-keep-mic'
+
+/**
+ * Keep the mic open between dictations so the next one starts instantly
+ * (macOS shows the mic as in use while Jan is open). On by default.
+ */
+export function getKeepMicReady(): boolean {
+  try {
+    return localStorage.getItem(KEEP_MIC_STORAGE_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+export function setKeepMicReady(on: boolean) {
+  try {
+    localStorage.setItem(KEEP_MIC_STORAGE_KEY, on ? 'on' : 'off')
+  } catch {
+    // Storage blocked
+  }
+  if (!on && !recording) closeMic()
+}
+
+/** Live engines: how long to wait for the last words after stopping. */
 const LIVE_FINISH_MS = 8000
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
@@ -144,14 +168,13 @@ const PAUSE_MS = 600
 /** Below this loudness a block counts as a pause (used only to split). */
 const SILENCE_RMS = 0.004
 
+type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'>
+
 export type Recording = {
-  stream: MediaStream
-  ctx: AudioContext
-  tap: AudioWorkletNode
   rate: number
   engine: DictationEngine
-  /** ElevenLabs: the live stream that gets every block as it comes */
-  live?: LiveTranscriber
+  /** Live engines: the stream that gets every block as it comes */
+  live?: LiveStream
   /** Audio not yet sent */
   chunks: Float32Array[]
   /** Silence at the end of chunks, in ms */
@@ -163,30 +186,82 @@ export type Recording = {
 
 let recording: Recording | undefined
 
-// A new audio context per dictation, made once the mic is open (Safari
-// doesn't reliably restart a suspended one).
-async function audioContext(): Promise<AudioContext> {
-  const ctx = new AudioContext()
-  const url = URL.createObjectURL(
-    new Blob([TAP_WORKLET], { type: 'application/javascript' })
+/** The open mic, kept between dictations when "keep the mic ready" is on. */
+type Mic = {
+  stream: MediaStream
+  ctx: AudioContext
+  tap: AudioWorkletNode
+  /** The last moments before a dictation starts, so no first word is lost */
+  preroll: Float32Array[]
+}
+let mic: Mic | undefined
+const PREROLL_BLOCKS = 3 // ~130 ms at 48 kHz
+
+function micAlive(m: Mic) {
+  return (
+    m.ctx.state === 'running' &&
+    m.stream.getAudioTracks().some((t) => t.readyState === 'live')
   )
+}
+
+// A new audio context each time the mic opens, made once the mic is open
+// (Safari doesn't reliably restart a suspended one, so it's never suspended).
+async function openMic(): Promise<Mic> {
+  const media = navigator.mediaDevices
+  const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
+  const stream = await media.getUserMedia({
+    audio: {
+      ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
+      echoCancellation: true,
+      noiseSuppression: true,
+    },
+  })
+  let ctx: AudioContext | undefined
   try {
-    await ctx.audioWorklet.addModule(url)
-  } finally {
-    URL.revokeObjectURL(url)
+    ctx = new AudioContext()
+    const url = URL.createObjectURL(
+      new Blob([TAP_WORKLET], { type: 'application/javascript' })
+    )
+    try {
+      await ctx.audioWorklet.addModule(url)
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+    if (ctx.state !== 'running') await ctx.resume()
+  } catch (err) {
+    stream.getTracks().forEach((t) => t.stop())
+    ctx?.close().catch(() => {})
+    throw err
   }
-  return ctx
+  const tap = new AudioWorkletNode(ctx, 'dictation-tap')
+  ctx.createMediaStreamSource(stream).connect(tap)
+  // Outputs silence; the connection just keeps the node running.
+  tap.connect(ctx.destination)
+  const m: Mic = { stream, ctx, tap, preroll: [] }
+  tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
+    if (recording) return onBlock(recording, e.data)
+    m.preroll.push(e.data)
+    if (m.preroll.length > PREROLL_BLOCKS) m.preroll.shift()
+  }
+  return m
+}
+
+function closeMic() {
+  if (!mic) return
+  mic.tap.port.onmessage = null
+  mic.tap.disconnect()
+  mic.stream.getTracks().forEach((t) => t.stop())
+  mic.ctx.close().catch(() => {})
+  mic = undefined
 }
 
 function release() {
-  if (!recording) return
-  clearTimeout(recording.limit)
-  recording.tap.port.onmessage = null
-  recording.tap.disconnect()
-  recording.stream.getTracks().forEach((t) => t.stop())
-  recording.live?.abort()
-  recording.ctx.close().catch(() => {})
-  recording = undefined
+  if (recording) {
+    clearTimeout(recording.limit)
+    recording.live?.abort()
+    recording = undefined
+  }
+  if (!getKeepMicReady()) closeMic()
 }
 
 /** Posts one piece of audio through the relay; resolves to its text. */
@@ -247,56 +322,56 @@ export function onBlock(rec: Recording, block: Float32Array) {
   }
 }
 
+function liveStream(engine: DictationEngine): LiveStream | undefined {
+  if (engine === 'elevenlabs')
+    return new LiveTranscriber(fetchLiveToken('elevenlabs'))
+  if (engine === 'grok')
+    return new GrokLiveTranscriber(
+      fetchLiveToken('grok'),
+      undefined,
+      undefined,
+      keyTerms()
+    )
+  return undefined
+}
+
+function begin(m: Mic) {
+  const engine = getDictationEngine()
+  const rec: Recording = {
+    rate: m.ctx.sampleRate,
+    engine,
+    live: liveStream(engine),
+    chunks: [],
+    quietMs: 0,
+    pieces: [],
+    limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
+  }
+  recording = rec
+  for (const block of m.preroll.splice(0)) onBlock(rec, block)
+  useDictation.setState({ status: 'recording', startedAt: Date.now() })
+}
+
 export async function startDictation() {
   if (useDictation.getState().status !== 'idle') return
-  const media = navigator.mediaDevices
-  if (!media?.getUserMedia || typeof AudioWorkletNode === 'undefined') {
+  if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === 'undefined') {
     toast('This browser cannot record the microphone')
     return
   }
+  // The mic is still open from the last dictation: start right away
+  if (mic && micAlive(mic)) return begin(mic)
+  closeMic()
   useDictation.setState({ status: 'starting', level: 0 })
-  let stream: MediaStream | undefined
   try {
-    const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
-    stream = await media.getUserMedia({
-      audio: {
-        ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
-    })
-    const ctx = await audioContext()
-    if (ctx.state !== 'running') await ctx.resume()
+    const m = await openMic()
     // Cancelled while the mic was opening
     if (useDictation.getState().status !== 'starting') {
-      stream.getTracks().forEach((t) => t.stop())
-      ctx.close().catch(() => {})
+      mic = m
+      if (!getKeepMicReady()) closeMic()
       return
     }
-    const tap = new AudioWorkletNode(ctx, 'dictation-tap')
-    ctx.createMediaStreamSource(stream).connect(tap)
-    // Outputs silence; the connection just keeps the node running.
-    tap.connect(ctx.destination)
-    const engine = getDictationEngine()
-    const rec: Recording = {
-      stream,
-      ctx,
-      tap,
-      rate: ctx.sampleRate,
-      engine,
-      ...(engine === 'elevenlabs'
-        ? { live: new LiveTranscriber(fetchLiveToken('elevenlabs')) }
-        : {}),
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-      limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
-    }
-    tap.port.onmessage = (e: MessageEvent<Float32Array>) => onBlock(rec, e.data)
-    recording = rec
-    useDictation.setState({ status: 'recording', startedAt: Date.now() })
+    mic = m
+    begin(m)
   } catch (err) {
-    stream?.getTracks().forEach((t) => t.stop())
     release()
     useDictation.setState({ status: 'idle', level: 0 })
     toast(`Microphone unavailable: ${(err as Error).message}`)
