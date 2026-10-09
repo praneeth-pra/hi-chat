@@ -1,0 +1,63 @@
+name: Groq web build CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install
+      - run: yarn build:core
+      - name: Web app tests
+        run: yarn workspace @janhq/web-app test
+      - name: Transcription relay tests
+        run: node --test relay/server.test.mjs
+      - name: Build web app
+        run: yarn build:web-app
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t jan-web .
+      - name: Smoke test
+        run: |
+          docker run -d --name jan-web -e PORT=8080 -p 8080:8080 jan-web
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/ > /dev/null && break; sleep 1; done
+          curl -sf http://localhost:8080/ | grep -qi '<div id="root"'
+          curl -sf http://localhost:8080/threads/some-id | grep -qi '<div id="root"'
+          curl -sfI http://localhost:8080/ | grep -qi '^cache-control: no-cache'
+          curl -sfI http://localhost:8080/serviceWorker.js | grep -qi '^cache-control: no-cache'
+          curl -sf http://localhost:8080/serviceWorker.js | grep -q 'registration.unregister'
+          worker=$(docker exec jan-web sh -c 'ls /usr/share/nginx/html/assets | grep "^pdf.worker" | head -1')
+          curl -sfI "http://localhost:8080/assets/$worker" | grep -qi '^content-type: text/javascript'
+          # Groq pass-through reaches api.groq.com (no key, so Groq answers 401)
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/groq/openai/v1/models)" = 401
+          # The transcription relay stays off (503) until RELAY_TOKEN is set
+          curl -s -D - -o /dev/null -X POST http://localhost:8080/api/transcribe | grep -qi '^x-relay-rejected: unset'
+          # With a token: no or wrong token is refused before reaching the relay
+          docker run -d --name jan-web-key -e PORT=8081 -e ELEVENLABS_API_KEY=fake-key -e XAI_API_KEY=fake-key -e RELAY_TOKEN=ci-token -p 8081:8081 jan-web
+          for i in $(seq 1 30); do curl -sf http://localhost:8081/ > /dev/null && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/transcribe)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Relay-Token: wrong' http://localhost:8081/api/transcribe)" = 401
+          # With the token, one upload reaches the relay, which tries both engines
+          # (fake keys are rejected upstream, so every engine reports an error)
+          head -c 2000 /dev/urandom > clip.flac
+          for i in $(seq 1 30); do
+            code=$(curl -s -o body.json -w '%{http_code}' -X POST -H 'X-Relay-Token: ci-token' -F file=@clip.flac http://localhost:8081/api/transcribe)
+            grep -q '"results"' body.json && break
+            sleep 1
+          done
+          echo "Relay with fake keys: $code $(cat body.json)"
+          test "$code" = 502
+          grep -q '"name":"elevenlabs"' body.json
+          grep -q '"name":"grok"' body.json

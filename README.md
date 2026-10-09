@@ -1,38 +1,49 @@
-# hi-chat
+# Jan (web build)
 
-A small, single-user chat app for OpenAI-compatible APIs (Groq by default), inspired by Jan and Open WebUI.
+A web-only fork of [Jan](https://github.com/janhq/jan). The chat app runs in
+the browser, keeps threads and assistants in browser storage, and talks to
+Groq. It can also turn the Mac's own sound (through a BlackHole loopback
+device) into prompts by transcribing each spoken clip.
 
-- Chat history stored in SQLite (`DATA_DIR/chat.db`)
-- Model picker per chat, default model and system prompt in Settings
-- Streaming replies with stop, regenerate, copy and delete
-- Markdown with code highlighting, light and dark themes, mobile layout
-- **The view never auto-scrolls when you send a prompt or while a reply streams.** A "jump to latest" button appears instead.
+## Layout
 
-## Configuration
+- `web-app/` - the React app (built with `vite.config.web.ts`)
+- `core/` - `@janhq/core`, shared types and extension base classes
+- `extensions-web/` - browser storage for threads and messages
+- `relay/` - small Node server for `/api/transcribe` that forwards clips to
+  ElevenLabs, Grok and AssemblyAI, keeping the API keys on the server
+- `nginx.conf`, `Dockerfile` - the production image (static app, Groq
+  pass-through at `/api/groq/`, transcription relay)
 
-| Variable         | Default                          | Notes                                          |
-| ---------------- | -------------------------------- | ---------------------------------------------- |
-| `APP_PASSWORD`   | none                             | Required in production. Sign-in password.      |
-| `LLM_API_KEY`    | none                             | API key (`GROQ_API_KEY` also works).           |
-| `LLM_BASE_URL`   | `https://api.groq.com/openai/v1` | Any OpenAI-compatible endpoint.                |
-| `DEFAULT_MODEL`  | `llama-3.3-70b-versatile`        | Used until changed in Settings.                |
-| `DATA_DIR`       | `./data` (`/data` in Docker)     | Database and session secret. Mount a volume.   |
-| `PORT`           | `3000`                           |                                                |
-| `SESSION_SECRET` | generated into `DATA_DIR`        | Optional. Set to keep sessions across volumes. |
+## Develop
 
-## Development
+Requires Node.js 20+ and Yarn 4 (`corepack enable`).
 
-Requires Node 22.13 or newer.
-
-```sh
-npm install
-LLM_API_KEY=... npm run dev     # web on :5173, API on :3000
-npm test                        # vitest (server + web)
-npm run typecheck && npm run format:check
+```bash
+yarn install
+yarn build:core
+yarn dev:web-app        # http://localhost:3001
 ```
 
-## Deploy (Railway)
+## Test and build
 
-The repo includes a `Dockerfile` and `railway.json` (health check on `/api/health`).
-Create a service from this repo, attach a volume at `/data`, and set `APP_PASSWORD` and `LLM_API_KEY`.
-Every change goes through a pull request and must pass CI before it is deployed.
+```bash
+yarn workspace @janhq/web-app test
+node --test relay/server.test.mjs
+yarn build:web-app      # output in web-app/dist-web
+```
+
+## Deploy
+
+```bash
+docker build -t jan-web .
+docker run -p 8080:8080 -e PORT=8080 \
+  -e ELEVENLABS_API_KEY=... -e XAI_API_KEY=... -e ASSEMBLYAI_API_KEY=... -e RELAY_TOKEN=... jan-web
+```
+
+`RELAY_TOKEN` is the shared secret the browser sends to use the transcription
+relay; without it the relay stays off. The Groq API key is entered in the app.
+
+## License
+
+Apache 2.0, see [LICENSE](LICENSE).

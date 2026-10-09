@@ -1,18 +1,24 @@
-import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [react()],
   test: {
     projects: [
-      {
-        extends: true,
-        test: { name: 'server', include: ['server/**/*.test.ts'], environment: 'node' }
-      },
-      {
-        extends: true,
-        test: { name: 'web', include: ['web/src/**/*.test.{ts,tsx}'], environment: 'jsdom' }
-      }
-    ]
-  }
-});
+      // Core package - use its own vitest config
+      './core',
+
+      // Web-app package - use its own vitest config
+      './web-app',
+    ],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      exclude: [
+        '**/*/dist',
+        'node_modules',
+        'src/**/*.test.ts',
+        'src/**/*.test.tsx',
+        'src/test/**/*',
+      ],
+    },
+  },
+})

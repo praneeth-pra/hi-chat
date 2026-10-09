@@ -1,0 +1,147 @@
+/**
+ * Streams a chat reply from Claude (Anthropic's Messages API) in the shape of
+ * OpenAI chat completion chunks, so Auto can use Claude like the other chat
+ * models. The web build has no built-in Anthropic provider; the key comes
+ * from anthropicConfig, the same one the Claude judges use.
+ */
+
+type OpenAIMessage = {
+  role: string
+  content?: unknown
+}
+
+type ClaudeMessage = { role: 'user' | 'assistant'; content: string }
+
+export type ClaudeChunk = {
+  choices: {
+    index: number
+    delta: { content?: string }
+    finish_reason: string | null
+  }[]
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
+}
+
+const textOf = (content: unknown): string => {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) =>
+      part && typeof part === 'object' && 'text' in part
+        ? String((part as { text: unknown }).text ?? '')
+        : ''
+    )
+    .join('')
+}
+
+/**
+ * OpenAI-style messages to Claude's system prompt and alternating turns.
+ * Tool calls and results are left out; same-role turns are merged.
+ */
+export function toClaudeMessages(messages: OpenAIMessage[]): {
+  system: string
+  messages: ClaudeMessage[]
+} {
+  const system: string[] = []
+  const turns: ClaudeMessage[] = []
+  for (const m of messages) {
+    const text = textOf(m.content).trim()
+    if (!text) continue
+    if (m.role === 'system' || m.role === 'developer') {
+      system.push(text)
+      continue
+    }
+    if (m.role !== 'user' && m.role !== 'assistant') continue
+    const last = turns[turns.length - 1]
+    if (last?.role === m.role) last.content += `\n\n${text}`
+    else turns.push({ role: m.role, content: text })
+  }
+  // Claude's turns must start with the user
+  while (turns[0]?.role === 'assistant') turns.shift()
+  return { system: system.join('\n\n'), messages: turns }
+}
+
+const chunk = (content: string): ClaudeChunk => ({
+  choices: [{ index: 0, delta: { content }, finish_reason: null }],
+})
+
+export async function streamClaude(opts: {
+  apiKey: string
+  baseUrl?: string
+  model: string
+  messages: OpenAIMessage[]
+  signal: AbortSignal
+  maxTokens?: number
+}): Promise<AsyncIterable<ClaudeChunk>> {
+  const { system, messages } = toClaudeMessages(opts.messages)
+  const base = (opts.baseUrl || 'https://api.anthropic.com')
+    .replace(/\/+$/, '')
+    .replace(/\/v1$/, '')
+  const res = await fetch(`${base}/v1/messages`, {
+    method: 'POST',
+    signal: opts.signal,
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': opts.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: opts.maxTokens ?? 4096,
+      stream: true,
+      ...(system ? { system } : {}),
+      messages,
+    }),
+  })
+  if (!res.ok || !res.body) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`Claude ${res.status}: ${detail.slice(0, 200)}`)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+
+  return (async function* () {
+    let buffer = ''
+    let input = 0
+    let output = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, nl).trim()
+          buffer = buffer.slice(nl + 1)
+          if (!line.startsWith('data:')) continue
+          const event = JSON.parse(line.slice(5).trim())
+          if (event.type === 'message_start')
+            input = event.message?.usage?.input_tokens ?? 0
+          else if (
+            event.type === 'content_block_delta' &&
+            event.delta?.type === 'text_delta'
+          )
+            yield chunk(event.delta.text)
+          else if (event.type === 'message_delta')
+            output = event.usage?.output_tokens ?? output
+          else if (event.type === 'error')
+            throw new Error(`Claude: ${event.error?.message ?? 'stream error'}`)
+        }
+      }
+      yield {
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: input,
+          completion_tokens: output,
+          total_tokens: input + output,
+        },
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  })()
+}

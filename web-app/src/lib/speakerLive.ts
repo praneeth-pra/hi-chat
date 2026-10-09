@@ -1,0 +1,535 @@
+import { TARGET_SAMPLE_RATE } from './speakerCapture'
+
+/**
+ * Live mode: while the speaker talks, audio streams to ElevenLabs' realtime
+ * model (scribe_v2_realtime), so the text is ready moments after the pause
+ * instead of after uploading and transcribing the whole clip. Kept in this
+ * browser; off by default.
+ */
+export const LIVE_MODE_STORAGE_KEY = 'speaker-live-mode'
+
+export function getLiveMode(): boolean {
+  try {
+    return localStorage.getItem(LIVE_MODE_STORAGE_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
+
+export function setLiveMode(on: boolean) {
+  try {
+    localStorage.setItem(LIVE_MODE_STORAGE_KEY, on ? 'on' : 'off')
+  } catch {
+    // Storage blocked: live mode stays off
+  }
+}
+
+export const LIVE_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
+
+/** How long to wait for the transcript after the pause before giving up. */
+export const LIVE_COMMIT_TIMEOUT_MS = 4000
+
+/** Audio is sent in blocks of about 100 ms. */
+const SEND_SAMPLES = TARGET_SAMPLE_RATE / 10
+
+/** 16 kHz float samples to base64 little-endian 16-bit PCM. */
+export function toPcm16Base64(samples: Float32Array): string {
+  const bytes = new Uint8Array(samples.length * 2)
+  const view = new DataView(bytes.buffer)
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(binary)
+}
+
+type SocketLike = Pick<WebSocket, 'send' | 'close' | 'readyState'> & {
+  onopen: ((ev: Event) => unknown) | null
+  onmessage: ((ev: MessageEvent) => unknown) | null
+  onerror: ((ev: Event) => unknown) | null
+  onclose: ((ev: CloseEvent) => unknown) | null
+}
+
+/**
+ * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
+ * is held and sent on open. `finish()` commits and resolves with the text.
+ */
+export class LiveTranscriber {
+  private socket: SocketLike | null = null
+  private queue: string[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private committed = false
+  // ElevenLabs commits by itself after ~36 s of audio, even in manual mode;
+  // those earlier segments are kept and joined to the final one.
+  private earlier: string[] = []
+
+  constructor(
+    token: Promise<string>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url)
+  ) {
+    token.then(
+      (t) => {
+        if (this.failed) return
+        const params = new URLSearchParams({
+          model_id: 'scribe_v2_realtime',
+          audio_format: `pcm_${TARGET_SAMPLE_RATE}`,
+          commit_strategy: 'manual',
+          no_verbatim: 'true',
+          // Without it, short replies come back in other languages ("Ja",
+          // "Nein", "Ouais" for "Yeah", "Fine", "What")
+          language_code: 'en',
+          token: t,
+        })
+        const socket = makeSocket(`${LIVE_URL}?${params}`)
+        this.socket = socket
+        socket.onopen = () => {
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () => this.abort(new Error('Live connection failed'))
+        socket.onclose = () =>
+          this.abort(new Error('Live connection closed early'))
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush(false)
+  }
+
+  /** Sends the rest of the audio with a commit and waits for the text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(
+        () => this.abort(new Error('Live transcript took too long')),
+        timeoutMs
+      )
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      this.committed = true
+      this.flush(true)
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private flush(commit: boolean) {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    const msg = JSON.stringify({
+      message_type: 'input_audio_chunk',
+      audio_base_64: toPcm16Base64(merged),
+      ...(commit ? { commit: true } : {}),
+    })
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: { message_type?: string; text?: string; error?: string }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.message_type === 'committed_transcript' && !this.committed) {
+      if (msg.text?.trim()) this.earlier.push(msg.text.trim())
+    } else if (msg.message_type === 'committed_transcript') {
+      const finish = this.done
+      this.done = null
+      this.fail = null
+      this.failed = new Error('Live transcription finished')
+      this.close()
+      finish?.(
+        [...this.earlier, msg.text?.trim() ?? ''].filter(Boolean).join(' ')
+      )
+    } else if (msg.error) {
+      this.abort(new Error(`ElevenLabs live: ${msg.error}`))
+    }
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}
+
+export const ASSEMBLY_LIVE_URL = 'wss://streaming.assemblyai.com/v3/ws'
+export const ASSEMBLY_LIVE_MODEL = 'universal-3-6-pro'
+
+/** AssemblyAI wants 50-1000 ms per audio message. */
+const ASSEMBLY_MIN_SAMPLES = TARGET_SAMPLE_RATE / 20
+
+/** 16 kHz float samples to little-endian 16-bit PCM bytes. */
+export function toPcm16(samples: Float32Array): ArrayBuffer {
+  const view = new DataView(new ArrayBuffer(samples.length * 2))
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  return view.buffer
+}
+
+/**
+ * One utterance streamed to AssemblyAI (Universal-Streaming), beside the
+ * ElevenLabs stream. AssemblyAI ends turns by itself on pauses, so every turn
+ * is kept by its number. `finish()` forces the last turn to end, closes the
+ * session (it is billed while open) and resolves with all turns joined.
+ */
+export class AssemblyLiveTranscriber {
+  private socket: SocketLike | null = null
+  private queue: (ArrayBuffer | string)[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private turns = new Map<number, string>()
+
+  constructor(
+    token: Promise<string>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url)
+  ) {
+    token.then(
+      (t) => {
+        if (this.failed) return
+        const params = new URLSearchParams({
+          speech_model: ASSEMBLY_LIVE_MODEL,
+          sample_rate: String(TARGET_SAMPLE_RATE),
+          encoding: 'pcm_s16le',
+          format_turns: 'true',
+          token: t,
+        })
+        const socket = makeSocket(`${ASSEMBLY_LIVE_URL}?${params}`)
+        this.socket = socket
+        socket.onopen = () => {
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('AssemblyAI live connection failed'))
+        socket.onclose = () => this.closed()
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the last turn, closes the session and waits for the text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        // Keep whatever turns arrived; give up only if there are none.
+        if (this.text()) this.resolveWith()
+        else this.abort(new Error('AssemblyAI live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      // The last message must also be at least 50 ms: pad it with silence.
+      if (this.pendingLen && this.pendingLen < ASSEMBLY_MIN_SAMPLES)
+        this.push(new Float32Array(ASSEMBLY_MIN_SAMPLES - this.pendingLen))
+      if (this.pendingLen) this.flush()
+      this.sendMsg(JSON.stringify({ type: 'ForceEndpoint' }))
+      this.sendMsg(JSON.stringify({ type: 'Terminate' }))
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('AssemblyAI live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private text() {
+    return [...this.turns.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, t]) => t.trim())
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  private resolveWith() {
+    const finish = this.done
+    if (!finish) return
+    this.done = null
+    this.fail = null
+    this.failed = new Error('AssemblyAI live transcription finished')
+    this.close()
+    finish(this.text())
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(toPcm16(merged))
+  }
+
+  private sendMsg(msg: ArrayBuffer | string) {
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: {
+      type?: string
+      transcript?: string
+      turn_order?: number
+      error?: string
+    }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.type === 'Turn' && typeof msg.turn_order === 'number') {
+      this.turns.set(msg.turn_order, msg.transcript ?? '')
+    } else if (msg.type === 'Termination') {
+      this.resolveWith()
+    } else if (msg.error) {
+      this.abort(new Error(`AssemblyAI live: ${msg.error}`))
+    }
+  }
+
+  /** The server closed the session: done if we finished, else a failure. */
+  private closed() {
+    if (this.done) this.resolveWith()
+    else this.abort(new Error('AssemblyAI live connection closed early'))
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}
+
+/** Grok live goes through our relay, which adds XAI_API_KEY (wsProxy.mjs). */
+export const GROK_LIVE_PATH = '/api/grok-live'
+
+/**
+ * One utterance streamed to Grok Voice Transcribe 2.0 through the relay.
+ * Grok sends a final for each stretch of speech it hears end (speech_final
+ * restates the whole stretch); `finish()` sends audio.done, which flushes the
+ * rest and ends with transcript.done, and resolves with the fullest text.
+ */
+export class GrokLiveTranscriber {
+  private socket: SocketLike | null = null
+  private queue: (ArrayBuffer | string)[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  // Finished stretches, and the locked chunks of the one in progress
+  private utterances: string[] = []
+  private chunks: string[] = []
+
+  constructor(
+    ticket: Promise<string>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
+    origin: string = typeof location !== 'undefined'
+      ? location.origin
+      : 'http://localhost',
+    // Words to bias Grok toward; the relay passes them on to xAI
+    keyterms: string[] = []
+  ) {
+    // Browsers can't send the relay token on a WebSocket, so a single-use
+    // ticket from the relay stands in for it
+    ticket.then(
+      (t) => {
+        if (this.failed) return
+        const params = new URLSearchParams({ ticket: t })
+        for (const term of keyterms) params.append('keyterm', term)
+        const url = `${origin.replace(/^http/, 'ws')}${GROK_LIVE_PATH}?${params}`
+        const socket = makeSocket(url)
+        this.socket = socket
+        socket.onopen = () => {
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('Grok live connection failed'))
+        socket.onclose = () => {
+          if (this.done) this.resolveWith('')
+          else this.abort(new Error('Grok live connection closed early'))
+        }
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the audio and waits for the text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        if (this.heard()) this.resolveWith('')
+        else this.abort(new Error('Grok live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      if (this.pendingLen) this.flush()
+      this.sendMsg(JSON.stringify({ type: 'audio.done' }))
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Grok live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private heard() {
+    return [...this.utterances, ...this.chunks].join(' ').trim()
+  }
+
+  /** transcript.done may repeat everything or only the end: keep the fuller. */
+  private resolveWith(doneText: string) {
+    const finish = this.done
+    if (!finish) return
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Grok live transcription finished')
+    this.close()
+    const heard = this.heard()
+    const last = doneText.trim()
+    if (!last) return finish(heard)
+    if (!heard || last.length >= heard.length) return finish(last)
+    finish(heard.endsWith(last) ? heard : `${heard} ${last}`)
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(toPcm16(merged))
+  }
+
+  private sendMsg(msg: ArrayBuffer | string) {
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: {
+      type?: string
+      text?: string
+      is_final?: boolean
+      speech_final?: boolean
+      message?: string
+    }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    const text = msg.text?.trim() ?? ''
+    if (msg.type === 'transcript.partial' && msg.is_final && text) {
+      if (msg.speech_final) {
+        this.utterances.push(text)
+        this.chunks = []
+      } else this.chunks.push(text)
+    } else if (msg.type === 'transcript.done') {
+      this.resolveWith(text)
+    } else if (msg.type === 'error') {
+      this.abort(new Error(`Grok live: ${msg.message ?? 'error'}`))
+    }
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}

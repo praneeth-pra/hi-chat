@@ -1,4 +1,5 @@
-dist
-node_modules
-data
-package-lock.json
+.next/
+node_modules/
+dist/
+*.hbs
+*.mdx
