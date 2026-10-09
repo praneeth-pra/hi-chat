@@ -14,6 +14,7 @@ import {
   pickBest,
   gatherAuto,
   reportAuto,
+  withoutFillers,
   textAgreement,
   type Recording,
 } from '../dictation'
@@ -144,9 +145,9 @@ describe('dictation', () => {
     expect(rec.chunks).toHaveLength(0)
   })
 
-  it('remembers the chosen engine, Aqua by default', () => {
+  it('remembers the chosen engine, Auto by default', () => {
     localStorage.removeItem('dictation-engine')
-    expect(getDictationEngine()).toBe('aqua')
+    expect(getDictationEngine()).toBe('auto')
     setDictationEngine('elevenlabs')
     expect(getDictationEngine()).toBe('elevenlabs')
     localStorage.removeItem('dictation-engine')
@@ -278,7 +279,7 @@ describe('dictation', () => {
     ).toBe('two')
   })
 
-  it('Auto streams to both live engines and still sends Aqua pieces', () => {
+  it('Auto streams to the live engines and sends no Aqua pieces', () => {
     const grok = { push: vi.fn() }
     const eleven = { push: vi.fn() }
     vi.stubGlobal(
@@ -301,7 +302,8 @@ describe('dictation', () => {
     for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
     expect(grok.push).toHaveBeenCalledTimes(40)
     expect(eleven.push).toHaveBeenCalledTimes(40)
-    expect(rec.pieces).toHaveLength(1)
+    expect(rec.pieces).toHaveLength(0)
+    expect(rec.chunks).toHaveLength(0)
     vi.unstubAllGlobals()
   })
 
@@ -313,7 +315,7 @@ describe('dictation', () => {
         { engine: 'grok', text: Promise.resolve('fast') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ])
-      await vi.advanceTimersByTimeAsync(2000)
+      await vi.advanceTimersByTimeAsync(1000)
       await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
       // Two engines that agree: sent at once, without waiting for Aqua
       const quorum = gatherAuto([
@@ -354,5 +356,20 @@ describe('dictation', () => {
     expect(line).toContain('sent=soniox total=310ms')
     expect(line).toContain('aqua: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
+  })
+
+  it('Auto ignores filler words: they agree, and the text sent has none', () => {
+    expect(
+      textAgreement(
+        'like check alerts and like uh filter them, um, based on that',
+        'Check alerts and filter them based on that.'
+      )
+    ).toBe(1)
+    expect(
+      withoutFillers('... uh so we, um, use Terraform. Hmm, and Umbrella')
+    ).toBe('So we use Terraform. And Umbrella')
+    expect(withoutFillers('Uh, my career started in TCS')).toBe(
+      'My career started in TCS'
+    )
   })
 })

@@ -10,12 +10,15 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 
 export type EngineText = { engine: string; text: string }
 
+/** Filler words, ignored when comparing (some engines write them out). */
+const FILLERS = new Set(['uh', 'um', 'uhm', 'umm', 'erm', 'hmm', 'mm', 'like'])
+
 function words(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^\p{L}\p{N}']+/gu, ' ')
     .split(' ')
-    .filter(Boolean)
+    .filter((w) => w && !FILLERS.has(w))
 }
 
 /** How alike two texts are word by word, 0-1 (shared words in order). */
@@ -45,7 +48,7 @@ export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
-export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Aqua applies the speaker's own dictionary and Soniox is given the same words, so trust their spelling of names and technical words. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
+export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Soniox and Cartesia are given the speaker's own dictionary, so trust their spelling of names and technical words. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
   aqua: 'Aqua',

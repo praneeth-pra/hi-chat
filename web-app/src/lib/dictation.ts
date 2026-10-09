@@ -36,12 +36,13 @@ import {
  */
 
 /**
- * Which service turns your voice into text. Aqua applies your Aqua
- * dictionary and replacements, Soniox gets the same words as context terms
- * and Cartesia the 100 that fit; Soniox, Cartesia, Grok and ElevenLabs
- * stream live while you talk. Auto runs Soniox, Cartesia, ElevenLabs and
- * Aqua (Grok was the least accurate): as soon as two agree their text is
- * sent, else a judge model writes the best version.
+ * Which service turns your voice into text. Soniox gets your dictionary as
+ * context terms and Cartesia the 100 that fit; Soniox, Cartesia, Grok and
+ * ElevenLabs stream live while you talk, and Aqua (with your Aqua
+ * dictionary) transcribes in pieces. Auto runs Cartesia, Soniox and
+ * ElevenLabs: as soon as two agree their text is sent, else a judge model
+ * writes the best version. Aqua and Grok were left out of Auto: on P's
+ * questions they were the slowest and least accurate.
  */
 export type DictationEngine =
   | 'aqua'
@@ -51,7 +52,7 @@ export type DictationEngine =
   | 'cartesia'
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (Soniox + Cartesia + ElevenLabs + Aqua)' },
+  { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
   { value: 'aqua', label: 'Aqua' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
@@ -68,7 +69,7 @@ export function getDictationEngine(): DictationEngine {
   } catch {
     // Storage blocked
   }
-  return 'aqua'
+  return 'auto'
 }
 
 export function setDictationEngine(engine: DictationEngine) {
@@ -105,11 +106,10 @@ export function setKeepMicReady(on: boolean) {
 /** Live engines: how long to wait for the last words after stopping. */
 const LIVE_FINISH_MS = 8000
 /**
- * Auto: once one engine has answered, how long the others get. ElevenLabs
- * answers in ~0.4 s; Aqua only starts on the last piece when you stop and
- * took up to 2 s, so it needs this long to reach the judge.
+ * Auto: once one engine has answered, how long the others get. On P's
+ * questions all three live engines answered within 0.6 s of stopping.
  */
-const AUTO_GRACE_MS = 2000
+const AUTO_GRACE_MS = 1000
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -436,6 +436,7 @@ export function onBlock(rec: Recording, block: Float32Array) {
   if (rec.autoLive?.length) {
     const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
     rec.autoLive.forEach((l) => l.stream.push(down))
+    return
   }
   rec.chunks.push(block)
   const blockMs = (block.length / rec.rate) * 1000
@@ -447,7 +448,7 @@ export function onBlock(rec: Recording, block: Float32Array) {
     const piece = rec.chunks
     rec.chunks = []
     rec.quietMs = 0
-    const text = transcribe(piece, rec.rate, batchEngine(rec.engine))
+    const text = transcribe(piece, rec.rate, rec.engine)
     text.catch(() => {}) // reported when the dictation is sent
     rec.pieces.push(text)
   }
@@ -478,15 +479,10 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
   return undefined
 }
 
-/** Auto sends Aqua pieces while you talk; the live engines stream. */
-function batchEngine(engine: DictationEngine): DictationEngine {
-  return engine === 'auto' ? 'aqua' : engine
-}
-
 function autoLiveStreams() {
-  // Soniox first: when it agrees with another live engine, its text (with
-  // your whole dictionary) is the one sent
-  return (['soniox', 'cartesia', 'elevenlabs'] as const).map((engine) => ({
+  // Cartesia first: when it agrees with another engine its text is sent
+  // (it had the most words right on P's questions), then Soniox
+  return (['cartesia', 'soniox', 'elevenlabs'] as const).map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
@@ -496,9 +492,26 @@ export type EngineText = { engine: DictationEngine; text: string }
 export { textAgreement }
 
 /**
+ * The text without "uh"/"um" (Cartesia and Soniox write them out) or a
+ * leading "..." (ElevenLabs, when you start mid-sentence).
+ */
+export function withoutFillers(text: string): string {
+  const clean = text
+    .replace(/,?\s*\b(?:u+h+|u+m+|uhm|e+rm|h+m+)\b[,.]?(?=\s|$)/gi, '')
+    .replace(/^[\s.…,-]+/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  // Capitalise the start of each sentence a filler opened
+  return clean.replace(
+    /(^|[.?!]\s+)(\p{Ll})/gu,
+    (_, end, c) => end + c.toUpperCase()
+  )
+}
+
+/**
  * Auto: the text the other engines agree with most, since a word one engine
  * mishears the others usually get right. With a tie (or only two answers)
- * the earlier one wins: Aqua first, as it applies your dictionary.
+ * the earlier one wins: Cartesia, then Soniox.
  */
 export function pickBest(results: EngineText[]): EngineText | undefined {
   const heard = results.filter((r) => r.text)
@@ -623,10 +636,9 @@ export async function stopDictation() {
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
   try {
     const batch = () =>
-      Promise.all([
-        ...pieces,
-        transcribe(chunks, rate, batchEngine(engine)),
-      ]).then((texts) => texts.filter(Boolean).join(' '))
+      Promise.all([...pieces, transcribe(chunks, rate, engine)]).then((texts) =>
+        texts.filter(Boolean).join(' ')
+      )
     let text: string
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
@@ -638,18 +650,15 @@ export async function stopDictation() {
           return t
         }),
       })
-      const jobs = [
-        timed('aqua', batch()),
-        ...autoLive.map((l) =>
-          timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
-        ),
-      ]
+      const jobs = autoLive.map((l) =>
+        timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
+      )
       const results = await gatherAuto(jobs)
       const best = pickBest(results)
       const judgeStart = Date.now()
       const judged =
         best && (await judgeDictation(results, best.text, keyTerms()))
-      text = judged ?? best?.text ?? ''
+      text = withoutFillers(judged ?? best?.text ?? '')
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
       void reportAuto(jobs, took, {
@@ -700,12 +709,7 @@ export async function reportAuto(
     new Promise((r) => (wait = setTimeout(r, waitMs))),
   ])
   clearTimeout(wait)
-  const engines: DictationEngine[] = [
-    'aqua',
-    'soniox',
-    'cartesia',
-    'elevenlabs',
-  ]
+  const engines = jobs.map((j) => j.engine)
   const times = engines
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')
