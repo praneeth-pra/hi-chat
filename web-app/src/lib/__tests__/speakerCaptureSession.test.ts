@@ -6,6 +6,7 @@ import {
   setTranscribeMode,
   getTranscribeMode,
   grokFirst,
+  sonioxCartesiaLive,
   startSpeakerCapture,
   transcribeClip,
 } from '../speakerCaptureSession'
@@ -125,13 +126,14 @@ describe('transcribeClip', () => {
         ],
       })
     )
+    setTranscribeMode('live')
     const out = await transcribeClip(audio)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/transcribe')
     expect(init.headers['X-Relay-Token']).toBe('tok')
     expect((init.body as FormData).get('file')).toBeInstanceOf(Blob)
-    // The default (AssemblyAI streams only in live mode) uploads to Grok
+    // Grok live without live mode uploads to Grok instead
     expect((init.body as FormData).get('engines')).toBe('elevenlabs,grok')
     expect((init.body as FormData).get('need')).toBeNull()
     expect((init.body as FormData).get('wait_ms')).toBe('1000')
@@ -140,6 +142,17 @@ describe('transcribeClip', () => {
       { name: 'elevenlabs', ms: 700, ok: true },
       { name: 'grok', ms: 650, ok: true },
     ])
+    localStorage.removeItem('speaker-transcribe-mode')
+    // Soniox + Cartesia (the default) only stream; uploads go to ElevenLabs
+    fetchMock.mockResolvedValue(
+      reply(200, {
+        results: [{ name: 'elevenlabs', ok: true, ms: 700, text: 'x' }],
+      })
+    )
+    await transcribeClip(audio)
+    expect((fetchMock.mock.calls[1][1].body as FormData).get('engines')).toBe(
+      'elevenlabs'
+    )
   })
 
   it('uses whichever engine answered and leaves out engines with no key', async () => {
@@ -218,8 +231,14 @@ describe('transcribe mode', () => {
     expect(form.get('need')).toBe('2')
   })
 
-  it('streams only Grok by default, and AssemblyAI too when picked', () => {
+  it('streams Soniox and Cartesia by default; Grok, and AssemblyAI too, when picked', () => {
     localStorage.setItem('speaker-live-mode', 'on')
+    expect([sonioxCartesiaLive(), grokLive(), assemblyLive()]).toEqual([
+      true,
+      false,
+      false,
+    ])
+    setTranscribeMode('live')
     expect([grokLive(), assemblyLive()]).toEqual([true, false])
     setTranscribeMode('live-assemblyai')
     expect([grokLive(), assemblyLive()]).toEqual([true, true])
@@ -229,7 +248,7 @@ describe('transcribe mode', () => {
 
   it('forgets the removed Aqua choice and falls back to the default', () => {
     localStorage.setItem('speaker-transcribe-mode', 'both')
-    expect(getTranscribeMode()).toBe('live')
+    expect(getTranscribeMode()).toBe('live-soniox-cartesia')
   })
 })
 
@@ -285,5 +304,17 @@ describe('grokFirst', () => {
     expect(grokFirst([el, 'You are doing some...'], names)[0]).toBe(el)
     expect(grokFirst([el, ''], names)[0]).toBe(el)
     expect(grokFirst([el], ['elevenlabs live'])).toEqual([el])
+  })
+  it('puts Cartesia first when it heard the clip', () => {
+    const texts = ['What is Pinoops?', 'What is FinOps?', 'What is FinOps.']
+    expect(
+      grokFirst(texts, ['elevenlabs live', 'soniox live', 'cartesia live'])[0]
+    ).toBe('What is FinOps.')
+    expect(
+      grokFirst(
+        ['What is Pinoops?', 'What is FinOps?', ''],
+        ['elevenlabs live', 'soniox live', 'cartesia live']
+      )[0]
+    ).toBe('What is Pinoops?')
   })
 })
