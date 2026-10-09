@@ -1,0 +1,703 @@
+kubernetes
+RBAC
+Devops
+Jenkins
+CICD
+Terraform
+Helm
+Artifact
+Git
+Lambda
+deployment
+ec2 instance
+build stage
+maven
+github actions
+environment
+services
+docker
+container
+networking
+host
+ansible
+scripting
+region
+encryption
+challenges
+Cost‑optimization
+monitoring
+metrics
+grafana
+json
+s3 bucket policy
+kubectl
+variables
+provider
+resource
+Blue-Green / Canary
+GitOps
+Multi-stage Dockerfile
+ENTRYPOINT vs CMD
+Pods, ReplicaSets, Deployments, DaemonSets, StatefulSets
+Services (ClusterIP, NodePort, LoadBalancer)
+Ingress (NGINX/ALB)
+Liveness/Readiness probes
+argoCD
+ETCD
+VPC, Subnet, NAT Gateway, IGW, Route Tables
+EKS, ECS, Lambda
+Statefile, Backend, Workspaces
+Lifecycle rules, Remote State (S3 + DynamoDB)
+HTTPS/TLS, Certificates
+OWASP, Dependency Scanning, SAST/DAST
+Firewall, NACL vs Security Group
+MTTR, MTTD
+Horizontal vs Vertical Scaling
+Root Cause Analysis (RCA)
+Post-mortem
+application traces
+Pull Request
+Merge Conflicts
+SonarQube
+Dockerfile
+NetworkPolicy
+Load Balancer (ALB/NLB)
+Utilization, Saturation, Errors
+Error Budget
+SLA / SLO / SLI
+Controller Metrics
+Log Levels: DEBUG/INFO/WARN/ERROR/FATAL.
+PromQL
+Alerting Rules
+Rollback
+staging
+Production
+registry
+Infrastructure automation
+describe pod
+Versioning
+restore, backup
+firewall
+Reliability
+Availability
+VPC (Virtual Private Cloud)
+Microservices
+API Gateway
+Incident Management
+Chaos Engineering
+quality gates
+quality profile
+jfrog, nexus
+vmware
+blackbox testing
+OSI layers
+application load balancer, network load balancer
+Implementation
+FIMM integration
+FBZP configuration
+FISD integration
+parallel accounting
+EBRS configuration
+DME configuration
+document splitting
+Asset accounting
+init container
+cent OS
+GCP
+Azure pipelines
+s3
+Cloud
+calico
+crashloopbackoff
+imagepullerr
+swapspace
+zombie process
+statefulset
+OSI model
+Null
+Parallelise
+RDD
+Hadoop
+groupBy
+Adaptive Query Execution (AQE)
+coalesce
+Parallelism
+shuffling
+Delta Lake
+fact table
+kube-proxy
+ingress
+tfvars
+kustomize
+Jaeger
+Open Telemetry
+Otel
+SAML
+Vault
+Nexus
+Fargate
+ECR
+CSI
+Cilium
+Jfrog
+HDFS
+MapReduce
+ksqlDB
+Databricks
+YARN
+EMR
+Firehose
+SageMaker
+Parquet
+Iceberg
+Airflow
+DAG
+dbt
+OLAP
+Idempotent
+SparkSession
+Dataframe
+ELT/ETL
+Zookeeper
+Hbase
+Flink
+Hive
+Pyspark
+CDC
+Lakehouse
+partitionBy
+Big Query
+Redshift
+Athena
+Dataflow
+Data factory
+Avro
+partitioning
+kafka
+spark streaming
+glue crawler
+istio
+trivy
+replicaset
+coreDNS
+CNI plugin
+DAST
+Groovy
+Playbook
+Bicep
+MTTR
+podman
+Nginx
+Karpenter
+Envoy
+KEDA
+openshift
+sidecar injection
+FluxCD
+Terragrunt
+Guardduty
+IRSA
+Security hub
+MSK
+RDS multi AZ
+Graviton
+WAF
+TLS termination
+SQL
+SFTP
+SIGTERM
+SIGKILL
+SAST
+AKS node pool
+Dynatrace
+numpy
+Pandas
+Regression
+executor
+shuffle
+kind
+network policy
+ingress controller
+sidecar
+Deamonset
+KubeProxy
+Service account
+Service Mesh
+Kustomize.
+kubeadm
+containerd
+PersistentVolume
+CronJob
+multi stage build
+DLQ
+SLO
+SLA
+for_each
+cosmos DB
+yaml
+fluentd
+OpsGenie
+TSDB
+optimize
+driver
+Databrics
+schema evolution
+executor memory
+dense_rank
+Dstream
+orderBy
+unpersist
+ACID transactions
+schema enforcement
+event time
+time travel
+explode
+wide transformation.
+broker
+KSQL
+kinesis
+offset commit
+snowflake
+star schema
+internal stage
+dimension table
+columnar storage
+sort key
+dbt model
+data vault
+hash distribution
+datenode
+idempotency
+data lineage
+data catalogue
+schema drift
+checkpoint
+pivot table
+UDF
+repartition
+consumer
+surrogate key
+MOLAP
+RA3 nodes
+ROLAP
+spark-submit
+logical plan
+flatmap
+dynamic allocation
+SCD type 2
+broadcast
+Outposts
+Azure devops
+ARM template
+VNet peering
+Function app
+logic apps
+APM metrics
+ADP pipeline
+MTTD
+high cardinality
+CVE
+rate limiting
+pom.xml
+Envoy Proxy
+CIS benmarks
+grep
+ubuntu
+SELinux
+htop
+journalctl
+inode
+nohup
+tmpfs
+rebase
+webhook
+gitlab runner
+squash
+cherrypick
+submodule
+boto3
+jinja2
+chaos
+load testing
+blast radius
+on-call
+OOM
+EKS
+AKS
+OTLP
+DDos attack
+penetration
+CRI-O
+dynamoDB
+PodDisruptionBudget
+PodSecurityPolicy
+CircleCI
+remote backend
+A/B testing
+ExternalSecret
+blue-green
+Array
+micro batch
+NAT gateway
+NACL
+VPC peering
+node exporter
+Private DNS Zone
+Event Grid
+WAF ACL
+HAProxy
+OWASP
+snyk
+iptables
+application load balancer
+network load balancer
+Config rules
+ECS task definition
+AWS Organizations
+hosted zone
+RDS read replica
+SSM agent
+JWT token
+datadog
+log aggregator
+AppDynamics
+snapshot
+subnet
+cloudfront
+ImagePullbackOff
+Liveness Probe
+Readiness probe
+Admission Controller
+Application Performance Monitoring
+Taints
+Toleration
+Rolling updates
+Cron Jobs
+Git Fetch
+Chmod
+Stateless
+Stateful
+Route Tables
+SSL Certificate
+CloudTrail
+Cross Region Replication
+AWS Shield
+Alpine Image
+Cordon
+ConfigMaps
+Terraform Workspaces
+Cross-Account
+Vertical Scaling
+Headless
+Network Policies
+ClusterIP
+MongoDB
+deployment.yaml
+Master node
+Image Pull Policy
+NoSQL
+Inbound Rules
+TCP Protocol
+On-Premise
+Security Groups
+Transit Gateway
+SCM Polling
+Logstash
+Vulnerability Scanning
+Serverless
+Metric Scraping
+Elastic Load Balancer
+Git Merge
+Zabbix
+Splunk
+Autoscaling
+Apache Tomcat
+Monolithic Architecture
+Terraform Drift
+Terraform Plan
+Terraform State File
+Horizontal Pod Autoscaler
+kubectl get pod
+IAM Role
+Freestyle
+Replication
+Reverse Proxy
+Data Warehousing
+Schedule Trigger
+Lookup Activity
+Auto Resolve Integration Runtime
+Parquet File Format
+ACID Properties
+Data Skewness
+Sort Merge Join
+Broadcast Join
+Landing Layer
+Self-Hosted Integration Runtime
+Repartitioning
+Authorization
+Copy Activity
+Operational Data Store
+Bucket Join
+Scheduled Triggers
+Spark Optimization
+Bronze Layer
+Silver Layer
+Gold Layer
+Incremental Ingestion
+predicate pushdown
+Performance Tuning
+Access Control List
+Optimized Row Columnar
+Cross Join
+Structured Streaming
+scala
+Kafka Topics
+Consumer Lag
+Azure Synapse Analytics
+Medallion Logic
+Salting Technique
+VACUUM
+Feature Engineering
+Azure Data Lake Storage (ADLS)
+withColumn
+Bucketing
+Databricks Units (DBUs)
+SFTP integration
+Azure Key Vault
+Data Profiling
+Lazy Evaluation
+Shallow copy
+SQL Window Functions
+Null Comparisons
+Normalization
+surrogate keys
+Scalability
+Pruning
+Data Locality
+serialized storage
+XOR operator
+Client Mode
+Cluster Mode
+historical data load
+Mounting
+Caching
+Spark Driver
+data shuffling
+traceroute
+DNS lookup
+router
+VLAN
+EtherChannel
+ECMP
+sticky sessions
+connection draining
+Shared Libraries
+Hardened Images
+Private Subnet
+Cost Optimization
+Spanning Tree Protocol
+specific
+Local Area Network (LAN)
+TCP
+Linux
+Bastion Host
+Hypervisor
+Virtual Machine (VM)
+Disaster Recovery
+Microservices Architecture
+SDLC
+npm
+Semantic Versioning
+Runbook
+Bare metal
+UAT
+Root Cause Analysis
+IPV4
+deployment frequency
+KPI
+automation
+gitlab
+CMD
+ENTRYPOINT
+AWS SES
+AWS SNS
+cloudwatch
+Xray
+Vulnerability
+data block
+AWS Certificate Manager
+Proxy Server
+VPN (Virtual Private Network)
+netstat
+Bandwidth
+Least Privilege
+Docker Compose
+Idempotent pipelines
+Multithreading
+Null Handling
+Sharding
+Eventual Consistency
+Compression
+Entity-Relationship
+Subqueries
+Stored Procedures
+Window Functions
+Batch vs Stream Processing
+CDS views
+Graphical views
+sql views
+analytical models
+Datasphere
+SAP
+SAP DATASPHERE
+ABAP
+Data Access Controls
+ODQMON
+Replication Flows
+Data Flows
+Transformation flows
+Graphical View
+Sql View
+Input Parameters
+Data Pruning
+Liquibase
+Kerberos
+cache
+avarmar
+Jmeter
+Load Runner
+Performance engineering
+Performance Testing
+Stress Testing
+Volume Testing
+Endurance Testing
+Soak Testing
+Spike Testing
+Scalability Testing
+Capacity Testing
+Stability Testing
+Baseline Testing
+Benchmark Testing
+Reliability Testing
+Concurrency Testing
+Throughput Testing
+Latency Testing
+Response Time Testing
+Performance Optimization
+Performance Monitoring
+Response Time
+Throughput
+Requests Per Second (RPS)
+Transactions Per Second (TPS)
+Concurrent Users
+Error Rate
+CPU Utilization
+Memory Utilization
+Disk I/O
+Network Utilization
+Latency
+Average Response Time
+90th Percentile
+95th Percentile
+99th Percentile
+Apdex
+Queue Time
+Connection Time
+Time to First Byte (TTFB)
+Resource Utilization
+JMeter Test Plan
+Thread Group
+Sampler
+HTTP Request
+Listener
+Assertion
+Timer
+Config Element
+Correlation
+Parameterization
+CSV Data Set Config
+Regular Expression Extractor
+JSON Extractor
+PreProcessor
+PostProcessor
+Workload Modeling
+Load Profile
+Ramp-Up
+Ramp-Down
+Steady-State Load
+Peak Load
+User Journey
+Test Scenario
+Test Data
+Virtual Users
+Think Time
+Pacing
+Arrival Rate
+Bottleneck Analysis
+Performance SLA
+Bottleneck Identification
+Garbage Collection
+JVM Performance Tuning
+Thread Pool
+Connection Pool
+Database Performance
+Query Optimization
+Distributed Load Testing
+APM
+Distributed Tracing
+Performance Profiling
+Capacity Planning
+Performance Regression Testing
+Grok
+Groq
+Cerebras
+Debezium
+WebLogic
+WebDriver
+Selenium
+Playwright
+Robot Framework
+LabVIEW
+FQDN
+Postgres
+MySQL
+Xcode
+CocoaPods
+Calendly
+XGBoost
+LangChain
+FastAPI
+GitHub
+AWS Glue
+Secrets Manager
+Salesforce
+Finastra
+Renault
+Randstad
+LoadRunner
+Jira
+ServiceNow
+OIDC
+Artifactory
+BigQuery
+CSRF
+OSPF
+OpenTelemetry
+PowerShell
+RHEL
+SAP UI5
+Cigna
+Flipkart
+Claude
+New Relic
+HashiCorp
+OAuth
+Fiori
+S/4HANA
+SAP HANA
+Minikube
+Bitbucket
+PagerDuty
+kubelet
+Nmap
+Wireshark

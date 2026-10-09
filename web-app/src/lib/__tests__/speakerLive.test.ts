@@ -6,6 +6,9 @@ import {
   ASSEMBLY_LIVE_URL,
   LiveTranscriber,
   LIVE_URL,
+  SONIOX_LIVE_URL,
+  SonioxLiveTranscriber,
+  sonioxTerms,
   toPcm16Base64,
 } from '../speakerLive'
 
@@ -329,5 +332,88 @@ describe('GrokLiveTranscriber', () => {
     const text = live.finish()
     socket.reply({ type: 'error', message: 'XAI_API_KEY not set' })
     await expect(text).rejects.toThrow('XAI_API_KEY not set')
+  })
+})
+
+describe('SonioxLiveTranscriber', () => {
+  class SonioxSocket extends FakeSocket {
+    raw: (ArrayBuffer | string)[] = []
+    send(data: string) {
+      this.raw.push(data)
+    }
+  }
+  const connect = async () => {
+    let socket!: SonioxSocket
+    const live = new SonioxLiveTranscriber(
+      Promise.resolve({ token: 'temp:1', terms: ['kubectl', 'S3 bucket'] }),
+      (url) => {
+        socket = new SonioxSocket(url)
+        return socket
+      },
+      ['VPC', 'kubectl']
+    )
+    await tick()
+    return { live, socket }
+  }
+
+  it('sends the config with the dictionary first, then audio, and joins the final words', async () => {
+    const { live, socket } = await connect()
+    expect(socket.url).toBe(SONIOX_LIVE_URL)
+    live.push(new Float32Array(1600).fill(0.1)) // held until open
+    socket.open()
+    const config = JSON.parse(socket.raw[0] as string)
+    expect(config).toMatchObject({
+      api_key: 'temp:1',
+      model: 'stt-rt-v5',
+      audio_format: 'pcm_s16le',
+      sample_rate: 16000,
+      num_channels: 1,
+      language_hints: ['en'],
+      context: { terms: ['kubectl', 'S3 bucket', 'VPC'] },
+    })
+    expect(socket.raw[1]).toBeInstanceOf(ArrayBuffer)
+    socket.reply({
+      tokens: [
+        { text: 'What', is_final: true },
+        { text: ' is', is_final: true },
+        { text: ' a', is_final: false },
+      ],
+    })
+    const text = live.finish()
+    expect(socket.raw.at(-1)).toBe('') // end of audio
+    socket.reply({
+      tokens: [
+        { text: ' an', is_final: true },
+        { text: ' S3 bucket?', is_final: true },
+        { text: '<fin>', is_final: true },
+      ],
+    })
+    socket.reply({ tokens: [], finished: true })
+    await expect(text).resolves.toBe('What is an S3 bucket?')
+    expect(socket.closed).toBe(true)
+  })
+
+  it('fails on a Soniox error', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    const text = live.finish()
+    socket.reply({ error_code: 401, error_message: 'Invalid API key' })
+    await expect(text).rejects.toThrow('Soniox live: Invalid API key')
+  })
+
+  it('fails when the relay has no Soniox key', async () => {
+    const live = new SonioxLiveTranscriber(
+      Promise.reject(new Error('Live token failed (503)')),
+      () => new SonioxSocket('x')
+    )
+    await tick()
+    await expect(live.finish()).rejects.toThrow('503')
+  })
+
+  it('cuts terms to fit Soniox context', () => {
+    const many = Array.from({ length: 2000 }, (_, i) => `term number ${i}`)
+    const out = sonioxTerms(many)
+    expect(out.join(', ').length).toBeLessThan(9000)
+    expect(out[0]).toBe('term number 0')
   })
 })

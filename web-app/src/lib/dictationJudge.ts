@@ -41,16 +41,17 @@ export const JUDGE_TIMEOUT_MS = 1500
  * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
  * vs "Extra bucket" 0.95 (Aqua right both times); a real mix-up scored 0.89.
  */
-const SKIP_AGREEMENT = 0.93
+export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
-export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Aqua applies the speaker's own dictionary, so trust its spelling of names and technical words. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
+export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Aqua applies the speaker's own dictionary and Soniox is given the same words, so trust their spelling of names and technical words. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
   aqua: 'Aqua',
   grok: 'Grok',
   elevenlabs: 'ElevenLabs',
+  soniox: 'Soniox',
 }
 
 function judgeTarget() {

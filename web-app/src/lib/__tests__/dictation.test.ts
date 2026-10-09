@@ -309,6 +309,17 @@ describe('dictation', () => {
       ])
       await vi.advanceTimersByTimeAsync(2000)
       await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
+      // Two engines that agree: sent at once, without waiting for Aqua
+      const quorum = gatherAuto([
+        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'soniox', text: Promise.resolve('What is an S3 bucket?') },
+        { engine: 'elevenlabs', text: Promise.resolve('what is an S3 bucket') },
+      ])
+      await vi.advanceTimersByTimeAsync(0)
+      await expect(quorum).resolves.toEqual([
+        { engine: 'soniox', text: 'What is an S3 bucket?' },
+        { engine: 'elevenlabs', text: 'what is an S3 bucket' },
+      ])
       await expect(
         gatherAuto([
           { engine: 'aqua', text: Promise.reject(new Error('no key')) },

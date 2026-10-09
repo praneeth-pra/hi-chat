@@ -57,7 +57,7 @@ ENV AQUA_API_KEY=""
 ENV RELAY_TOKEN=""
 
 # The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
-COPY relay/server.mjs relay/flacToWav.mjs relay/wsProxy.mjs /relay/
+COPY relay/server.mjs relay/flacToWav.mjs relay/wsProxy.mjs relay/dictionary.txt /relay/
 COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
 
 EXPOSE 80

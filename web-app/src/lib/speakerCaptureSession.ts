@@ -211,16 +211,17 @@ export function reportClip(line: string) {
 /**
  * Live mode: the relay hands out single-use ElevenLabs streaming tokens, or
  * AssemblyAI ones ({"engine":"assemblyai"}), or tickets for its own Grok live
- * socket ({"engine":"grok"}).
+ * socket ({"engine":"grok"}), or temporary Soniox keys ({"engine":"soniox"},
+ * which come with P's dictionary as `terms`).
  */
-type LiveEngine = 'elevenlabs' | 'assemblyai' | 'grok'
+type LiveEngine = 'elevenlabs' | 'assemblyai' | 'grok' | 'soniox'
 export const LIVE_TOKEN_URL = '/api/live-token'
 /** Tokens last 15 minutes; a spare older than this is replaced. */
 const LIVE_TOKEN_MAX_AGE_MS = 10 * 60 * 1000
 
-export async function fetchLiveToken(
-  engine: LiveEngine = 'elevenlabs'
-): Promise<string> {
+async function requestLiveToken(
+  engine: LiveEngine
+): Promise<{ token: string; terms?: string[] }> {
   const res = await fetch(LIVE_TOKEN_URL, {
     method: 'POST',
     headers: {
@@ -235,7 +236,22 @@ export async function fetchLiveToken(
     throw new Error('RELAY_TOKEN is not set on the server')
   }
   if (!res.ok) throw new Error(`Live token failed (${res.status})`)
-  return ((await res.json()) as { token: string }).token
+  return (await res.json()) as { token: string; terms?: string[] }
+}
+
+export async function fetchLiveToken(
+  engine: LiveEngine = 'elevenlabs'
+): Promise<string> {
+  return (await requestLiveToken(engine)).token
+}
+
+/** A temporary Soniox key and the dictionary terms to send with it. */
+export async function fetchSonioxKey(): Promise<{
+  token: string
+  terms: string[]
+}> {
+  const { token, terms } = await requestLiveToken('soniox')
+  return { token, terms: terms ?? [] }
 }
 
 /** Audio kept from just before speech is detected, so first words aren't clipped. */

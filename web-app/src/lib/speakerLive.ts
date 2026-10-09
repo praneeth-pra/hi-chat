@@ -553,3 +553,190 @@ export class GrokLiveTranscriber {
     }
   }
 }
+
+export const SONIOX_LIVE_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
+export const SONIOX_LIVE_MODEL = 'stt-rt-v5'
+/** Soniox's context holds about 10,000 characters. */
+const SONIOX_TERMS_CHARS = 9000
+
+/** Terms without repeats, cut to fit Soniox's context. */
+export function sonioxTerms(terms: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  let chars = 0
+  for (const raw of terms) {
+    const term = raw.replace(/\s+/g, ' ').trim()
+    if (!term || seen.has(term.toLowerCase())) continue
+    if (chars + term.length + 2 > SONIOX_TERMS_CHARS) break
+    seen.add(term.toLowerCase())
+    out.push(term)
+    chars += term.length + 2
+  }
+  return out
+}
+
+/**
+ * One utterance streamed to Soniox (stt-rt-v5) with a temporary key from the
+ * relay. The first message is the config, with P's dictionary as context
+ * terms; then raw 16-bit PCM. `finish()` sends the empty end-of-audio
+ * message, Soniox finalizes every word and says finished, and the final
+ * words joined are the text.
+ */
+export class SonioxLiveTranscriber {
+  private socket: SocketLike | null = null
+  private queue: (ArrayBuffer | string)[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private finals = ''
+  private partial = ''
+
+  constructor(
+    key: Promise<{ token: string; terms: string[] }>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
+    // The assistant's key terms, added after the dictionary
+    keyterms: string[] = []
+  ) {
+    key.then(
+      ({ token, terms }) => {
+        if (this.failed) return
+        const socket = makeSocket(SONIOX_LIVE_URL)
+        this.socket = socket
+        socket.onopen = () => {
+          // The key goes in the config, as Soniox's own browser SDK does
+          socket.send(
+            JSON.stringify({
+              api_key: token,
+              model: SONIOX_LIVE_MODEL,
+              audio_format: 'pcm_s16le',
+              sample_rate: TARGET_SAMPLE_RATE,
+              num_channels: 1,
+              language_hints: ['en'],
+              context: { terms: sonioxTerms([...terms, ...keyterms]) },
+            })
+          )
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('Soniox live connection failed'))
+        socket.onclose = () => {
+          if (this.done) this.resolveWith()
+          else this.abort(new Error('Soniox live connection closed early'))
+        }
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the audio and waits for the final words. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        if (this.heard()) this.resolveWith()
+        else this.abort(new Error('Soniox live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      if (this.pendingLen) this.flush()
+      // An empty text message ends the audio
+      this.sendMsg('')
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Soniox live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private heard() {
+    return `${this.finals}${this.partial}`.replace(/\s+/g, ' ').trim()
+  }
+
+  private resolveWith() {
+    const finish = this.done
+    if (!finish) return
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Soniox live transcription finished')
+    this.close()
+    finish(this.heard())
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(toPcm16(merged))
+  }
+
+  private sendMsg(msg: ArrayBuffer | string) {
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: {
+      tokens?: { text?: string; is_final?: boolean }[]
+      finished?: boolean
+      error_code?: number
+      error_message?: string
+    }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.error_code) {
+      return this.abort(
+        new Error(`Soniox live: ${msg.error_message ?? msg.error_code}`)
+      )
+    }
+    // Final words are sent once; the rest are restated in each message
+    let partial = ''
+    for (const t of msg.tokens ?? []) {
+      const text = t.text ?? ''
+      if (/^<\w+>$/.test(text)) continue // <end>, <fin> markers
+      if (t.is_final) this.finals += text
+      else partial += text
+    }
+    this.partial = partial
+    if (msg.finished) this.resolveWith()
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}
