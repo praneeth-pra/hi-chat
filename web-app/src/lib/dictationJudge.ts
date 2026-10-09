@@ -35,9 +35,13 @@ export function textAgreement(a: string, b: string): number {
 }
 
 /** Past this the vote is sent instead. */
-export const JUDGE_TIMEOUT_MS = 2000
-/** Texts this alike (a word or so apart) skip the judge. */
-const SKIP_AGREEMENT = 0.97
+export const JUDGE_TIMEOUT_MS = 1500
+/**
+ * Texts this alike skip the judge and Aqua's is sent. On P's questions,
+ * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
+ * vs "Extra bucket" 0.95 (Aqua right both times); a real mix-up scored 0.89.
+ */
+const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 

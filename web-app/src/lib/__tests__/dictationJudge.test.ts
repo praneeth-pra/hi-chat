@@ -86,6 +86,29 @@ describe('judgeDictation', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
+  it('skips the judge for one misheard word, sending the vote', async () => {
+    const fetcher = reply('x')
+    const close = [
+      {
+        engine: 'aqua',
+        text: "S3 bucket. And if it's a cross-account, then you also have to mention inside the bucket policies that this is",
+      },
+      {
+        engine: 'elevenlabs',
+        text: "... Extra bucket, and if it's a cross-account, then you also have to mention inside the bucket policies that this is-",
+      },
+    ]
+    expect(
+      await judgeDictation(
+        close,
+        close[0].text,
+        [],
+        fetcher as unknown as typeof fetch
+      )
+    ).toBeUndefined()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('falls back to Groq, and to the vote with no key', async () => {
     delete providers.cerebras
     providers.groq = { api_key: 'gsk' }

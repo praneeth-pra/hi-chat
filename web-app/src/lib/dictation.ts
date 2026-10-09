@@ -174,8 +174,8 @@ registerProcessor('dictation-tap', DictationTap)
  * While you talk, each stretch of speech that ends in a pause is sent to Aqua
  * right away, so when you stop only the last bit is left to transcribe.
  */
-const PIECE_MIN_MS = 4000
-const PAUSE_MS = 600
+const PIECE_MIN_MS = 3000
+const PAUSE_MS = 500
 /**
  * A block counts as a pause (used only to split) when it is this much quieter
  * than your recent speech, so it works whatever the mic's level. A fixed

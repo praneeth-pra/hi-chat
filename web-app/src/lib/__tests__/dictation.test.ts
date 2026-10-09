@@ -49,7 +49,7 @@ describe('dictation', () => {
     expect(useDictation.getState().status).toBe('idle')
   })
 
-  it('sends a piece to Aqua at a pause once 4 s are held', async () => {
+  it('sends a piece to Aqua at a pause once 3 s are held', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ text: 'first part.' }), { status: 200 })
@@ -63,11 +63,11 @@ describe('dictation', () => {
     } as unknown as Recording
     const loud = new Float32Array(2048).fill(0.2)
     const quiet = new Float32Array(2048)
-    for (let i = 0; i < 20; i++) onBlock(rec, loud) // 2.6 s
+    for (let i = 0; i < 15; i++) onBlock(rec, loud) // 1.9 s
     for (let i = 0; i < 5; i++) onBlock(rec, quiet) // a pause, but too soon
     expect(rec.pieces).toHaveLength(0)
-    for (let i = 0; i < 15; i++) onBlock(rec, loud) // now past 4 s
-    for (let i = 0; i < 5; i++) onBlock(rec, quiet)
+    for (let i = 0; i < 15; i++) onBlock(rec, loud) // now past 3 s
+    for (let i = 0; i < 4; i++) onBlock(rec, quiet) // 0.5 s pause
     expect(rec.pieces).toHaveLength(1)
     expect(rec.chunks).toHaveLength(0)
     expect(await rec.pieces[0]).toBe('first part.')
@@ -75,7 +75,7 @@ describe('dictation', () => {
     vi.unstubAllGlobals()
   })
 
-  it('a quiet mic is split at its pauses, not every 4 s', () => {
+  it('a quiet mic is split at its pauses, not every 3 s', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
