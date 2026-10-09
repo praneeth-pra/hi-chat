@@ -27,11 +27,6 @@ export const TokenSpeedIndicator = memo(
 
     if (nonStreamingAssistantParam) return
 
-    // Which model wrote the answer (Auto may hand it to a fallback)
-    const answeredBy = streaming
-      ? undefined
-      : (metadata?.timings as { answered_by?: string } | undefined)?.answered_by
-
     return (
       <div className="flex items-center gap-1 text-main-view-fg/60 text-xs">
         <Gauge size={16} />
@@ -41,7 +36,6 @@ export const TokenSpeedIndicator = memo(
             : Math.round(toNumber(persistedTokenSpeed))}
           &nbsp;tokens/sec
         </span>
-        {answeredBy && <span>· {answeredBy}</span>}
       </div>
     )
   }
