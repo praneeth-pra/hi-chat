@@ -10,6 +10,7 @@ import {
   setKeepMicReady,
   startDictation,
   cancelDictation,
+  readyMicEarly,
   type Recording,
 } from '../dictation'
 
@@ -156,6 +157,62 @@ describe('dictation', () => {
 
     void startDictation()
     // No await: the mic is already open
+    expect(useDictation.getState().status).toBe('recording')
+    expect(getUserMedia).toHaveBeenCalledTimes(1)
+    cancelDictation()
+
+    setKeepMicReady(false)
+    expect(track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
+  it('opens an allowed mic when Jan loads and finishes on the first key press', async () => {
+    const track = { readyState: 'live', stop: vi.fn() }
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] }
+    const getUserMedia = vi.fn(async () => stream)
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia, enumerateDevices: async () => [] },
+      permissions: { query: async () => ({ state: 'granted' }) },
+    })
+    const contexts: unknown[] = []
+    class FakeContext {
+      state = 'running'
+      sampleRate = 48000
+      destination = {}
+      audioWorklet = { addModule: async () => {} }
+      createMediaStreamSource = () => ({ connect: () => {} })
+      resume = async () => {}
+      close = async () => {}
+      constructor() {
+        contexts.push(this)
+      }
+    }
+    class FakeNode {
+      port = { onmessage: null }
+      connect() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('AudioContext', FakeContext)
+    vi.stubGlobal('AudioWorkletNode', FakeNode)
+    URL.createObjectURL = () => 'blob:x'
+    URL.revokeObjectURL = () => {}
+    setKeepMicReady(true)
+    useDictation.setState({ status: 'idle' })
+    const settle = () => new Promise((r) => setTimeout(r, 0))
+
+    readyMicEarly()
+    await settle()
+    // The mic is open, but no audio starts before a click or key press
+    expect(getUserMedia).toHaveBeenCalledTimes(1)
+    expect(contexts).toHaveLength(0)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    await settle()
+    expect(contexts).toHaveLength(1)
+
+    void startDictation()
+    // No await: ready before the first dictation
     expect(useDictation.getState().status).toBe('recording')
     expect(getUserMedia).toHaveBeenCalledTimes(1)
     cancelDictation()
