@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
-import { startDictation, stopDictation } from '@/lib/dictation'
+import { stopDictation, toggleDictation } from '@/lib/dictation'
 
 /**
  * Keys a helper like Hammerspoon can send to this tab while another app is
@@ -20,10 +20,11 @@ export const SCENARIO_KEY = 'F16'
  */
 export const SUGGESTION_KEY = 'F15'
 /**
- * Push-to-talk: F14 starts dictating your own voice (Aqua), F13 stops and
- * sends the text. Hammerspoon sends them when fn + Space goes down and up.
+ * F14 starts dictating your own voice (Aqua) and, pressed again, stops and
+ * sends the text; F13 only stops. Hammerspoon sends F14 on a tap of Left
+ * Control.
  */
-export const DICTATION_START_KEY = 'F14'
+export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
 
 let scenarioSender: (() => string | null) | null = null
@@ -114,8 +115,8 @@ export function handleSpeakerKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === SCENARIO_KEY) return sendScenario()
-  if (key === DICTATION_START_KEY) {
-    void startDictation()
+  if (key === DICTATION_TOGGLE_KEY) {
+    toggleDictation()
     return true
   }
   if (key === DICTATION_STOP_KEY) {

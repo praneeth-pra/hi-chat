@@ -171,7 +171,7 @@ export async function startDictation() {
 /** Stops recording and sends the text Aqua returns, like a question. */
 export async function stopDictation() {
   const { status, startedAt } = useDictation.getState()
-  // Let go before the mic opened: nothing was said yet
+  // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
   const { ctx, chunks } = recording
@@ -223,5 +223,5 @@ export function cancelDictation() {
 export function toggleDictation() {
   const { status } = useDictation.getState()
   if (status === 'idle') void startDictation()
-  else if (status === 'recording') void stopDictation()
+  else if (status === 'recording' || status === 'starting') void stopDictation()
 }
