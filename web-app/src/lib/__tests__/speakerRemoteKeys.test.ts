@@ -9,6 +9,8 @@ import {
 } from '../speakerRemoteKeys'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
+const toggleDictation = vi.fn()
+vi.mock('@/lib/dictation', () => ({ toggleDictation: () => toggleDictation() }))
 
 describe('speaker remote keys', () => {
   beforeEach(() =>
@@ -78,6 +80,16 @@ describe('speaker remote keys', () => {
     expect(useSpeakerTranscription.getState().queue).toEqual(['What is a pod?'])
     stop()
     button.remove()
+  })
+
+  it('F14 starts and stops dictation, also by key code', () => {
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F14' }))
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 125 })
+    )
+    expect(toggleDictation).toHaveBeenCalledTimes(2)
+    stop()
   })
 
   it('F16 sends the scenario the listener hands over', () => {

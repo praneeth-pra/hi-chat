@@ -50,6 +50,8 @@ ENV PORT=80
 ENV ELEVENLABS_API_KEY=""
 ENV XAI_API_KEY=""
 ENV ASSEMBLYAI_API_KEY=""
+# Dictation (your own voice) goes to Aqua, which applies your dictionary
+ENV AQUA_API_KEY=""
 # Shared secret the browser sends to use the transcription relay; without it
 # the relay stays off (503).
 ENV RELAY_TOKEN=""
