@@ -306,6 +306,23 @@ describe('GrokLiveTranscriber', () => {
     await expect(text).resolves.toBe('What is EKS?')
   })
 
+  it('keeps spaces between stretches when transcript.done runs them together', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    socket.reply({
+      type: 'transcript.partial',
+      text: 'I said that.',
+      is_final: true,
+      speech_final: true,
+    })
+    const text = live.finish()
+    socket.reply({
+      type: 'transcript.done',
+      text: 'I said that.And have a look.',
+    })
+    await expect(text).resolves.toBe('I said that. And have a look.')
+  })
+
   it('rejects when the relay reports an error', async () => {
     const { live, socket } = await connect()
     socket.open()
