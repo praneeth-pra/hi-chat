@@ -8,7 +8,8 @@
 // ENGINES order. In a race (`need`), it returns as soon as that many answered.
 
 import { createServer } from 'node:http'
-import { pathToFileURL } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { flacToWav } from './flacToWav.mjs'
 import { randomBytes } from 'node:crypto'
 import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
@@ -217,6 +218,8 @@ export async function liveToken({
   engine = 'elevenlabs',
 } = {}) {
   if (engine === 'grok') return grokTicket(env)
+  if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
+  if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
   const assembly = engine === 'assemblyai'
   const keyVar = assembly ? 'ASSEMBLYAI_API_KEY' : 'ELEVENLABS_API_KEY'
   const key = env[keyVar]
@@ -271,11 +274,105 @@ export function useGrokTicket(ticket) {
   return at !== undefined && Date.now() - at <= GROK_TICKET_MS
 }
 
+/**
+ * Soniox live: a temporary key (valid 60 s, enough to open the socket) lets
+ * the browser stream straight to Soniox without seeing SONIOX_API_KEY.
+ */
+export async function sonioxKey({ env = process.env, fetchImpl = fetch } = {}) {
+  if (!env.SONIOX_API_KEY)
+    throw Object.assign(new Error('SONIOX_API_KEY not set'), { status: 503 })
+  const res = await fetchImpl(
+    'https://api.soniox.com/v1/auth/temporary-api-key',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.SONIOX_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        usage_type: 'transcribe_websocket',
+        expires_in_seconds: 60,
+      }),
+    }
+  )
+  if (!res.ok)
+    throw Object.assign(
+      new Error(
+        `Soniox key failed (${res.status}): ${await errorText(res)}`
+      ),
+      { status: 502 }
+    )
+  const { api_key } = await res.json()
+  return api_key
+}
+
+/**
+ * Cartesia live: an access token (valid 10 minutes, speech-to-text only)
+ * lets the browser stream straight to Cartesia without CARTESIA_API_KEY.
+ */
+export const CARTESIA_VERSION = '2026-08-14'
+export async function cartesiaToken({
+  env = process.env,
+  fetchImpl = fetch,
+} = {}) {
+  if (!env.CARTESIA_API_KEY)
+    throw Object.assign(new Error('CARTESIA_API_KEY not set'), { status: 503 })
+  const res = await fetchImpl('https://api.cartesia.ai/access-token', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.CARTESIA_API_KEY}`,
+      'Cartesia-Version': CARTESIA_VERSION,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ grants: { stt: true }, expires_in: 600 }),
+  })
+  if (!res.ok)
+    throw Object.assign(
+      new Error(
+        `Cartesia token failed (${res.status}): ${await errorText(res)}`
+      ),
+      { status: 502 }
+    )
+  const { token } = await res.json()
+  return token
+}
+
+/**
+ * P's dictionary (copied from Aqua, one entry per line; "a, b" lines give
+ * each term). Soniox and Cartesia get it with their keys; the browser fits
+ * it to each engine's limit.
+ */
+let dictionary
+export function dictionaryTerms(
+  file = fileURLToPath(new URL('./dictionary.txt', import.meta.url))
+) {
+  if (dictionary) return dictionary
+  let lines = []
+  try {
+    lines = readFileSync(file, 'utf8').split('\n')
+  } catch {
+    // No dictionary shipped
+  }
+  const seen = new Set()
+  dictionary = []
+  for (const line of lines)
+    // Commas split terms, except inside brackets: "Services (ClusterIP, …)"
+    for (const raw of line.split(/,(?![^(]*\))/)) {
+      const term = raw.replace(/\s+/g, ' ').replace(/[.:]$/, '').trim()
+      if (!term || seen.has(term.toLowerCase())) continue
+      seen.add(term.toLowerCase())
+      dictionary.push(term)
+    }
+  return dictionary
+}
+
 /** The engine a live-token request asks for: `{"engine":"assemblyai"}`. */
 function liveTokenEngine(body) {
   try {
     const engine = JSON.parse(body.toString('utf8')).engine
-    return ['assemblyai', 'grok'].includes(engine) ? engine : 'elevenlabs'
+    return ['assemblyai', 'grok', 'soniox', 'cartesia'].includes(engine)
+      ? engine
+      : 'elevenlabs'
   } catch {
     return 'elevenlabs'
   }
@@ -401,6 +498,9 @@ export function createRelay(options = {}) {
         engine = liveTokenEngine(await readBody(req))
         const token = await liveToken({ ...options, engine })
         console.log(`live token ${engine} ${Date.now() - started} ms`)
+        // Soniox and Cartesia are sent the dictionary as key terms
+        if (engine === 'soniox' || engine === 'cartesia')
+          return send(res, 200, { token, terms: dictionaryTerms() })
         return send(res, 200, { token })
       } catch (err) {
         console.log(`live token ${engine} failed: ${err.message}`)

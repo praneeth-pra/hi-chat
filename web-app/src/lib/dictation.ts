@@ -9,14 +9,24 @@ import {
 import {
   RELAY_TOKEN_HEADER,
   fetchLiveToken,
+  fetchLiveKeyWithTerms,
   keyTerms,
   relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
-import { GrokLiveTranscriber, LiveTranscriber } from '@/lib/speakerLive'
+import {
+  CartesiaLiveTranscriber,
+  GrokLiveTranscriber,
+  LiveTranscriber,
+  SonioxLiveTranscriber,
+} from '@/lib/speakerLive'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
-import { judgeDictation, textAgreement } from '@/lib/dictationJudge'
+import {
+  SKIP_AGREEMENT,
+  judgeDictation,
+  textAgreement,
+} from '@/lib/dictationJudge'
 
 /**
  * Dictation: your own voice, recorded here and turned into text by Aqua's
@@ -26,15 +36,25 @@ import { judgeDictation, textAgreement } from '@/lib/dictationJudge'
  */
 
 /**
- * Which service turns your voice into text. Only Aqua applies your Aqua
- * dictionary and replacements; Grok and ElevenLabs stream live while you
- * talk. Auto runs ElevenLabs and Aqua (Grok was the least accurate); when
- * they differ a judge model writes the best version, else Aqua's is sent.
+ * Which service turns your voice into text. Aqua applies your Aqua
+ * dictionary and replacements, Soniox gets the same words as context terms
+ * and Cartesia the 100 that fit; Soniox, Cartesia, Grok and ElevenLabs
+ * stream live while you talk. Auto runs Soniox, Cartesia, ElevenLabs and
+ * Aqua (Grok was the least accurate): as soon as two agree their text is
+ * sent, else a judge model writes the best version.
  */
-export type DictationEngine = 'aqua' | 'grok' | 'elevenlabs' | 'auto'
+export type DictationEngine =
+  | 'aqua'
+  | 'grok'
+  | 'elevenlabs'
+  | 'soniox'
+  | 'cartesia'
+  | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (ElevenLabs + Aqua)' },
+  { value: 'auto', label: 'Auto (Soniox + Cartesia + ElevenLabs + Aqua)' },
   { value: 'aqua', label: 'Aqua' },
+  { value: 'soniox', label: 'Soniox (live)' },
+  { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
@@ -443,6 +463,18 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       keyTerms()
     )
+  if (engine === 'soniox')
+    return new SonioxLiveTranscriber(
+      fetchLiveKeyWithTerms('soniox'),
+      undefined,
+      keyTerms()
+    )
+  if (engine === 'cartesia')
+    return new CartesiaLiveTranscriber(
+      fetchLiveKeyWithTerms('cartesia'),
+      undefined,
+      keyTerms()
+    )
   return undefined
 }
 
@@ -452,7 +484,9 @@ function batchEngine(engine: DictationEngine): DictationEngine {
 }
 
 function autoLiveStreams() {
-  return (['elevenlabs'] as const).map((engine) => ({
+  // Soniox first: when it agrees with another live engine, its text (with
+  // your whole dictionary) is the one sent
+  return (['soniox', 'cartesia', 'elevenlabs'] as const).map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
@@ -483,7 +517,10 @@ export function pickBest(results: EngineText[]): EngineText | undefined {
   return best
 }
 
-/** Waits for every engine, but only AUTO_GRACE_MS once the first has text. */
+/**
+ * Waits for every engine, but only AUTO_GRACE_MS once the first has text,
+ * and not at all once two engines agree (the judge would skip anyway).
+ */
 export function gatherAuto(
   jobs: { engine: DictationEngine; text: Promise<string> }[]
 ): Promise<EngineText[]> {
@@ -502,8 +539,15 @@ export function gatherAuto(
     jobs.forEach(({ engine, text }) =>
       text
         .then((t) => {
-          done.push({ engine, text: t.trim() })
-          if (t.trim() && !grace) grace = setTimeout(finish, AUTO_GRACE_MS)
+          const text = t.trim()
+          const agreed =
+            text &&
+            done.some(
+              (d) => d.text && textAgreement(d.text, text) >= SKIP_AGREEMENT
+            )
+          done.push({ engine, text })
+          if (agreed) finish()
+          else if (text && !grace) grace = setTimeout(finish, AUTO_GRACE_MS)
         })
         .catch((err) => errors.push(`${engine}: ${(err as Error).message}`))
         .finally(() => {
@@ -634,7 +678,12 @@ function reportAuto(
   took: Partial<Record<DictationEngine, number>>,
   info: { sent: string; totalMs: number; judgeMs?: number; judged?: string }
 ) {
-  const engines: DictationEngine[] = ['aqua', 'elevenlabs']
+  const engines: DictationEngine[] = [
+    'aqua',
+    'soniox',
+    'cartesia',
+    'elevenlabs',
+  ]
   const times = engines
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')

@@ -8,6 +8,7 @@ import {
   transcribeAll,
   useGrokTicket,
   clipLogLine,
+  dictionaryTerms,
 } from './server.mjs'
 import { readFileSync } from 'node:fs'
 import { decodeFlac, toWav } from './flacToWav.mjs'
@@ -519,6 +520,97 @@ test('dictation: sends the WAV to Aqua with its key and returns the text', async
 test('dictation: 503 without an Aqua key', async () => {
   await assert.rejects(
     dictate(new Blob([]), { env: {} }),
+    (err) => err.status === 503
+  )
+})
+
+test('soniox live: a temporary key plus the dictionary as terms', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, auth: init.headers.Authorization, body: JSON.parse(init.body) })
+    return new Response(JSON.stringify({ api_key: 'temp:1', expires_at: 'x' }))
+  }
+  const server = createRelay({ env: { SONIOX_API_KEY: 's' }, fetchImpl }).listen(
+    0,
+    '127.0.0.1'
+  )
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/live-token`,
+      { method: 'POST', body: JSON.stringify({ engine: 'soniox' }) }
+    )
+    assert.equal(res.status, 200)
+    const { token, terms } = await res.json()
+    assert.equal(token, 'temp:1')
+    assert.ok(terms.includes('kubectl'))
+    assert.ok(terms.includes('Services (ClusterIP, NodePort, LoadBalancer)'))
+    assert.deepEqual(calls, [
+      {
+        url: 'https://api.soniox.com/v1/auth/temporary-api-key',
+        auth: 'Bearer s',
+        body: { usage_type: 'transcribe_websocket', expires_in_seconds: 60 },
+      },
+    ])
+  } finally {
+    server.close()
+  }
+  await assert.rejects(
+    liveToken({ env: {}, engine: 'soniox' }),
+    (err) => err.status === 503
+  )
+})
+
+test('dictionary: one term per line, split at commas outside brackets', () => {
+  const terms = dictionaryTerms()
+  for (const t of ['Pods', 'ReplicaSets', 'MTTR', 'MTTD', 'Wireshark'])
+    assert.ok(terms.includes(t), t)
+  assert.ok(terms.includes('Log Levels: DEBUG/INFO/WARN/ERROR/FATAL'))
+  // No duplicates (MTTR is listed twice), no trailing dots
+  assert.equal(new Set(terms.map((t) => t.toLowerCase())).size, terms.length)
+  assert.ok(!terms.includes('Kustomize.'))
+  // Soniox's context limit is ~10,000 characters
+  assert.ok(terms.join(', ').length < 10000)
+})
+
+test('cartesia live: an STT-only access token plus the dictionary', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({
+      url,
+      auth: init.headers.Authorization,
+      version: init.headers['Cartesia-Version'],
+      body: JSON.parse(init.body),
+    })
+    return new Response(JSON.stringify({ token: 'cart_tok' }))
+  }
+  const server = createRelay({ env: { CARTESIA_API_KEY: 'c' }, fetchImpl }).listen(
+    0,
+    '127.0.0.1'
+  )
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/live-token`,
+      { method: 'POST', body: JSON.stringify({ engine: 'cartesia' }) }
+    )
+    assert.equal(res.status, 200)
+    const { token, terms } = await res.json()
+    assert.equal(token, 'cart_tok')
+    assert.ok(terms.includes('kubectl'))
+    assert.deepEqual(calls, [
+      {
+        url: 'https://api.cartesia.ai/access-token',
+        auth: 'Bearer c',
+        version: '2026-08-14',
+        body: { grants: { stt: true }, expires_in: 600 },
+      },
+    ])
+  } finally {
+    server.close()
+  }
+  await assert.rejects(
+    liveToken({ env: {}, engine: 'cartesia' }),
     (err) => err.status === 503
   )
 })
