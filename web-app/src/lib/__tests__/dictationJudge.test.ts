@@ -19,7 +19,7 @@ const reply = (content: string) =>
   )
 
 const results = [
-  { engine: 'aqua', text: 'Run kubectl get pods' },
+  { engine: 'cartesia', text: 'Run kube cuddle get pods' },
   { engine: 'grok', text: 'Run cube cuddle get pods.' },
   { engine: 'elevenlabs', text: 'Run kubectl get pods.' },
 ]
@@ -126,5 +126,28 @@ describe('judgeDictation', () => {
       await judgeDictation(results, 'v', [], fetcher as unknown as typeof fetch)
     ).toBeUndefined()
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the judge when two of three engines agree', async () => {
+    providers.cerebras = { api_key: 'csk' }
+    const fetcher = vi.fn()
+    const rest =
+      'so the attached IP is going to be changed with respect to that'
+    expect(
+      await judgeDictation(
+        [
+          { engine: 'cartesia', text: `system is restarted newly. So ${rest}` },
+          { engine: 'soniox', text: `The system is restart newly, ${rest}.` },
+          {
+            engine: 'elevenlabs',
+            text: `The system is restarted newly, ${rest}.`,
+          },
+        ],
+        `The system is restarted newly, ${rest}.`,
+        [],
+        fetcher as unknown as typeof fetch
+      )
+    ).toBeUndefined()
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

@@ -81,7 +81,7 @@ function judgeTarget() {
 
 /**
  * The judge's version of the dictation, or undefined to keep the vote
- * (no key, all engines agree, too slow, or a reply that strays from them).
+ * (no key, two engines agree, too slow, or a reply that strays from them).
  */
 export async function judgeDictation(
   results: EngineText[],
@@ -90,9 +90,12 @@ export async function judgeDictation(
   fetcher: typeof fetch = groqFetch
 ): Promise<string | undefined> {
   const heard = results.filter((r) => r.text)
-  // Nothing to judge when they (nearly) agree: the vote is sent at once
-  const agree = heard.every((a) =>
-    heard.every((b) => textAgreement(a.text, b.text) >= SKIP_AGREEMENT)
+  // Nothing to judge when two engines (nearly) agree: they outvote the
+  // rest, and the vote is sent at once
+  const agree = heard.some((a, i) =>
+    heard
+      .slice(i + 1)
+      .some((b) => textAgreement(a.text, b.text) >= SKIP_AGREEMENT)
   )
   if (heard.length < 2 || agree) return undefined
   const target = judgeTarget()
