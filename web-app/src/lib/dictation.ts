@@ -96,21 +96,100 @@ class DictationTap extends AudioWorkletProcessor {
 registerProcessor('dictation-tap', DictationTap)
 `
 
-let recording:
-  | {
-      stream: MediaStream
-      ctx: AudioContext
-      chunks: Float32Array[]
-      limit: ReturnType<typeof setTimeout>
+/**
+ * While you talk, each stretch of speech that ends in a pause is sent to Aqua
+ * right away, so when you stop only the last bit is left to transcribe.
+ */
+const PIECE_MIN_MS = 4000
+const PAUSE_MS = 600
+/** Below this loudness a block counts as silence. */
+const SILENCE_RMS = 0.01
+
+export type Recording = {
+  stream: MediaStream
+  tap: AudioWorkletNode
+  rate: number
+  /** Audio not yet sent to Aqua */
+  chunks: Float32Array[]
+  /** Silence at the end of chunks, in ms */
+  quietMs: number
+  /** Aqua's text for each piece sent so far, in order */
+  pieces: Promise<string>[]
+  limit: ReturnType<typeof setTimeout>
+}
+
+let recording: Recording | undefined
+
+// Kept between dictations (suspended while idle), so starting doesn't wait
+// for a new audio context and the worklet to load.
+let audio: Promise<AudioContext> | undefined
+
+function audioContext(): Promise<AudioContext> {
+  audio ??= (async () => {
+    const ctx = new AudioContext()
+    const url = URL.createObjectURL(
+      new Blob([TAP_WORKLET], { type: 'application/javascript' })
+    )
+    try {
+      await ctx.audioWorklet.addModule(url)
+    } finally {
+      URL.revokeObjectURL(url)
     }
-  | undefined
+    return ctx
+  })().catch((err) => {
+    audio = undefined
+    throw err
+  })
+  return audio
+}
 
 function release() {
   if (!recording) return
   clearTimeout(recording.limit)
+  recording.tap.port.onmessage = null
+  recording.tap.disconnect()
   recording.stream.getTracks().forEach((t) => t.stop())
-  recording.ctx.close().catch(() => {})
   recording = undefined
+  void audio?.then((ctx) => ctx.suspend()).catch(() => {})
+}
+
+/** Posts one piece of audio to Aqua through the relay; resolves to its text. */
+async function transcribe(chunks: Float32Array[], rate: number) {
+  const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
+  // The mic had sent (almost) nothing; Aqua rejects an empty file
+  if (samples.length < TARGET_SAMPLE_RATE / 20) return ''
+  if (!chunks.some((c) => rms(c) >= SILENCE_RMS)) return ''
+  const body = new FormData()
+  body.append('audio', encodeWav(samples, TARGET_SAMPLE_RATE), 'dictation.wav')
+  const res = await fetch('/api/dictate', {
+    method: 'POST',
+    body,
+    headers: { [RELAY_TOKEN_HEADER]: relayToken() },
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    text?: string
+    error?: string
+  }
+  if (!res.ok) throw new Error(data.error ?? `status ${res.status}`)
+  return (data.text ?? '').trim()
+}
+
+/** Takes one block from the mic; exported for tests. */
+export function onBlock(rec: Recording, block: Float32Array) {
+  rec.chunks.push(block)
+  const level = rms(block)
+  useDictation.setState({ level: Math.min(1, level * 8) })
+  const blockMs = (block.length / rec.rate) * 1000
+  rec.quietMs = level < SILENCE_RMS ? rec.quietMs + blockMs : 0
+  const heldMs = (rec.chunks.length * block.length * 1000) / rec.rate
+  if (rec.quietMs >= PAUSE_MS && heldMs >= PIECE_MIN_MS) {
+    const piece = rec.chunks
+    rec.chunks = []
+    rec.quietMs = 0
+    const text = transcribe(piece, rec.rate)
+    text.catch(() => {}) // reported when the dictation is sent
+    rec.pieces.push(text)
+  }
 }
 
 export async function startDictation() {
@@ -121,47 +200,42 @@ export async function startDictation() {
     return
   }
   useDictation.setState({ status: 'starting', level: 0 })
+  let stream: MediaStream | undefined
   try {
+    const ready = audioContext()
     const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
-    const stream = await media.getUserMedia({
+    stream = await media.getUserMedia({
       audio: {
         ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
         echoCancellation: true,
         noiseSuppression: true,
       },
     })
-    const ctx = new AudioContext()
-    const url = URL.createObjectURL(
-      new Blob([TAP_WORKLET], { type: 'application/javascript' })
-    )
-    try {
-      await ctx.audioWorklet.addModule(url)
-    } finally {
-      URL.revokeObjectURL(url)
+    const ctx = await ready
+    await ctx.resume()
+    // Cancelled while the mic was opening
+    if (useDictation.getState().status !== 'starting') {
+      stream.getTracks().forEach((t) => t.stop())
+      return
     }
     const tap = new AudioWorkletNode(ctx, 'dictation-tap')
     ctx.createMediaStreamSource(stream).connect(tap)
     // Outputs silence; the connection just keeps the node running.
     tap.connect(ctx.destination)
-    const chunks: Float32Array[] = []
-    tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
-      chunks.push(e.data)
-      useDictation.setState({ level: Math.min(1, rms(e.data) * 8) })
-    }
-    // Cancelled while the mic was opening
-    if (useDictation.getState().status !== 'starting') {
-      stream.getTracks().forEach((t) => t.stop())
-      ctx.close().catch(() => {})
-      return
-    }
-    recording = {
+    const rec: Recording = {
       stream,
-      ctx,
-      chunks,
+      tap,
+      rate: ctx.sampleRate,
+      chunks: [],
+      quietMs: 0,
+      pieces: [],
       limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
     }
+    tap.port.onmessage = (e: MessageEvent<Float32Array>) => onBlock(rec, e.data)
+    recording = rec
     useDictation.setState({ status: 'recording', startedAt: Date.now() })
   } catch (err) {
+    stream?.getTracks().forEach((t) => t.stop())
     release()
     useDictation.setState({ status: 'idle', level: 0 })
     toast(`Microphone unavailable: ${(err as Error).message}`)
@@ -174,8 +248,7 @@ export async function stopDictation() {
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { ctx, chunks } = recording
-  const rate = ctx.sampleRate
+  const { chunks, rate, pieces } = recording
   release()
   if (Date.now() - startedAt < MIN_DICTATION_MS) {
     useDictation.setState({ status: 'idle', level: 0 })
@@ -183,26 +256,8 @@ export async function stopDictation() {
   }
   useDictation.setState({ status: 'transcribing', level: 0 })
   try {
-    const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
-    // The mic had sent (almost) nothing yet; Aqua rejects an empty file
-    if (samples.length < TARGET_SAMPLE_RATE / 20) return
-    const body = new FormData()
-    body.append(
-      'audio',
-      encodeWav(samples, TARGET_SAMPLE_RATE),
-      'dictation.wav'
-    )
-    const res = await fetch('/api/dictate', {
-      method: 'POST',
-      body,
-      headers: { [RELAY_TOKEN_HEADER]: relayToken() },
-    })
-    const data = (await res.json().catch(() => ({}))) as {
-      text?: string
-      error?: string
-    }
-    if (!res.ok) throw new Error(data.error ?? `status ${res.status}`)
-    const text = (data.text ?? '').trim()
+    pieces.push(transcribe(chunks, rate))
+    const text = (await Promise.all(pieces)).filter(Boolean).join(' ')
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else toast('Aqua heard nothing')
   } catch (err) {
