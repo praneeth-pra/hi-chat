@@ -372,6 +372,21 @@ export class AssemblyLiveTranscriber {
 export const GROK_LIVE_PATH = '/api/grok-live'
 
 /**
+ * When `text` starts with the same characters as `prefix` (ignoring spaces),
+ * returns what follows, trimmed; otherwise null.
+ */
+export function afterSameText(text: string, prefix: string): string | null {
+  let i = 0
+  for (const ch of prefix) {
+    if (/\s/.test(ch)) continue
+    while (i < text.length && /\s/.test(text[i])) i++
+    if (text[i] !== ch) return null
+    i++
+  }
+  return text.slice(i).trim()
+}
+
+/**
  * One utterance streamed to Grok Voice Transcribe 2.0 through the relay.
  * Grok sends a final for each stretch of speech it hears end (speech_final
  * restates the whole stretch); `finish()` sends audio.done, which flushes the
@@ -474,7 +489,12 @@ export class GrokLiveTranscriber {
     const heard = this.heard()
     const last = doneText.trim()
     if (!last) return finish(heard)
-    if (!heard || last.length >= heard.length) return finish(last)
+    if (!heard) return finish(last)
+    // transcript.done can restate everything with the stretches run together
+    // ("…that.And have…"): keep our spaced stretches and take only its end
+    const rest = afterSameText(last, heard)
+    if (rest !== null) return finish(rest ? `${heard} ${rest}` : heard)
+    if (last.length >= heard.length) return finish(last)
     finish(heard.endsWith(last) ? heard : `${heard} ${last}`)
   }
 
