@@ -10,7 +10,9 @@ import {
 import { encodeFlac } from './flacEncoder'
 import {
   AssemblyLiveTranscriber,
+  CartesiaLiveTranscriber,
   GrokLiveTranscriber,
+  SonioxLiveTranscriber,
   LiveTranscriber,
   getLiveMode,
 } from './speakerLive'
@@ -19,13 +21,18 @@ import type { SpeakerStatus } from '@/hooks/useSpeakerTranscription'
 import type { TurnCheck } from './smartTurn'
 
 /**
- * Puts Grok's transcript first, so it is the one sent when the judge doesn't
- * pick a wording: across three interviews it got tech terms right (JMeter,
- * assert, NAT gateway) where ElevenLabs didn't. Grok sometimes drops the
- * first word, so ElevenLabs stays first when Grok's text is clearly shorter.
+ * Puts Cartesia's (else Grok's) transcript first, so it is the one sent when
+ * the judge doesn't pick a wording: across three interviews Grok got tech
+ * terms right (JMeter, assert, NAT gateway) where ElevenLabs didn't, and on
+ * P's dictation tests Cartesia beat both. Live engines sometimes drop the
+ * first word, so ElevenLabs stays first when the text is clearly shorter.
  */
 export function grokFirst(texts: string[], names: string[]): string[] {
-  const g = names.findIndex((n) => n.startsWith('grok'))
+  const cartesia = names.findIndex(
+    (n, i) => n.startsWith('cartesia') && texts[i]?.trim()
+  )
+  const g =
+    cartesia >= 0 ? cartesia : names.findIndex((n) => n.startsWith('grok'))
   if (g <= 0 || !texts[g]?.trim()) return texts
   if (wordCount(texts[g]) < wordCount(texts[0]) * 0.8) return texts
   return [texts[g], ...texts.filter((_, i) => i !== g)]
@@ -71,14 +78,16 @@ export function relayToken(): string {
 
 /**
  * Which engines transcribe speaker clips. ElevenLabs always runs; a second
- * transcript gives the relevance check something to merge with it. "live"
- * (with live mode on) streams to Grok beside ElevenLabs, so both transcripts
- * arrive together at the pause; "live-assemblyai" streams to AssemblyAI as
- * well, for three.
+ * transcript gives the relevance check something to merge with it.
+ * "live-soniox-cartesia" (with live mode on) streams to Soniox and Cartesia
+ * beside ElevenLabs, both with P's dictionary, so all three transcripts
+ * arrive together at the pause. "live" streams to Grok instead;
+ * "live-assemblyai" streams to AssemblyAI and Grok.
  * "race" uploads to Grok and AssemblyAI and keeps the first; the others pick
  * one partner or none. Kept in this browser.
  */
 export type TranscribeMode =
+  | 'live-soniox-cartesia'
   | 'live'
   | 'live-assemblyai'
   | 'race'
@@ -88,6 +97,7 @@ export type TranscribeMode =
 export const TRANSCRIBE_MODE_STORAGE_KEY = 'speaker-transcribe-mode'
 
 export const TRANSCRIBE_MODES: { value: TranscribeMode; label: string }[] = [
+  { value: 'live-soniox-cartesia', label: 'Soniox live + Cartesia live' },
   { value: 'live', label: 'Grok live' },
   { value: 'live-assemblyai', label: 'AssemblyAI live + Grok live' },
   { value: 'race', label: 'Race: Grok + AssemblyAI' },
@@ -98,7 +108,9 @@ export const TRANSCRIBE_MODES: { value: TranscribeMode; label: string }[] = [
 
 /** The relay engines for each mode, in the order transcripts are merged. */
 const MODE_ENGINES: Record<TranscribeMode, string[]> = {
-  // Grok (and AssemblyAI) stream instead when live mode is on (see grokLive)
+  // These stream instead when live mode is on (see grokLive); without live
+  // mode, Soniox + Cartesia falls back to ElevenLabs alone
+  'live-soniox-cartesia': ['elevenlabs'],
   'live': ['elevenlabs', 'grok'],
   'live-assemblyai': ['elevenlabs', 'grok'],
   'race': ['elevenlabs', 'grok', 'assemblyai'],
@@ -118,9 +130,9 @@ export function getTranscribeMode(): TranscribeMode {
     const saved = localStorage.getItem(TRANSCRIBE_MODE_STORAGE_KEY)
     return TRANSCRIBE_MODES.some((m) => m.value === saved)
       ? (saved as TranscribeMode)
-      : 'live'
+      : 'live-soniox-cartesia'
   } catch {
-    return 'live'
+    return 'live-soniox-cartesia'
   }
 }
 
@@ -150,6 +162,11 @@ export function keyTerms(): string[] {
 export function grokLive(): boolean {
   const mode = getTranscribeMode()
   return getLiveMode() && (mode === 'live' || mode === 'live-assemblyai')
+}
+
+/** Live mode with Soniox and Cartesia streaming beside ElevenLabs. */
+export function sonioxCartesiaLive(): boolean {
+  return getLiveMode() && getTranscribeMode() === 'live-soniox-cartesia'
 }
 
 /** Live mode with AssemblyAI streaming too. */
@@ -251,6 +268,13 @@ export async function fetchLiveKeyWithTerms(
 ): Promise<{ token: string; terms: string[] }> {
   const { token, terms } = await requestLiveToken(engine)
   return { token, terms: terms ?? [] }
+}
+
+/** A live engine streaming beside ElevenLabs (Soniox, Cartesia). */
+type SideStream = {
+  push(samples: Float32Array): void
+  finish(): Promise<string>
+  abort(): void
 }
 
 /** Audio kept from just before speech is detected, so first words aren't clipped. */
@@ -395,10 +419,10 @@ export function startSpeakerCapture({
   }
 
   // Live mode keeps one token in hand so a new utterance can connect at once.
-  const tokenPool = (engine: LiveEngine, maxAge: number) => {
-    let spare: { token: Promise<string>; at: number } | null = null
+  const pool = <T>(fetchToken: () => Promise<T>, maxAge: number) => {
+    let spare: { token: Promise<T>; at: number } | null = null
     const fetchOne = () => {
-      const token = fetchLiveToken(engine)
+      const token = fetchToken()
       token.catch(() => {})
       return { token, at: Date.now() }
     }
@@ -408,25 +432,32 @@ export function startSpeakerCapture({
       },
       take() {
         const fresh =
-          spare && Date.now() - spare.at < maxAge
-            ? spare.token
-            : fetchLiveToken(engine)
+          spare && Date.now() - spare.at < maxAge ? spare.token : fetchToken()
         spare = fetchOne()
         return fresh
       },
     }
   }
+  const tokenPool = (engine: LiveEngine, maxAge: number) =>
+    pool(() => fetchLiveToken(engine), maxAge)
   const elevenTokens = tokenPool('elevenlabs', LIVE_TOKEN_MAX_AGE_MS)
   // AssemblyAI tokens must be redeemed within 10 minutes
   const assemblyTokens = tokenPool('assemblyai', 8 * 60 * 1000)
   // Grok live tickets also last 10 minutes
   const grokTickets = tokenPool('grok', 8 * 60 * 1000)
+  // Soniox keys last 60 s, Cartesia tokens 10 minutes
+  const sonioxKeys = pool(() => fetchLiveKeyWithTerms('soniox'), 45 * 1000)
+  const cartesiaKeys = pool(
+    () => fetchLiveKeyWithTerms('cartesia'),
+    8 * 60 * 1000
+  )
 
   const send = (
     samples: Float32Array,
     live: LiveTranscriber | null,
     second: AssemblyLiveTranscriber | null,
     third: GrokLiveTranscriber | null,
+    more: { name: string; stream: SideStream }[],
     turnCheck: Promise<TurnCheck | null> = Promise.resolve(null)
   ) => {
     // Ignore clips too short to hold a word.
@@ -434,6 +465,7 @@ export function startSpeakerCapture({
       live?.abort()
       second?.abort()
       third?.abort()
+      more.forEach((m) => m.stream.abort())
       return
     }
     // Lossless FLAC is about half the size of WAV, so it uploads faster.
@@ -449,6 +481,7 @@ export function startSpeakerCapture({
     if (!live) {
       second?.abort()
       third?.abort()
+      more.forEach((m) => m.stream.abort())
     }
     type Extra = { texts: string[]; timings: EngineTiming[] }
     const extras: { names: string[]; result: Promise<Extra | null> }[] = []
@@ -476,6 +509,9 @@ export function startSpeakerCapture({
         names: ['grok live'],
         result: streamed('grok live', third),
       })
+    if (live)
+      for (const m of more)
+        extras.push({ names: [m.name], result: streamed(m.name, m.stream) })
     // Grok streams in live mode, so it isn't uploaded as well
     const others = live
       ? otherEngines().filter((e) => !(third && e === 'grok'))
@@ -652,10 +688,15 @@ export function startSpeakerCapture({
       let live: LiveTranscriber | null = null
       let second: AssemblyLiveTranscriber | null = null
       let third: GrokLiveTranscriber | null = null
+      let more: { name: string; stream: SideStream }[] = []
       let clock = 0
       if (getLiveMode()) elevenTokens.warm()
       if (grokLive()) grokTickets.warm()
       if (assemblyLive()) assemblyTokens.warm()
+      if (sonioxCartesiaLive()) {
+        sonioxKeys.warm()
+        cartesiaKeys.warm()
+      }
 
       tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
         if (stale()) return
@@ -686,6 +727,28 @@ export function startSpeakerCapture({
             )
             preroll.forEach((chunk) => third!.push(chunk))
           }
+          if (sonioxCartesiaLive()) {
+            more = [
+              {
+                name: 'cartesia live',
+                stream: new CartesiaLiveTranscriber(
+                  cartesiaKeys.take(),
+                  undefined,
+                  keyTermsSource()
+                ),
+              },
+              {
+                name: 'soniox live',
+                stream: new SonioxLiveTranscriber(
+                  sonioxKeys.take(),
+                  undefined,
+                  keyTermsSource()
+                ),
+              },
+            ]
+            for (const m of more)
+              preroll.forEach((chunk) => m.stream.push(chunk))
+          }
           speaking = true
           idleStatus()
         }
@@ -694,6 +757,7 @@ export function startSpeakerCapture({
           live?.push(small)
           second?.push(small)
           third?.push(small)
+          more.forEach((m) => m.stream.push(small))
         } else {
           preroll.push(small)
           prerollLen += small.length
@@ -707,11 +771,13 @@ export function startSpeakerCapture({
             live,
             second,
             third,
+            more,
             checkTurn?.() ?? Promise.resolve(null)
           )
           live = null
           second = null
           third = null
+          more = []
           utterance = null
           preroll.length = 0
           prerollLen = 0
@@ -733,6 +799,7 @@ export function startSpeakerCapture({
       cleanups.push(() => live?.abort())
       cleanups.push(() => second?.abort())
       cleanups.push(() => third?.abort())
+      cleanups.push(() => more.forEach((m) => m.stream.abort()))
       ownCtx.onstatechange = () => {
         if (!stale()) idleStatus()
       }

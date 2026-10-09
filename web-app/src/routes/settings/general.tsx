@@ -825,7 +825,7 @@ function General() {
               />
               <CardItem
                 title="Second transcription engine"
-                description="A second engine next to ElevenLabs; the judge merges the transcripts to fix misheard words. The live options need live transcription. None is fastest."
+                description="Engines next to ElevenLabs; the judge merges the transcripts to fix misheard words. Soniox + Cartesia (the default) get your dictionary. The live options need live transcription. None is fastest."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
