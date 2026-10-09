@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  dictate,
   createRelay,
   liveToken,
   speakerLogLine,
@@ -472,4 +473,46 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
   } finally {
     server.close()
   }
+})
+
+test('dictation: sends the WAV to Aqua with its key and returns the text', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, headers: init.headers, audio: init.body.get('audio') })
+    return new Response(JSON.stringify({ raw_text: 'cube ctl', text: 'kubectl' }))
+  }
+  const server = createRelay({ env: { AQUA_API_KEY: 'a' }, fetchImpl }).listen(
+    0,
+    '127.0.0.1'
+  )
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const post = () => {
+      const form = new FormData()
+      form.append(
+        'audio',
+        new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/wav' }),
+        'dictation.wav'
+      )
+      return fetch(`http://127.0.0.1:${server.address().port}/api/dictate`, {
+        method: 'POST',
+        body: form,
+      })
+    }
+    const res = await post()
+    assert.equal(res.status, 200)
+    assert.deepEqual(await res.json(), { text: 'kubectl' })
+    assert.equal(calls[0].url, 'https://api.aquavoice.com/v1/dictations')
+    assert.equal(calls[0].headers.Authorization, 'Bearer a')
+    assert.equal(calls[0].audio.size, 4)
+  } finally {
+    server.close()
+  }
+})
+
+test('dictation: 503 without an Aqua key', async () => {
+  await assert.rejects(
+    dictate(new Blob([]), { env: {} }),
+    (err) => err.status === 503
+  )
 })

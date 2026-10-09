@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { toggleDictation } from '@/lib/dictation'
 
 /**
  * Keys a helper like Hammerspoon can send to this tab while another app is
@@ -18,6 +19,8 @@ export const SCENARIO_KEY = 'F16'
  * suggestion chip (a clip the two judges disagreed on).
  */
 export const SUGGESTION_KEY = 'F15'
+/** Starts dictating your own voice (Aqua); pressed again, sends the text. */
+export const DICTATION_KEY = 'F14'
 
 let scenarioSender: (() => string | null) | null = null
 
@@ -90,6 +93,7 @@ function keyName(e: KeyboardEvent): string {
   if (fKey.test(e.key)) return e.key
   if (fKey.test(e.code)) return e.code
   const byCode: Record<number, string> = {
+    125: 'F14',
     126: 'F15',
     127: 'F16',
     128: 'F17',
@@ -105,6 +109,10 @@ export function handleSpeakerKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === SCENARIO_KEY) return sendScenario()
+  if (key === DICTATION_KEY) {
+    toggleDictation()
+    return true
+  }
   const state = useSpeakerTranscription.getState()
   if (key === SUGGESTION_KEY) {
     const send = document.querySelector<HTMLButtonElement>(

@@ -51,6 +51,7 @@ import {
   SpeakerListenIndicator,
   SpeakerSuggestions,
 } from './SpeakerListenIndicator'
+import { DictationBanner, DictationButton } from './DictationIndicator'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import { replaceableQuestion } from '@/lib/speakerRevision'
 import {
@@ -168,7 +169,10 @@ const ChatInput = ({
   // Derived: any document currently processing (ingestion in progress)
   const attachmentsKey = currentThreadId ?? NEW_THREAD_ATTACHMENT_KEY
   const attachments = useChatAttachments(
-    useCallback((state) => state.getAttachments(attachmentsKey), [attachmentsKey])
+    useCallback(
+      (state) => state.getAttachments(attachmentsKey),
+      [attachmentsKey]
+    )
   )
   const attachmentsKeyRef = useRef(attachmentsKey)
   const setAttachmentsForThread = useChatAttachments(
@@ -194,7 +198,10 @@ const ChatInput = ({
   const lastTransferredThreadId = useRef<string | null>(null)
 
   useEffect(() => {
-    if (currentThreadId && lastTransferredThreadId.current !== currentThreadId) {
+    if (
+      currentThreadId &&
+      lastTransferredThreadId.current !== currentThreadId
+    ) {
       transferAttachments(NEW_THREAD_ATTACHMENT_KEY, currentThreadId)
       lastTransferredThreadId.current = currentThreadId
     }
@@ -230,9 +237,10 @@ const ChatInput = ({
                   ...att,
                   ...updatedAttachment,
                   processing: status === 'processing',
-                  processed: status === 'done'
-                    ? true
-                    : updatedAttachment?.processed ?? att.processed,
+                  processed:
+                    status === 'done'
+                      ? true
+                      : (updatedAttachment?.processed ?? att.processed),
                 }
               : att
           )
@@ -271,7 +279,8 @@ const ChatInput = ({
   }, [selectedModel, selectedModel?.capabilities, selectedProvider, serviceHub])
 
   // Check if there are active MCP servers
-  const hasActiveMCPServers = tools.filter((tool) => tool.server !== 'Jan Browser MCP').length > 0
+  const hasActiveMCPServers =
+    tools.filter((tool) => tool.server !== 'Jan Browser MCP').length > 0
 
   // Get MCP extension and its custom component
   const extensionManager = ExtensionManager.getInstance()
@@ -458,7 +467,10 @@ const ChatInput = ({
           setActiveModels(active || [])
           return active?.includes(selectedModel.id) ?? false
         } catch (err) {
-          console.warn('Failed to start model before attachment validation', err)
+          console.warn(
+            'Failed to start model before attachment validation',
+            err
+          )
           return false
         } finally {
           updateLoadingModel(false)
@@ -500,7 +512,10 @@ const ChatInput = ({
       const docsNeedingPrompt = docs.filter((doc) => {
         if (doc.processed || doc.injectionMode) return false
         const preference = doc.parseMode ?? parsePreference
-        return preference === 'prompt' || (preference === 'auto' && !hasContextEstimate)
+        return (
+          preference === 'prompt' ||
+          (preference === 'auto' && !hasContextEstimate)
+        )
       })
 
       // Map to store individual choices for each document
@@ -512,7 +527,12 @@ const ChatInput = ({
           const doc = docsNeedingPrompt[i]
           const choice = await useAttachmentIngestionPrompt
             .getState()
-            .showPrompt(doc, ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES, i, docsNeedingPrompt.length)
+            .showPrompt(
+              doc,
+              ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES,
+              i,
+              docsNeedingPrompt.length
+            )
 
           if (!choice) {
             // User cancelled - remove all pending docs
@@ -534,7 +554,9 @@ const ChatInput = ({
         }
       }
 
-      const estimateTokens = async (text: string): Promise<number | undefined> => {
+      const estimateTokens = async (
+        text: string
+      ): Promise<number | undefined> => {
         try {
           if (!selectedModel?.id || !modelReady) return undefined
           const tokenCount = await serviceHub
@@ -755,13 +777,16 @@ const ChatInput = ({
           ) as VectorDBExtension | undefined
 
           if (vectorDBExtension?.deleteFile) {
-            await vectorDBExtension.deleteFile(currentThreadId, attachmentToRemove.id)
+            await vectorDBExtension.deleteFile(
+              currentThreadId,
+              attachmentToRemove.id
+            )
           }
         }
       } catch (error) {
         console.error('Failed to delete attachment from backend:', error)
         toast.error('Failed to remove attachment', {
-          description: error instanceof Error ? error.message : String(error)
+          description: error instanceof Error ? error.message : String(error),
         })
         return
       }
@@ -901,11 +926,11 @@ const ChatInput = ({
                 prev.map((a) =>
                   a.name === img.name && a.type === 'image'
                     ? {
-                      ...a,
-                      processing: false,
-                      processed: true,
-                      id: result.id,
-                    }
+                        ...a,
+                        processing: false,
+                        processed: true,
+                        id: result.id,
+                      }
                     : a
                 )
               )
@@ -1247,6 +1272,7 @@ const ChatInput = ({
             onDragOver={hasMmproj ? handleDragOver : undefined}
             onDrop={hasMmproj ? handleDrop : undefined}
           >
+            <DictationBanner />
             <SpeakerSuggestions />
             {attachments.length > 0 && (
               <div className="flex flex-col gap-2 p-2 pb-0">
@@ -1340,14 +1366,16 @@ const ChatInput = ({
                               className="absolute -top-1 -right-2.5 bg-destructive size-5 flex rounded-full items-center justify-center cursor-pointer"
                               onClick={() => handleRemoveAttachment(idx)}
                             >
-                              <IconX className="text-destructive-fg" size={16} />
+                              <IconX
+                                className="text-destructive-fg"
+                                size={16}
+                              />
                             </div>
                           )}
                         </div>
                       )
                     })}
                 </div>
-
               </div>
             )}
             <TextareaAutosize
@@ -1502,46 +1530,52 @@ const ChatInput = ({
                     </Tooltip>
                   </TooltipProvider>
                 )}
-                {selectedModel?.capabilities?.includes('tools') && hasJanBrowserMCPConfig && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div
-                          className={cn(
-                            "h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1 cursor-pointer",
-                            janBrowserMCPActive && "bg-accent/10",
-                            isJanBrowserMCPLoading && "opacity-70 cursor-not-allowed"
-                          )}
-                          onClick={isJanBrowserMCPLoading ? undefined : handleBrowseClick}
-                        >
-                          {isJanBrowserMCPLoading ? (
-                            <IconLoader2
-                              size={18}
-                              className="text-accent animate-spin"
-                            />
-                          ) : (
-                            <IconWorld
-                              size={18}
-                              className={cn(
-                                "text-main-view-fg/50",
-                                janBrowserMCPActive && "text-accent"
-                              )}
-                            />
-                          )}
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>
-                          {isJanBrowserMCPLoading
-                            ? 'Starting...'
-                            : janBrowserMCPActive
-                            ? 'Browse (Active)'
-                            : 'Browse'}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
+                {selectedModel?.capabilities?.includes('tools') &&
+                  hasJanBrowserMCPConfig && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div
+                            className={cn(
+                              'h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1 cursor-pointer',
+                              janBrowserMCPActive && 'bg-accent/10',
+                              isJanBrowserMCPLoading &&
+                                'opacity-70 cursor-not-allowed'
+                            )}
+                            onClick={
+                              isJanBrowserMCPLoading
+                                ? undefined
+                                : handleBrowseClick
+                            }
+                          >
+                            {isJanBrowserMCPLoading ? (
+                              <IconLoader2
+                                size={18}
+                                className="text-accent animate-spin"
+                              />
+                            ) : (
+                              <IconWorld
+                                size={18}
+                                className={cn(
+                                  'text-main-view-fg/50',
+                                  janBrowserMCPActive && 'text-accent'
+                                )}
+                              />
+                            )}
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>
+                            {isJanBrowserMCPLoading
+                              ? 'Starting...'
+                              : janBrowserMCPActive
+                                ? 'Browse (Active)'
+                                : 'Browse'}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                 {selectedModel?.capabilities?.includes('tools') &&
                   hasActiveMCPServers &&
                   (MCPToolComponent ? (
@@ -1593,8 +1627,8 @@ const ChatInput = ({
                                     <IconTool
                                       size={18}
                                       className={cn(
-                                        "text-main-view-fg/50",
-                                        toolsCount > 0 && "text-accent"
+                                        'text-main-view-fg/50',
+                                        toolsCount > 0 && 'text-accent'
                                       )}
                                     />
                                   </div>
@@ -1647,6 +1681,7 @@ const ChatInput = ({
             </div>
 
             <div className="flex items-center gap-2">
+              <DictationButton />
               <SpeakerListenIndicator />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&
