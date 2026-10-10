@@ -31,29 +31,35 @@ jobs:
       - run: docker build -t jan-web .
       - name: Smoke test
         run: |
+          # Without LOGIN_EMAIL nobody can sign in: pages go to /login, files and APIs are refused
           docker run -d --name jan-web -e PORT=8080 -p 8080:8080 jan-web
-          for i in $(seq 1 30); do curl -sf http://localhost:8080/ > /dev/null && break; sleep 1; done
-          curl -sf http://localhost:8080/ | grep -qi '<div id="root"'
-          curl -sf http://localhost:8080/threads/some-id | grep -qi '<div id="root"'
-          curl -sfI http://localhost:8080/ | grep -qi '^cache-control: no-cache'
-          curl -sfI http://localhost:8080/serviceWorker.js | grep -qi '^cache-control: no-cache'
-          curl -sf http://localhost:8080/serviceWorker.js | grep -q 'registration.unregister'
-          worker=$(docker exec jan-web sh -c 'ls /usr/share/nginx/html/assets | grep "^pdf.worker" | head -1')
-          curl -sfI "http://localhost:8080/assets/$worker" | grep -qi '^content-type: text/javascript'
-          # Groq pass-through reaches api.groq.com (no key, so Groq answers 401)
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/login > /dev/null && break; sleep 1; done
+          curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8080/ | grep -q '^302 .*/login$'
+          curl -sf http://localhost:8080/login | grep -q 'Sign in to Hi-chat'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/groq/openai/v1/models)" = 401
-          # The transcription relay stays off (503) until RELAY_TOKEN is set
-          curl -s -D - -o /dev/null -X POST http://localhost:8080/api/transcribe | grep -qi '^x-relay-rejected: unset'
-          # With a token: no or wrong token is refused before reaching the relay
-          docker run -d --name jan-web-key -e PORT=8081 -e ELEVENLABS_API_KEY=fake-key -e XAI_API_KEY=fake-key -e RELAY_TOKEN=ci-token -p 8081:8081 jan-web
-          for i in $(seq 1 30); do curl -sf http://localhost:8081/ > /dev/null && break; sleep 1; done
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/transcribe)" = 401
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Relay-Token: wrong' http://localhost:8081/api/transcribe)" = 401
-          # With the token, one upload reaches the relay, which tries both engines
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/transcribe)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/code)" = 503
+          # With LOGIN_EMAIL: a signed cookie (as /auth/verify sets it) opens everything
+          docker run -d --name jan-web-key -e PORT=8081 -e LOGIN_EMAIL=ci@example.com -e RESEND_API_KEY=fake-key -e AUTH_SECRET=ci-secret -e ELEVENLABS_API_KEY=fake-key -e XAI_API_KEY=fake-key -p 8081:8081 jan-web
+          for i in $(seq 1 30); do curl -sf http://localhost:8081/login > /dev/null && break; sleep 1; done
+          exp="$(( $(date +%s) + 3600 ))000"
+          sig=$(printf '%s' "$exp:ci@example.com" | openssl dgst -sha256 -hmac ci-secret | awk '{print $NF}')
+          C="hc_auth=$exp.$sig"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = 302
+          curl -sf -b "$C" http://localhost:8081/ | grep -qi '<div id="root"'
+          curl -sf -b "$C" http://localhost:8081/threads/some-id | grep -qi '<div id="root"'
+          curl -sfI -b "$C" http://localhost:8081/ | grep -qi '^cache-control: no-cache'
+          curl -sfI -b "$C" http://localhost:8081/serviceWorker.js | grep -qi '^cache-control: no-cache'
+          curl -sf -b "$C" http://localhost:8081/serviceWorker.js | grep -q 'registration.unregister'
+          worker=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^pdf.worker" | head -1')
+          curl -sfI -b "$C" "http://localhost:8081/assets/$worker" | grep -qi '^content-type: text/javascript'
+          # Groq pass-through reaches api.groq.com (no key, so Groq itself answers 401)
+          curl -s -b "$C" http://localhost:8081/api/groq/openai/v1/models | grep -qi 'api key'
+          # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac
           for i in $(seq 1 30); do
-            code=$(curl -s -o body.json -w '%{http_code}' -X POST -H 'X-Relay-Token: ci-token' -F file=@clip.flac http://localhost:8081/api/transcribe)
+            code=$(curl -s -o body.json -w '%{http_code}' -X POST -b "$C" -F file=@clip.flac http://localhost:8081/api/transcribe)
             grep -q '"results"' body.json && break
             sleep 1
           done

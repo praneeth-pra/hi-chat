@@ -45,37 +45,6 @@ export function grokFirst(texts: string[], names: string[]): string[] {
 export const TRANSCRIBE_URL = '/api/transcribe'
 
 /**
- * The relay only answers requests carrying the RELAY_TOKEN set on the server,
- * so strangers can't spend the API keys. The token is asked for once and kept
- * in this browser.
- */
-export const RELAY_TOKEN_STORAGE_KEY = 'speaker-relay-token'
-export const RELAY_TOKEN_HEADER = 'X-Relay-Token'
-
-export function relayToken(): string {
-  let token = ''
-  try {
-    token = localStorage.getItem(RELAY_TOKEN_STORAGE_KEY) ?? ''
-  } catch {
-    // Storage blocked: ask every time
-  }
-  if (!token && typeof window !== 'undefined' && window.prompt) {
-    const answer = window.prompt(
-      'Speaker relay token (the RELAY_TOKEN variable on Railway):'
-    )
-    token = (answer ?? '').trim()
-    if (token) {
-      try {
-        localStorage.setItem(RELAY_TOKEN_STORAGE_KEY, token)
-      } catch {
-        // Storage blocked: ask again next time
-      }
-    }
-  }
-  return token
-}
-
-/**
  * Which engines transcribe speaker clips. ElevenLabs always runs; a second
  * transcript gives the relevance check something to merge with it.
  * "live-soniox-cartesia" (with live mode on) streams to Soniox and Cartesia
@@ -157,52 +126,21 @@ export function sonioxCartesiaLive(): boolean {
   return getLiveMode() && getTranscribeMode() === 'live-soniox-cartesia'
 }
 
-function forgetRelayToken() {
-  try {
-    localStorage.removeItem(RELAY_TOKEN_STORAGE_KEY)
-  } catch {
-    // Nothing stored
-  }
-}
-
 function relayPost(url: string, body: FormData): Promise<Response> {
-  return fetch(url, {
-    method: 'POST',
-    body,
-    headers: { [RELAY_TOKEN_HEADER]: relayToken() },
-  })
+  return fetch(url, { method: 'POST', body })
 }
 
-const RELAY_TOKEN_ERROR =
-  'Relay token missing or wrong; you will be asked for it on the next clip'
-
-/** nginx marks the responses where it, not the engine, refused the request. */
-function relayRejected(res: Response): 'token' | 'unset' | null {
-  const flag = res.headers.get('X-Relay-Rejected')
-  if (!flag) return null
-  if (flag === 'unset') return 'unset'
-  forgetRelayToken()
-  return 'token'
-}
+/** The site login (relay/auth.mjs) answers 401 once this browser is signed out. */
+const SIGNED_OUT_ERROR = 'Signed out of Hi-chat: reload the page to sign in'
 
 /** Each judged clip is reported here so it shows in the server's logs. */
 export const SPEAKER_LOG_URL = '/api/speaker-log'
 
 /** Sends one clip line to the server log; never prompts and never throws. */
 export function reportClip(line: string) {
-  let token = ''
-  try {
-    token = localStorage.getItem(RELAY_TOKEN_STORAGE_KEY) ?? ''
-  } catch {
-    // Storage blocked: nothing to authenticate with
-  }
-  if (!token) return
   fetch(SPEAKER_LOG_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      [RELAY_TOKEN_HEADER]: token,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ line }),
     keepalive: true,
   }).catch(() => {})
@@ -224,17 +162,10 @@ async function requestLiveToken(
 ): Promise<{ token: string; terms?: string[] }> {
   const res = await fetch(LIVE_TOKEN_URL, {
     method: 'POST',
-    headers: {
-      [RELAY_TOKEN_HEADER]: relayToken(),
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ engine }),
   })
-  const rejected = relayRejected(res)
-  if (rejected === 'token') throw new Error(RELAY_TOKEN_ERROR)
-  if (rejected === 'unset') {
-    throw new Error('RELAY_TOKEN is not set on the server')
-  }
+  if (res.status === 401) throw new Error(SIGNED_OUT_ERROR)
   if (!res.ok) throw new Error(`Live token failed (${res.status})`)
   return (await res.json()) as { token: string; terms?: string[] }
 }
@@ -343,11 +274,7 @@ export async function transcribeClip(
   if (engines.some((e) => FAST_ENGINES.includes(e)))
     form.append('wait_ms', String(SECOND_ENGINE_WAIT_MS))
   const res = await relayPost(TRANSCRIBE_URL, form)
-  const rejected = relayRejected(res)
-  if (rejected === 'token') throw new Error(RELAY_TOKEN_ERROR)
-  if (rejected === 'unset') {
-    throw new Error('RELAY_TOKEN is not set on the server')
-  }
+  if (res.status === 401) throw new Error(SIGNED_OUT_ERROR)
   let results: EngineResult[] = []
   try {
     results = ((await res.json()) as { results?: EngineResult[] }).results ?? []

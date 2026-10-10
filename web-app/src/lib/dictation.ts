@@ -7,11 +7,9 @@ import {
   rms,
 } from '@/lib/speakerCapture'
 import {
-  RELAY_TOKEN_HEADER,
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
-  relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
@@ -413,7 +411,6 @@ async function transcribe(
     {
       method: 'POST',
       body,
-      headers: { [RELAY_TOKEN_HEADER]: relayToken() },
     }
   )
   const data = (await res.json().catch(() => ({}))) as {

@@ -8,9 +8,7 @@ import {
 } from '@/lib/dictationJudge'
 import { pickBest } from '@/lib/dictation'
 import {
-  RELAY_TOKEN_HEADER,
   keyTerms,
-  relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 
@@ -38,7 +36,6 @@ const TEST_TIMEOUT_MS = 6000
 export async function loadJudgeSamples(): Promise<JudgeSample[]> {
   const res = await fetch('/api/judge-samples', {
     method: 'POST',
-    headers: { [RELAY_TOKEN_HEADER]: relayToken() },
   })
   if (!res.ok) throw new Error(`samples: status ${res.status}`)
   return res.json()
