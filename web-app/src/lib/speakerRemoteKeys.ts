@@ -26,6 +26,11 @@ export const SUGGESTION_KEY = 'F15'
  */
 export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
+/**
+ * Shift + F16 scrolls to the last code block in the chat; pressed again
+ * within a few seconds, to the one before it. Hammerspoon sends it on a tap of Right Option.
+ */
+export const LAST_CODE_KEY = 'Shift+F16'
 
 let scenarioSender: (() => string | null) | null = null
 
@@ -49,6 +54,28 @@ function sendScenario(): boolean {
   }
   useSpeakerTranscription.getState().enqueue(text)
   toast('Sent scenario')
+  return true
+}
+
+const CODE_AGAIN_MS = 5000
+let codeJump = { at: 0, index: -1 }
+
+/** Scrolls to the last code block, or the one before the last jump's. */
+export function jumpToCode(now = Date.now()): boolean {
+  const blocks = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-code-block]')
+  )
+  if (!blocks.length) {
+    toast('No code in this chat')
+    return true
+  }
+  const since = now - codeJump.at
+  const again =
+    since >= 0 && since < CODE_AGAIN_MS && codeJump.index < blocks.length
+  const index = again ? Math.max(0, codeJump.index - 1) : blocks.length - 1
+  if (again && index === codeJump.index) toast('This is the first code block')
+  codeJump = { at: now, index }
+  blocks[index].scrollIntoView({ block: 'start', behavior: 'smooth' })
   return true
 }
 
@@ -110,11 +137,12 @@ function keyName(e: KeyboardEvent): string {
   return byCode[e.keyCode] ?? e.key
 }
 
-/** Toggles coding mode or listening, focuses the chat box or sends the scenario; returns false for any other key. */
+/** Toggles coding mode or listening, focuses the chat box, sends the scenario or jumps to code; returns false for any other key. */
 export function handleSpeakerKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === SCENARIO_KEY) return sendScenario()
+  if (key === LAST_CODE_KEY) return jumpToCode()
   if (key === DICTATION_TOGGLE_KEY) {
     toggleDictation()
     return true
@@ -156,7 +184,9 @@ export function handleSpeakerKey(key: string): boolean {
 export function listenForSpeakerKeys() {
   const onKey = (e: KeyboardEvent) => {
     if (e.repeat) return
-    if (handleSpeakerKey(keyName(e))) e.preventDefault()
+    const name = keyName(e)
+    if (handleSpeakerKey(e.shiftKey ? `Shift+${name}` : name))
+      e.preventDefault()
   }
   window.addEventListener('keydown', onKey)
   return () => window.removeEventListener('keydown', onKey)

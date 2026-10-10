@@ -125,7 +125,10 @@ const CodeComponent = memo(
     }
 
     return (
-      <div className="relative overflow-hidden border rounded-md border-main-view-fg/2">
+      <div
+        data-code-block
+        className="relative overflow-hidden border rounded-md border-main-view-fg/2 scroll-mt-4"
+      >
         <style>
           {`
         .react-syntax-highlighter-line-number {
