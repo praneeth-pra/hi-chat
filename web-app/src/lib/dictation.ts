@@ -542,6 +542,12 @@ function begin(m: Mic) {
   useDictation.setState({ status: 'recording', startedAt: Date.now() })
 }
 
+/**
+ * Each start gets a number; cancelling, or a newer start, makes an older one
+ * still waiting for the mic give up without touching the mic.
+ */
+let generation = 0
+
 export async function startDictation() {
   if (useDictation.getState().status !== 'idle') return
   if (
@@ -553,16 +559,20 @@ export async function startDictation() {
   }
   // The mic is already open: start right away
   if (mic && micAlive(mic)) return begin(mic)
+  const gen = ++generation
   useDictation.setState({ status: 'starting', level: 0 })
   try {
     const m = await ensureMic()
-    // Cancelled while the mic was opening
-    if (useDictation.getState().status !== 'starting') {
-      if (!getKeepMicReady()) closeMic()
+    // Cancelled while the mic was opening (and maybe started again, in
+    // which case the newer start owns the mic)
+    if (gen !== generation || useDictation.getState().status !== 'starting') {
+      if (useDictation.getState().status === 'idle' && !getKeepMicReady())
+        closeMic()
       return
     }
     begin(m)
   } catch (err) {
+    if (gen !== generation) return
     release()
     useDictation.setState({ status: 'idle', level: 0 })
     toast(`Microphone unavailable: ${(err as Error).message}`)
@@ -730,6 +740,7 @@ export async function reportAuto(
 export function cancelDictation() {
   const { status } = useDictation.getState()
   if (status !== 'recording' && status !== 'starting') return
+  generation++
   release()
   useDictation.setState({ status: 'idle', level: 0 })
 }

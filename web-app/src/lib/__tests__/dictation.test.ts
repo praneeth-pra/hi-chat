@@ -392,6 +392,41 @@ describe('dictation', () => {
       'My career started in TCS'
     )
   })
+  it('cancel then start again while the mic opens records once, on an open mic', async () => {
+    setKeepMicReady(false)
+    useDictation.setState({ status: 'idle' })
+    const mic = fakeMic()
+    const first = startDictation()
+    cancelDictation()
+    const second = startDictation()
+    expect(useDictation.getState().status).toBe('starting')
+    mic.open()
+    await Promise.all([first, second])
+    // The first start gave up: it neither recorded nor closed the mic
+    // under the second one
+    expect(useDictation.getState().status).toBe('recording')
+    expect(mic.getUserMedia).toHaveBeenCalledTimes(1)
+    expect(mic.track.stop).not.toHaveBeenCalled()
+    cancelDictation()
+    expect(mic.track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
+  it('a start cancelled while the mic opens closes it once it opens', async () => {
+    setKeepMicReady(false)
+    useDictation.setState({ status: 'idle' })
+    const mic = fakeMic()
+    const start = startDictation()
+    cancelDictation()
+    mic.open()
+    await start
+    expect(useDictation.getState().status).toBe('idle')
+    expect(mic.track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
   describe('when the live engines lose a dictation', () => {
     const enqueue = vi.fn()
     beforeEach(() => {
