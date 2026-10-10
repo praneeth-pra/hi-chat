@@ -7,9 +7,7 @@ import {
 import { cn } from '@/lib/utils'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import {
-  DICTATION_ENGINES,
   cancelDictation,
-  getDictationEngine,
   readyMicEarly,
   toggleDictation,
   useDictation,
@@ -43,7 +41,7 @@ function LevelBars({ level }: { level: number }) {
 
 /**
  * A row above the prompt while dictating: a pulsing dot, bars that follow
- * your voice and the time, then "Transcribing" while Aqua works.
+ * your voice and the time, then "Transcribing" while the engines finish.
  */
 export function DictationBanner() {
   const { status, level, startedAt } = useDictation()
@@ -63,14 +61,7 @@ export function DictationBanner() {
       {status === 'transcribing' ? (
         <>
           <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-          <span>
-            Transcribing with{' '}
-            {
-              DICTATION_ENGINES.find((e) => e.value === getDictationEngine())
-                ?.label
-            }
-            …
-          </span>
+          <span>Transcribing…</span>
         </>
       ) : (
         <>
