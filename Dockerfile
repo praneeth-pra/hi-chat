@@ -46,10 +46,9 @@ COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 ENV PORT=80
 # Speaker transcription keys; set them as Railway variables. ElevenLabs is the
-# main engine; Grok (xAI) and AssemblyAI are optional second engines.
+# main engine; Grok (xAI) is an optional second engine.
 ENV ELEVENLABS_API_KEY=""
 ENV XAI_API_KEY=""
-ENV ASSEMBLYAI_API_KEY=""
 # Dictation (your own voice) goes to Aqua, which applies your dictionary
 ENV AQUA_API_KEY=""
 # Shared secret the browser sends to use the transcription relay; without it
@@ -57,7 +56,7 @@ ENV AQUA_API_KEY=""
 ENV RELAY_TOKEN=""
 
 # The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
-COPY relay/server.mjs relay/flacToWav.mjs relay/wsProxy.mjs relay/dictionary.txt relay/judge-samples.json /relay/
+COPY relay/server.mjs relay/wsProxy.mjs relay/dictionary.txt relay/judge-samples.json /relay/
 COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
 
 EXPOSE 80

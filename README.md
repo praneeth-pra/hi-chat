@@ -11,7 +11,7 @@ device) into prompts by transcribing each spoken clip.
 - `core/` - `@janhq/core`, shared types and extension base classes
 - `extensions-web/` - browser storage for threads and messages
 - `relay/` - small Node server for `/api/transcribe` that forwards clips to
-  ElevenLabs, Grok and AssemblyAI, keeping the API keys on the server
+  ElevenLabs and Grok, keeping the API keys on the server
 - `nginx.conf`, `Dockerfile` - the production image (static app, Groq
   pass-through at `/api/groq/`, transcription relay)
 
@@ -38,7 +38,7 @@ yarn build:web-app      # output in web-app/dist-web
 ```bash
 docker build -t jan-web .
 docker run -p 8080:8080 -e PORT=8080 \
-  -e ELEVENLABS_API_KEY=... -e XAI_API_KEY=... -e ASSEMBLYAI_API_KEY=... -e RELAY_TOKEN=... jan-web
+  -e ELEVENLABS_API_KEY=... -e XAI_API_KEY=... -e RELAY_TOKEN=... jan-web
 ```
 
 `RELAY_TOKEN` is the shared secret the browser sends to use the transcription

@@ -1,6 +1,6 @@
 // Transcription relay: the browser uploads each clip once to
 // /api/transcribe; this sends it to every engine with a key at the same time,
-// adding the keys (ELEVENLABS_API_KEY, XAI_API_KEY, ASSEMBLYAI_API_KEY) so
+// adding the keys (ELEVENLABS_API_KEY, XAI_API_KEY) so
 // they never reach the browser. nginx checks the relay token before forwarding here.
 //
 // Once one engine answers, the others get SECOND_ENGINE_WAIT_MS more (the
@@ -10,7 +10,6 @@
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { flacToWav } from './flacToWav.mjs'
 import { randomBytes } from 'node:crypto'
 import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
 
@@ -67,33 +66,11 @@ export const ENGINES = [
       return (await res.json()).text ?? ''
     },
   },
-  {
-    // AssemblyAI's Sync API answers short clips in one request; it takes WAV,
-    // not FLAC, so the clip is unpacked here first.
-    name: 'assemblyai',
-    keyVar: 'ASSEMBLYAI_API_KEY',
-    async run(file, key, signal, fetchImpl) {
-      const form = new FormData()
-      form.append('audio', await flacToWav(file), 'speaker.wav')
-      const res = await fetchImpl('https://sync.assemblyai.com/v1/transcribe', {
-        method: 'POST',
-        headers: { 'Authorization': key, 'X-AAI-Model': 'universal-3-5-pro' },
-        body: form,
-        signal,
-      })
-      if (!res.ok)
-        throw new Error(
-          `AssemblyAI failed (${res.status}): ${await errorText(res)}`
-        )
-      return (await res.json()).text ?? ''
-    },
-  },
 ]
 
 async function errorText(res) {
   try {
-    // One line, so Railway keeps the whole message together
-    return (await res.text()).replace(/\s+/g, ' ').slice(0, 300)
+    return (await res.text()).slice(0, 200)
   } catch {
     return ''
   }
@@ -209,108 +186,34 @@ export function clipLogLine(size, results) {
 /**
  * Live mode: a single-use ElevenLabs token (valid 15 minutes) lets the browser
  * stream audio straight to ElevenLabs' realtime model without ever seeing
- * ELEVENLABS_API_KEY. With `engine: 'assemblyai'` it is a temporary
- * AssemblyAI streaming token instead (redeemable for 10 minutes; each session
- * may last 10 minutes, and AssemblyAI bills while it is open).
+ * ELEVENLABS_API_KEY.
  */
 export async function liveToken({
   env = process.env,
   fetchImpl = fetch,
   engine = 'elevenlabs',
-  terms = [],
 } = {}) {
   if (engine === 'grok') return grokTicket(env)
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
-  if (engine === 'gemini') return geminiToken({ env, fetchImpl, terms })
-  const assembly = engine === 'assemblyai'
-  const keyVar = assembly ? 'ASSEMBLYAI_API_KEY' : 'ELEVENLABS_API_KEY'
-  const key = env[keyVar]
+  const key = env.ELEVENLABS_API_KEY
   if (!key)
-    throw Object.assign(new Error(`${keyVar} not set`), {
+    throw Object.assign(new Error('ELEVENLABS_API_KEY not set'), {
       status: 503,
     })
-  const res = assembly
-    ? await fetchImpl(
-        'https://streaming.assemblyai.com/v3/token?expires_in_seconds=600&max_session_duration_seconds=600',
-        { headers: { Authorization: key } }
-      )
-    : await fetchImpl(
-        'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
-        { method: 'POST', headers: { 'xi-api-key': key } }
-      )
+  const res = await fetchImpl(
+    'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
+    { method: 'POST', headers: { 'xi-api-key': key } }
+  )
   if (!res.ok)
     throw Object.assign(
       new Error(
-        `${assembly ? 'AssemblyAI' : 'ElevenLabs'} token failed (${res.status}): ${await errorText(res)}`
+        `ElevenLabs token failed (${res.status}): ${await errorText(res)}`
       ),
       { status: 502 }
     )
   const { token } = await res.json()
   return token
-}
-
-/**
- * Gemini live (logged beside Auto, not yet voting): a single-use ephemeral
- * token lets the browser stream straight to Google without GEMINI_API_KEY.
- * The token is locked to the transcription model and this config, so the
- * browser's setup message must send the same terms.
- */
-// Ephemeral tokens are created on v1alpha (v1beta rejects the constraints)
-const GEMINI_TOKEN_URL =
-  'https://generativelanguage.googleapis.com/v1alpha/auth_tokens'
-export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
-export function geminiLiveConfig(terms = []) {
-  return {
-    responseModalities: ['TEXT'],
-    inputAudioTranscription: {
-      languageCodes: ['en-US'],
-      ...(terms.length ? { customVocabulary: terms } : {}),
-    },
-  }
-}
-export async function geminiToken({
-  env = process.env,
-  fetchImpl = fetch,
-  terms = [],
-} = {}) {
-  if (!env.GEMINI_API_KEY)
-    throw Object.assign(new Error('GEMINI_API_KEY not set'), { status: 503 })
-  const create = (locked) =>
-    fetchImpl(GEMINI_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': env.GEMINI_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        uses: 1,
-        expireTime: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        newSessionExpireTime: new Date(Date.now() + 60 * 1000).toISOString(),
-        ...(locked
-          ? {
-              liveConnectConstraints: {
-                model: GEMINI_LIVE_MODEL,
-                config: geminiLiveConfig(terms),
-              },
-            }
-          : {}),
-      }),
-    })
-  let res = await create(true)
-  // If Google won't lock the token to the config, an unlocked single-use
-  // token still works (the browser sends the same setup either way)
-  if (res.status === 400) {
-    console.log(`gemini token: locked token refused: ${await errorText(res)}`)
-    res = await create(false)
-  }
-  if (!res.ok)
-    throw Object.assign(
-      new Error(`Gemini token failed (${res.status}): ${await errorText(res)}`),
-      { status: 502 }
-    )
-  const { name } = await res.json()
-  return name
 }
 
 /**
@@ -432,20 +335,15 @@ export function dictionaryTerms(
   return dictionary
 }
 
-/** The engine a live-token request asks for: `{"engine":"assemblyai"}`. */
-function liveTokenRequest(body) {
+/** The engine a live-token request asks for: `{"engine":"soniox"}`. */
+function liveTokenEngine(body) {
   try {
-    const { engine, terms } = JSON.parse(body.toString('utf8'))
-    return {
-      engine: ['assemblyai', 'grok', 'soniox', 'cartesia', 'gemini'].includes(
-        engine
-      )
-        ? engine
-        : 'elevenlabs',
-      terms: Array.isArray(terms) ? cleanKeyterms(terms) : [],
-    }
+    const engine = JSON.parse(body.toString('utf8')).engine
+    return ['grok', 'soniox', 'cartesia'].includes(engine)
+      ? engine
+      : 'elevenlabs'
   } catch {
-    return { engine: 'elevenlabs', terms: [] }
+    return 'elevenlabs'
   }
 }
 
@@ -583,16 +481,12 @@ export function createRelay(options = {}) {
       const started = Date.now()
       let engine = 'elevenlabs'
       try {
-        const request = liveTokenRequest(await readBody(req))
-        engine = request.engine
-        const token = await liveToken({ ...options, ...request })
+        engine = liveTokenEngine(await readBody(req))
+        const token = await liveToken({ ...options, engine })
         console.log(`live token ${engine} ${Date.now() - started} ms`)
         // Soniox and Cartesia are sent the dictionary as key terms
         if (engine === 'soniox' || engine === 'cartesia')
           return send(res, 200, { token, terms: dictionaryTerms() })
-        // Gemini's token is locked to the terms it was made with
-        if (engine === 'gemini')
-          return send(res, 200, { token, terms: request.terms })
         return send(res, 200, { token })
       } catch (err) {
         console.log(`live token ${engine} failed: ${err.message}`)
