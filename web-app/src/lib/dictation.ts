@@ -15,7 +15,6 @@ import {
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
-  AssemblyLiveTranscriber,
   CartesiaLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
@@ -40,8 +39,8 @@ import {
  * Which service turns your voice into text. Soniox gets your dictionary as
  * context terms and Cartesia the 100 that fit; Soniox, Cartesia, Grok and
  * ElevenLabs stream live while you talk, and Aqua (with your Aqua
- * dictionary) transcribes in pieces. AssemblyAI streams with the assistant's
- * key terms. Auto runs Cartesia, Soniox, AssemblyAI and ElevenLabs: as soon as two agree their text is sent, else a judge model
+ * dictionary) transcribes in pieces. Auto runs Cartesia, Soniox and
+ * ElevenLabs: as soon as two agree their text is sent, else a judge model
  * writes the best version. Aqua and Grok were left out of Auto: on P's
  * questions they were the slowest and least accurate.
  */
@@ -51,17 +50,12 @@ export type DictationEngine =
   | 'elevenlabs'
   | 'soniox'
   | 'cartesia'
-  | 'assemblyai'
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  {
-    value: 'auto',
-    label: 'Auto (Cartesia + Soniox + AssemblyAI + ElevenLabs)',
-  },
+  { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
   { value: 'aqua', label: 'Aqua' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
-  { value: 'assemblyai', label: 'AssemblyAI Universal-3.6 Pro (live)' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
@@ -482,24 +476,16 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       keyTerms()
     )
-  if (engine === 'assemblyai')
-    return new AssemblyLiveTranscriber(
-      fetchLiveToken('assemblyai'),
-      undefined,
-      keyTerms()
-    )
   return undefined
 }
 
 function autoLiveStreams() {
   // Cartesia first: when it agrees with another engine its text is sent
   // (it had the most words right on P's questions), then Soniox
-  return (['cartesia', 'soniox', 'assemblyai', 'elevenlabs'] as const).map(
-    (engine) => ({
-      engine,
-      stream: liveStream(engine)!,
-    })
-  )
+  return (['cartesia', 'soniox', 'elevenlabs'] as const).map((engine) => ({
+    engine,
+    stream: liveStream(engine)!,
+  }))
 }
 
 export type EngineText = { engine: DictationEngine; text: string }
