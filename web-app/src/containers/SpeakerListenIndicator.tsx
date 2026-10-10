@@ -91,9 +91,7 @@ const LABELS: Record<SpeakerStatus, string> = {
 const ENGINE_NAMES: Record<string, string> = {
   'elevenlabs': 'ElevenLabs',
   'grok': 'Grok',
-  'assemblyai': 'AssemblyAI',
   'elevenlabs live': 'ElevenLabs live',
-  'assemblyai live': 'AssemblyAI live',
   'grok live': 'Grok live',
 }
 

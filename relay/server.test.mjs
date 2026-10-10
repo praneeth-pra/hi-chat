@@ -11,17 +11,6 @@ import {
   dictionaryTerms,
   judgeSamples,
 } from './server.mjs'
-import { readFileSync } from 'node:fs'
-import { decodeFlac, toWav } from './flacToWav.mjs'
-
-// 3000 samples of 0.4·sin(i/5) at 16 kHz, silent from 1000 to 1500, made by
-// web-app/src/lib/flacEncoder.ts
-const clip = readFileSync(new URL('./test-clip.flac', import.meta.url))
-const clipSample = (i) => {
-  if (i >= 1000 && i < 1500) return 0
-  const s = Math.fround(0.4 * Math.sin(i / 5))
-  return Math.trunc(s < 0 ? s * 0x8000 : s * 0x7fff)
-}
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
 const env = { AQUA_API_KEY: 'a', ELEVENLABS_API_KEY: 'e' }
@@ -116,8 +105,6 @@ test('HTTP: one upload reaches every engine with its key', async () => {
       results.filter((r) => !r.off).map((r) => r.text),
       ['from eleven', 'from grok']
     )
-    // No ASSEMBLYAI_API_KEY in this env: AssemblyAI is reported off, not called
-    assert.equal(results.find((r) => r.name === 'assemblyai').off, true)
     assert.equal(
       results.some((r) => r.name === 'aqua'),
       false
@@ -271,105 +258,15 @@ test('race: returns as soon as two engines answer', async () => {
   )
 })
 
-test('flacToWav: decodes the browser encoder losslessly', () => {
-  const decoded = decodeFlac(new Uint8Array(clip))
-  assert.equal(decoded.sampleRate, 16000)
-  assert.equal(decoded.samples.length, 3000)
-  for (let i = 0; i < 3000; i++)
-    if (decoded.samples[i] !== clipSample(i))
-      assert.fail(`sample ${i}: ${decoded.samples[i]} != ${clipSample(i)}`)
-  // White noise doesn't compress, so the encoder stores it verbatim
-  let x = 1
-  const noise = Float32Array.from({ length: 600 }, () => {
-    x = (x * 1103515245 + 12345) % 2147483648
-    return (x / 2147483648) * 2 - 1
-  })
-  const raw = decodeFlac(
-    new Uint8Array(readFileSync(new URL('./test-noise.flac', import.meta.url)))
-  )
-  assert.deepEqual(
-    [...raw.samples],
-    [...noise].map((s) => Math.trunc(s < 0 ? s * 0x8000 : s * 0x7fff))
-  )
-  const wav = toWav(decoded.samples, 16000)
-  assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), 'RIFF')
-  assert.equal(wav.length, 44 + 3000 * 2)
-})
-
-test('HTTP: AssemblyAI gets WAV and the race stops at two answers', async () => {
-  const calls = []
-  const fetchImpl = async (url, init) => {
-    calls.push({ url, init })
-    if (url.includes('x.ai')) await new Promise((r) => setTimeout(r, 400))
-    return new Response(JSON.stringify({ text: url }))
-  }
-  const server = createRelay({
-    env: { ...env, XAI_API_KEY: 'x', ASSEMBLYAI_API_KEY: 'k' },
-    fetchImpl,
-  }).listen(0, '127.0.0.1')
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const form = new FormData()
-    form.append('file', new Blob([clip]), 'speaker.flac')
-    form.append('engines', 'elevenlabs,grok,assemblyai')
-    form.append('need', '2')
-    const started = Date.now()
-    const res = await fetch(
-      `http://127.0.0.1:${server.address().port}/api/transcribe`,
-      { method: 'POST', body: form }
-    )
-    const { results } = await res.json()
-    assert.ok(Date.now() - started < 350)
-    assert.deepEqual(
-      results.map((r) => [r.name, r.ok]),
-      [
-        ['elevenlabs', true],
-        ['grok', false],
-        ['assemblyai', true],
-      ]
-    )
-    const aai = calls.find((c) => c.url.includes('assemblyai'))
-    assert.equal(aai.init.headers.Authorization, 'k')
-    assert.equal(aai.init.headers['X-AAI-Model'], 'universal-3-5-pro')
-    const audio = aai.init.body.get('audio')
-    assert.equal(audio.type, 'audio/wav')
-    assert.equal(audio.size, 44 + 3000 * 2)
-  } finally {
-    server.close()
-  }
-})
-
 test('the clip log line carries each engine’s words', () => {
   assert.equal(
     clipLogLine(1200, [
       { name: 'elevenlabs', ok: true, ms: 400, text: 'What is a "VPC"?' },
       { name: 'grok', ok: false, ms: 0, off: true, error: 'x' },
-      { name: 'assemblyai', ok: false, ms: 410, error: 'Too slow' },
+      { name: 'soniox', ok: false, ms: 410, error: 'Too slow' },
     ]),
     'clip 1200 B: elevenlabs 400 ms "What is a \\"VPC\\"?", grok off, ' +
-      'assemblyai failed after 410 ms (Too slow)'
-  )
-})
-
-test('live token: an AssemblyAI streaming token when asked for one', async () => {
-  const calls = []
-  const token = await liveToken({
-    env: { ASSEMBLYAI_API_KEY: 'a' },
-    engine: 'assemblyai',
-    fetchImpl: async (url, init) => {
-      calls.push([url, init.headers.Authorization])
-      return { ok: true, json: async () => ({ token: 'aai_1' }) }
-    },
-  })
-  assert.equal(token, 'aai_1')
-  assert.equal(calls.length, 1)
-  assert.ok(
-    calls[0][0].startsWith('https://streaming.assemblyai.com/v3/token?')
-  )
-  assert.equal(calls[0][1], 'a')
-  await assert.rejects(
-    liveToken({ env: {}, engine: 'assemblyai' }),
-    (err) => err.status === 503 && /ASSEMBLYAI_API_KEY/.test(err.message)
+      'soniox failed after 410 ms (Too slow)'
   )
 })
 
@@ -621,71 +518,4 @@ test('judge samples are logged dictations with two or more engines', () => {
   assert.ok(samples.length > 10)
   for (const s of samples) assert.ok(Object.keys(s.texts).length >= 2)
   assert.deepEqual(judgeSamples('/nonexistent.json'), [])
-})
-
-test('gemini live: a single-use token locked to the model and key terms', async () => {
-  const calls = []
-  const fetchImpl = async (url, init) => {
-    calls.push({ url, key: init.headers['x-goog-api-key'], body: JSON.parse(init.body) })
-    return new Response(JSON.stringify({ name: 'auth_tokens/gem' }))
-  }
-  const server = createRelay({ env: { GEMINI_API_KEY: 'g' }, fetchImpl }).listen(
-    0,
-    '127.0.0.1'
-  )
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const res = await fetch(
-      `http://127.0.0.1:${server.address().port}/api/live-token`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ engine: 'gemini', terms: ['FinOps', 'finops', ' EC2 '] }),
-      }
-    )
-    assert.equal(res.status, 200)
-    assert.deepEqual(await res.json(), {
-      token: 'auth_tokens/gem',
-      terms: ['FinOps', 'EC2'],
-    })
-    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens')
-    assert.equal(calls[0].key, 'g')
-    assert.equal(calls[0].body.uses, 1)
-    assert.deepEqual(calls[0].body.liveConnectConstraints, {
-      model: 'models/gemini-3.5-transcribe-live',
-      config: {
-        responseModalities: ['TEXT'],
-        inputAudioTranscription: {
-          languageCodes: ['en-US'],
-          customVocabulary: ['FinOps', 'EC2'],
-        },
-      },
-    })
-  } finally {
-    server.close()
-  }
-  await assert.rejects(
-    liveToken({ env: {}, engine: 'gemini' }),
-    (err) => err.status === 503
-  )
-})
-
-test('gemini live: falls back to an unlocked token when the lock is refused', async () => {
-  const bodies = []
-  const fetchImpl = async (url, init) => {
-    const body = JSON.parse(init.body)
-    bodies.push(body)
-    return body.liveConnectConstraints
-      ? new Response('{\n "error": "Unknown name"\n}', { status: 400 })
-      : new Response(JSON.stringify({ name: 'auth_tokens/open' }))
-  }
-  const token = await liveToken({
-    env: { GEMINI_API_KEY: 'g' },
-    fetchImpl,
-    engine: 'gemini',
-    terms: ['EC2'],
-  })
-  assert.equal(token, 'auth_tokens/open')
-  assert.equal(bodies.length, 2)
-  assert.equal(bodies[1].liveConnectConstraints, undefined)
-  assert.equal(bodies[1].uses, 1)
 })

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  assemblyLive,
   grokLive,
   reportClip,
   setTranscribeMode,
@@ -213,37 +212,13 @@ describe('transcribe mode', () => {
     expect(out.texts).toEqual(['hi there'])
   })
 
-  it('races Grok and AssemblyAI for the second transcript in race mode', async () => {
-    localStorage.setItem('speaker-relay-token', 'tok')
-    setTranscribeMode('race')
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          results: [{ name: 'grok', ok: true, ms: 600, text: 'hi' }],
-        }),
-        { status: 200 }
-      )
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    await transcribeClip(new Blob([new Uint8Array(4)]))
-    const form = fetchMock.mock.calls[0][1].body as FormData
-    expect(form.get('engines')).toBe('elevenlabs,grok,assemblyai')
-    expect(form.get('need')).toBe('2')
-  })
-
-  it('streams Soniox and Cartesia by default; Grok, and AssemblyAI too, when picked', () => {
+  it('streams Soniox and Cartesia by default; Grok when picked', () => {
     localStorage.setItem('speaker-live-mode', 'on')
-    expect([sonioxCartesiaLive(), grokLive(), assemblyLive()]).toEqual([
-      true,
-      false,
-      false,
-    ])
+    expect([sonioxCartesiaLive(), grokLive()]).toEqual([true, false])
     setTranscribeMode('live')
-    expect([grokLive(), assemblyLive()]).toEqual([true, false])
-    setTranscribeMode('live-assemblyai')
-    expect([grokLive(), assemblyLive()]).toEqual([true, true])
+    expect(grokLive()).toBe(true)
     localStorage.setItem('speaker-live-mode', 'off')
-    expect([grokLive(), assemblyLive()]).toEqual([false, false])
+    expect(grokLive()).toBe(false)
   })
 
   it('forgets the removed Aqua choice and falls back to the default', () => {
