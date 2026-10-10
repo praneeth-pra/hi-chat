@@ -957,6 +957,17 @@ export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
 /** After the last words arrive, how long to wait for more before finishing. */
 const GEMINI_SETTLE_MS = 400
 
+/** True when `next` restates `prev` (a growing partial) rather than following it. */
+export function sameStretch(prev: string, next: string): boolean {
+  const norm = (t: string) =>
+    t
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+  const a = norm(prev).split(' ').slice(0, 2).join(' ')
+  return !a || norm(next).startsWith(a)
+}
+
 /** Joins transcript pieces with one space, whether or not they carry one. */
 export function joinPieces(a: string, b: string): string {
   if (!a || !b) return a + b
@@ -1156,8 +1167,14 @@ export class GeminiLiveTranscriber {
     }
     const content = msg.serverContent
     if (!content) return
-    if (content.interimInputTranscription)
-      this.partial = content.interimInputTranscription.text ?? ''
+    if (content.interimInputTranscription) {
+      const next = content.interimInputTranscription.text ?? ''
+      // Google can move on to the next stretch without marking the last one
+      // final; keep it rather than letting the new partial replace it
+      if (this.partial && !sameStretch(this.partial, next))
+        this.finals = joinPieces(this.finals, this.partial)
+      this.partial = next
+    }
     if (content.inputTranscription) {
       this.finals = joinPieces(
         this.finals,

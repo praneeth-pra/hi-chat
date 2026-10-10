@@ -680,7 +680,10 @@ export async function stopDictation() {
             {
               engine: 'gemini' as const,
               text: trial.finish(LIVE_FINISH_MS).then((t) => {
-                took.gemini = (trial.lastTextAt || Date.now()) - stoppedAt
+                took.gemini = Math.max(
+                  0,
+                  (trial.lastTextAt || Date.now()) - stoppedAt
+                )
                 return t
               }),
             },

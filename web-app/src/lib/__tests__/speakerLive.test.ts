@@ -9,6 +9,7 @@ import {
   CartesiaLiveTranscriber,
   GeminiLiveTranscriber,
   joinPieces,
+  sameStretch,
   elevenLabsTerms,
   cartesiaTerms,
   SONIOX_LIVE_URL,
@@ -613,5 +614,34 @@ describe('GeminiLiveTranscriber diagnosis', () => {
     await expect(live.finish(10)).rejects.toThrow(
       /took too long \(opened, no setupComplete, 1 messages, last \{"usageMetadata"/
     )
+  })
+})
+
+describe('GeminiLiveTranscriber partials', () => {
+  it('keeps a partial that was never marked final when the next stretch starts', async () => {
+    let socket!: FakeSocket
+    const live = new GeminiLiveTranscriber(
+      Promise.resolve({ token: 't', terms: [] }),
+      (url) => (socket = new FakeSocket(url))
+    )
+    await tick()
+    socket.open()
+    socket.reply({ setupComplete: {} })
+    const say = (msg: object) => socket.reply({ serverContent: msg })
+    say({ interimInputTranscription: { text: 'We then' } })
+    say({ interimInputTranscription: { text: 'We then can use AWS S3,' } })
+    say({ interimInputTranscription: { text: 'which is' } })
+    say({ inputTranscription: { text: 'which is a really good service.' } })
+    await tick()
+    const text = live.finish(10)
+    await expect(text).resolves.toBe(
+      'We then can use AWS S3, which is a really good service.'
+    )
+  })
+
+  it('tells a growing partial from the next stretch', () => {
+    expect(sameStretch('We then', 'we then can use')).toBe(true)
+    expect(sameStretch('We then can use', 'which is')).toBe(false)
+    expect(sameStretch('', 'anything')).toBe(true)
   })
 })
