@@ -451,7 +451,8 @@ export class SonioxLiveTranscriber {
   constructor(
     key: Promise<{ token: string; terms: string[] }>,
     makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
-    // The assistant's key terms, added after the dictionary
+    // The assistant's key terms, sent ahead of the dictionary so they're
+    // never the ones cut to fit Soniox's context
     keyterms: string[] = []
   ) {
     key.then(
@@ -469,7 +470,7 @@ export class SonioxLiveTranscriber {
               sample_rate: TARGET_SAMPLE_RATE,
               num_channels: 1,
               language_hints: ['en'],
-              context: { terms: sonioxTerms([...terms, ...keyterms]) },
+              context: { terms: sonioxTerms([...keyterms, ...terms]) },
             })
           )
           for (const msg of this.queue.splice(0)) socket.send(msg)

@@ -258,7 +258,7 @@ describe('SonioxLiveTranscriber', () => {
     return { live, socket }
   }
 
-  it('sends the config with the dictionary first, then audio, and joins the final words', async () => {
+  it('sends the config with the key terms first, then audio, and joins the final words', async () => {
     const { live, socket } = await connect()
     expect(socket.url).toBe(SONIOX_LIVE_URL)
     live.push(new Float32Array(1600).fill(0.1)) // held until open
@@ -271,7 +271,7 @@ describe('SonioxLiveTranscriber', () => {
       sample_rate: 16000,
       num_channels: 1,
       language_hints: ['en'],
-      context: { terms: ['kubectl', 'S3 bucket', 'VPC'] },
+      context: { terms: ['VPC', 'kubectl', 'S3 bucket'] },
     })
     expect(socket.raw[1]).toBeInstanceOf(ArrayBuffer)
     socket.reply({
