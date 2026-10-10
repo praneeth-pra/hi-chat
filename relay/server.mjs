@@ -364,8 +364,10 @@ export function speakerLogLine(body) {
 }
 
 /**
- * Logged Auto dictations (each engine's text) for Settings > Dictation judge
- * test. Served behind the relay token, not bundled, since they are interviews.
+ * Logged Auto dictations (each engine's text). The app no longer reads them
+ * (the Dictation judge test was removed); the route stays until nginx.conf
+ * and the Dockerfile drop it. Served behind the relay token, not bundled,
+ * since they are interviews.
  */
 export function judgeSamples(
   file = fileURLToPath(new URL('./judge-samples.json', import.meta.url))

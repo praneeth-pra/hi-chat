@@ -1,11 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import {
-  DICTATION_SPOTS_PROMPT,
-  judgeDictation,
-  judgeSpots,
-  spotsPrompt,
-  stitchSpots,
-} from '../dictationJudge'
+import { judgeDictation } from '../dictationJudge'
 
 const providers: Record<string, { api_key?: string; base_url?: string }> = {
   cerebras: { api_key: 'csk' },
@@ -155,55 +149,5 @@ describe('judgeDictation', () => {
       )
     ).toBeUndefined()
     expect(fetcher).not.toHaveBeenCalled()
-  })
-})
-
-describe('judgeSpots', () => {
-  const engines = [
-    {
-      engine: 'cartesia',
-      text: 'Can you compare elastic IP versus an FMRI IP?',
-    },
-    {
-      engine: 'soniox',
-      text: 'Uh, can you compare Elastic IP versus an ephemeral IP?',
-    },
-    {
-      engine: 'elevenlabs',
-      text: 'Can you compare elastic IP versus a ephemeral IP today?',
-    },
-  ]
-
-  it('marks only the words the engines disagree on', () => {
-    const { spots, user } = spotsPrompt(engines, engines[0])
-    expect(spots.map((s) => [s.start, s.end])).toEqual([[4, 9]])
-    expect(user).toContain('[1: IP versus an FMRI IP?]')
-    expect(user).toContain('Soniox: "IP versus an ephemeral IP?"')
-    expect(user).toContain('ElevenLabs: "IP versus a ephemeral IP today?"')
-  })
-
-  it('stitches the answers into the vote', async () => {
-    providers.cerebras = { api_key: 'csk' }
-    const fetcher = reply('1: IP versus an ephemeral IP?')
-    expect(
-      await judgeSpots(
-        engines,
-        engines[0],
-        [],
-        fetcher as unknown as typeof fetch
-      )
-    ).toBe('Can you compare elastic IP versus an ephemeral IP?')
-    const body = JSON.parse(fetcher.mock.calls[0][1].body as string)
-    expect(body.messages[0].content).toBe(DICTATION_SPOTS_PROMPT)
-  })
-
-  it('keeps a spot the reply leaves out', () => {
-    const words = 'a b c d e f'.split(' ')
-    const spots = [
-      { start: 0, end: 2, options: [] },
-      { start: 4, end: 6, options: [] },
-    ]
-    expect(stitchSpots(words, spots, '2: x')).toBe('a b c d x')
-    expect(stitchSpots(words, spots, '1:\n2: "y z"')).toBe('c d y z')
   })
 })
