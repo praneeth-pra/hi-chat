@@ -950,3 +950,218 @@ export class CartesiaLiveTranscriber {
     }
   }
 }
+
+export const GEMINI_LIVE_URL =
+  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
+export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
+/** After the last words arrive, how long to wait for more before finishing. */
+const GEMINI_SETTLE_MS = 400
+
+/** Joins transcript pieces with one space, whether or not they carry one. */
+export function joinPieces(a: string, b: string): string {
+  if (!a || !b) return a + b
+  return /\s$/.test(a) || /^\s/.test(b) ? a + b : `${a} ${b}`
+}
+
+/**
+ * Google's Gemini live transcription (gemini-3.5-transcribe-live). The
+ * token from the relay is locked to the model and the key terms, so the
+ * setup message repeats exactly the terms it came with. `lastTextAt` is when
+ * the final words arrived, since finishing waits a little for more.
+ */
+export class GeminiLiveTranscriber {
+  private socket: SocketLike | null = null
+  private ready = false
+  private queue: string[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private settle: ReturnType<typeof setTimeout> | undefined
+  private finals = ''
+  private partial = ''
+  lastTextAt = 0
+
+  constructor(
+    key: Promise<{ token: string; terms: string[] }>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url)
+  ) {
+    key.then(
+      ({ token, terms }) => {
+        if (this.failed) return
+        const params = new URLSearchParams({ access_token: token })
+        const socket = makeSocket(`${GEMINI_LIVE_URL}?${params}`)
+        this.socket = socket
+        socket.onopen = () =>
+          socket.send(
+            JSON.stringify({
+              setup: {
+                model: GEMINI_LIVE_MODEL,
+                generationConfig: { responseModalities: ['TEXT'] },
+                inputAudioTranscription: {
+                  languageCodes: ['en-US'],
+                  ...(terms.length ? { customVocabulary: terms } : {}),
+                },
+              },
+            })
+          )
+        socket.onmessage = (e) => void this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('Gemini live connection failed'))
+        socket.onclose = (e) => {
+          if (this.done) this.resolveWith()
+          else
+            this.abort(
+              new Error(
+                `Gemini live closed early (${e.code}${e.reason ? ` ${e.reason}` : ''})`
+              )
+            )
+        }
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the audio and waits for the final text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        if (this.heard()) this.resolveWith()
+        else this.abort(new Error('Gemini live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      if (this.pendingLen) this.flush()
+      this.sendMsg(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }))
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Gemini live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private heard() {
+    return joinPieces(this.finals, this.partial).replace(/\s+/g, ' ').trim()
+  }
+
+  private resolveWith() {
+    const finish = this.done
+    if (!finish) return
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Gemini live transcription finished')
+    this.close()
+    finish(this.heard())
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(
+      JSON.stringify({
+        realtimeInput: {
+          audio: {
+            data: toPcm16Base64(merged),
+            mimeType: `audio/pcm;rate=${TARGET_SAMPLE_RATE}`,
+          },
+        },
+      })
+    )
+  }
+
+  private sendMsg(msg: string) {
+    if (this.ready && this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private async onMessage(data: unknown) {
+    let msg: {
+      setupComplete?: unknown
+      serverContent?: {
+        inputTranscription?: { text?: string }
+        interimInputTranscription?: { text?: string }
+        turnComplete?: boolean
+        generationComplete?: boolean
+      }
+      error?: { message?: string }
+    }
+    try {
+      // Google sends JSON in binary frames
+      const text =
+        typeof data === 'string'
+          ? data
+          : data instanceof Blob
+            ? await data.text()
+            : new TextDecoder().decode(data as ArrayBuffer)
+      msg = JSON.parse(text)
+    } catch {
+      return
+    }
+    if (msg.setupComplete !== undefined) {
+      this.ready = true
+      for (const m of this.queue.splice(0)) this.socket?.send(m)
+      return
+    }
+    if (msg.error) {
+      this.abort(new Error(`Gemini live: ${msg.error.message ?? 'error'}`))
+      return
+    }
+    const content = msg.serverContent
+    if (!content) return
+    if (content.interimInputTranscription)
+      this.partial = content.interimInputTranscription.text ?? ''
+    if (content.inputTranscription) {
+      this.finals = joinPieces(
+        this.finals,
+        content.inputTranscription.text ?? ''
+      )
+      this.partial = ''
+      this.lastTextAt = Date.now()
+    }
+    if (!this.done) return
+    if (content.turnComplete || content.generationComplete)
+      return this.resolveWith()
+    if (content.inputTranscription) {
+      clearTimeout(this.settle)
+      this.settle = setTimeout(() => this.resolveWith(), GEMINI_SETTLE_MS)
+    }
+  }
+
+  private close() {
+    clearTimeout(this.settle)
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}

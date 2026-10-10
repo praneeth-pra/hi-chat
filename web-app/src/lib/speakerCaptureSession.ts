@@ -231,13 +231,20 @@ export function reportClip(line: string) {
  * socket ({"engine":"grok"}), or temporary Soniox or Cartesia keys
  * ({"engine":"soniox"|"cartesia"}, which come with P's dictionary as `terms`).
  */
-type LiveEngine = 'elevenlabs' | 'assemblyai' | 'grok' | 'soniox' | 'cartesia'
+type LiveEngine =
+  | 'elevenlabs'
+  | 'assemblyai'
+  | 'grok'
+  | 'soniox'
+  | 'cartesia'
+  | 'gemini'
 export const LIVE_TOKEN_URL = '/api/live-token'
 /** Tokens last 15 minutes; a spare older than this is replaced. */
 const LIVE_TOKEN_MAX_AGE_MS = 10 * 60 * 1000
 
 async function requestLiveToken(
-  engine: LiveEngine
+  engine: LiveEngine,
+  terms?: string[]
 ): Promise<{ token: string; terms?: string[] }> {
   const res = await fetch(LIVE_TOKEN_URL, {
     method: 'POST',
@@ -245,7 +252,7 @@ async function requestLiveToken(
       [RELAY_TOKEN_HEADER]: relayToken(),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ engine }),
+    body: JSON.stringify(terms ? { engine, terms } : { engine }),
   })
   const rejected = relayRejected(res)
   if (rejected === 'token') throw new Error(RELAY_TOKEN_ERROR)
@@ -267,6 +274,17 @@ export async function fetchLiveKeyWithTerms(
   engine: 'soniox' | 'cartesia'
 ): Promise<{ token: string; terms: string[] }> {
   const { token, terms } = await requestLiveToken(engine)
+  return { token, terms: terms ?? [] }
+}
+
+/**
+ * A Gemini token locked to these key terms, and the terms the relay kept
+ * (the browser's setup message has to repeat them exactly).
+ */
+export async function fetchGeminiToken(
+  keyterms: string[]
+): Promise<{ token: string; terms: string[] }> {
+  const { token, terms } = await requestLiveToken('gemini', keyterms)
   return { token, terms: terms ?? [] }
 }
 

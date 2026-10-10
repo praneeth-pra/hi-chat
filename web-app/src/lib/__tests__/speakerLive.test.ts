@@ -7,6 +7,8 @@ import {
   LiveTranscriber,
   LIVE_URL,
   CartesiaLiveTranscriber,
+  GeminiLiveTranscriber,
+  joinPieces,
   elevenLabsTerms,
   cartesiaTerms,
   SONIOX_LIVE_URL,
@@ -520,5 +522,79 @@ describe('elevenLabsTerms', () => {
       'EKS',
       'RBAC',
     ])
+  })
+})
+
+describe('GeminiLiveTranscriber', () => {
+  const connect = async () => {
+    let socket!: FakeSocket
+    const live = new GeminiLiveTranscriber(
+      Promise.resolve({ token: 'auth_tokens/gem', terms: ['FinOps'] }),
+      (url) => {
+        socket = new FakeSocket(url)
+        return socket
+      }
+    )
+    await tick()
+    return { live, socket }
+  }
+
+  it('sends setup with the token terms, holds audio until setup completes, and joins the final pieces', async () => {
+    const { live, socket } = await connect()
+    vi.useFakeTimers()
+    try {
+      expect(new URL(socket.url).searchParams.get('access_token')).toBe(
+        'auth_tokens/gem'
+      )
+      socket.open()
+      expect(socket.sent[0]).toEqual({
+        setup: {
+          model: 'models/gemini-3.5-transcribe-live',
+          generationConfig: { responseModalities: ['TEXT'] },
+          inputAudioTranscription: {
+            languageCodes: ['en-US'],
+            customVocabulary: ['FinOps'],
+          },
+        },
+      })
+      live.push(new Float32Array(1600))
+      expect(socket.sent).toHaveLength(1)
+      socket.reply({ setupComplete: {} })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(socket.sent[1]).toMatchObject({
+        realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000' } },
+      })
+      socket.reply({
+        serverContent: { inputTranscription: { text: 'For FinOps' } },
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      const text = live.finish()
+      expect(socket.sent.at(-1)).toEqual({
+        realtimeInput: { audioStreamEnd: true },
+      })
+      socket.reply({
+        serverContent: { inputTranscription: { text: 'we use EC2.' } },
+      })
+      await vi.advanceTimersByTimeAsync(500)
+      await expect(text).resolves.toBe('For FinOps we use EC2.')
+      expect(live.lastTextAt).toBeGreaterThan(0)
+      expect(socket.closed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects with the server error', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    const text = live.finish()
+    socket.reply({ error: { message: 'quota exceeded' } })
+    await expect(text).rejects.toThrow('Gemini live: quota exceeded')
+  })
+
+  it('joins pieces with exactly one space', () => {
+    expect(joinPieces('a', 'b')).toBe('a b')
+    expect(joinPieces('a ', 'b')).toBe('a b')
+    expect(joinPieces('', 'b')).toBe('b')
   })
 })
