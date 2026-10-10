@@ -75,9 +75,11 @@ import {
 } from '@/lib/speakerFilter'
 import {
   getMicDevice,
+  getDictationMic,
   getMicTurns,
   listMics,
   setMicDevice,
+  setDictationMic,
   setMicTurns,
 } from '@/lib/micActivity'
 import { getTablesAsLists, setTablesAsLists } from '@/lib/tablesToLists'
@@ -272,6 +274,7 @@ function General() {
   const [smartTurn, setSmartTurnState] = useState(getSmartTurn)
   const [micTurns, setMicTurnsState] = useState(getMicTurns)
   const [micDevice, setMicDeviceState] = useState(getMicDevice)
+  const [dictationMic, setDictationMicState] = useState(getDictationMic)
   const [mics, setMics] = useState<string[] | null>(null)
   const loadMics = (open: boolean) => {
     if (!open) return
@@ -808,7 +811,7 @@ function General() {
               />
               <CardItem
                 title="Microphone"
-                description="The mic dictation records from, also used by One answer until you speak. BlackHole is never used."
+                description="The mic dictation records from. BlackHole is never used."
                 actions={
                   <DropdownMenu onOpenChange={loadMics}>
                     <DropdownMenuTrigger asChild>
@@ -816,17 +819,17 @@ function General() {
                         type="button"
                         className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
                       >
-                        {micDevice || 'Mac default input'}
+                        {dictationMic || 'Mac default input'}
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {['', ...(mics ?? [])].map((label) => (
                         <DropdownMenuItem
                           key={label || 'default'}
-                          className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
+                          className={`cursor-pointer my-0.5 ${dictationMic === label ? 'bg-main-view-fg/5' : ''}`}
                           onClick={() => {
-                            setMicDevice(label)
-                            setMicDeviceState(label)
+                            setDictationMic(label)
+                            setDictationMicState(label)
                             // An open dictation mic moves to it now
                             switchMic()
                           }}
@@ -1028,6 +1031,39 @@ function General() {
                       setMicTurnsState(on)
                     }}
                   />
+                }
+              />
+              <CardItem
+                title="Microphone"
+                description="The mic One answer until you speak listens to for when you start talking. Takes effect when you reload the page. BlackHole is never used."
+                actions={
+                  <DropdownMenu onOpenChange={loadMics}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                      >
+                        {micDevice || 'Mac default input'}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {['', ...(mics ?? [])].map((label) => (
+                        <DropdownMenuItem
+                          key={label || 'default'}
+                          className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
+                          onClick={() => {
+                            setMicDevice(label)
+                            setMicDeviceState(label)
+                          }}
+                        >
+                          {label || 'Mac default input'}
+                        </DropdownMenuItem>
+                      ))}
+                      {mics === null && (
+                        <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 }
               />
               <CardItem

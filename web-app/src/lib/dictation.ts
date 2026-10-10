@@ -20,7 +20,7 @@ import {
   SonioxLiveTranscriber,
 } from '@/lib/speakerLive'
 import { applyFixes } from '@/lib/dictationFixes'
-import { findMicDevice, getMicDevice } from '@/lib/micActivity'
+import { findMicDevice, getDictationMic } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
   SKIP_AGREEMENT,
@@ -234,14 +234,14 @@ function micAlive(m: Mic) {
 /** The input the Microphone setting picks right now, and its key. */
 async function wantedMic() {
   const devices = await navigator.mediaDevices.enumerateDevices()
-  const device = findMicDevice(devices, getMicDevice())
+  const device = findMicDevice(devices, getDictationMic())
   return { device, key: device ? device.groupId || device.deviceId : undefined }
 }
 
 type MicStream = { stream: MediaStream; device: string; key?: string }
 
 async function getMicStream(): Promise<MicStream> {
-  const label = getMicDevice()
+  const label = getDictationMic()
   const { device, key } = await wantedMic()
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -261,7 +261,7 @@ function takeEarlyStream(): MicStream | undefined {
   early = undefined
   if (!e) return undefined
   const live = e.stream.getAudioTracks().some((t) => t.readyState === 'live')
-  if (live && e.device === getMicDevice()) return e
+  if (live && e.device === getDictationMic()) return e
   e.stream.getTracks().forEach((t) => t.stop())
   return undefined
 }
@@ -326,7 +326,7 @@ let opening: Promise<Mic> | undefined
 
 /** The mic is open, and on the input the Microphone setting picks. */
 function micReady(m: Mic) {
-  return micAlive(m) && m.device === getMicDevice()
+  return micAlive(m) && m.device === getDictationMic()
 }
 
 /** The open mic, opening it if needed (one open at a time). */
