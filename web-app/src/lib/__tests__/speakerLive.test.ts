@@ -598,3 +598,20 @@ describe('GeminiLiveTranscriber', () => {
     expect(joinPieces('', 'b')).toBe('b')
   })
 })
+
+describe('GeminiLiveTranscriber diagnosis', () => {
+  it('says what came back when no text arrives in time', async () => {
+    let socket!: FakeSocket
+    const live = new GeminiLiveTranscriber(
+      Promise.resolve({ token: 't', terms: [] }),
+      (url) => (socket = new FakeSocket(url))
+    )
+    await tick()
+    socket.open()
+    socket.reply({ usageMetadata: { totalTokenCount: 1 } })
+    await tick()
+    await expect(live.finish(10)).rejects.toThrow(
+      /took too long \(opened, no setupComplete, 1 messages, last \{"usageMetadata"/
+    )
+  })
+})
