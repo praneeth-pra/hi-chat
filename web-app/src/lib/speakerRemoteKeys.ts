@@ -28,7 +28,7 @@ export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
 /**
  * Shift + F16 scrolls to the last code block in the chat; pressed again
- * within a few seconds, to the one before it. Hammerspoon sends it on fn + K.
+ * within a few seconds, to the one before it. Hammerspoon sends it on a tap of Right Option.
  */
 export const LAST_CODE_KEY = 'Shift+F16'
 
