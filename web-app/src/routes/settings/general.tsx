@@ -653,9 +653,12 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {CHAT_MODELS.find((m) => m.value === chatModel)?.label}
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_MODELS.map((m) => (
@@ -689,12 +692,15 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           CHAT_MODELS.find((m) => m.value === chatFallback)
                             ?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_MODELS.filter((m) => m.value !== chatModel).map(
@@ -734,13 +740,16 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           CHAT_THINKING_LEVELS.find(
                             (l) => l.value === chatThinking
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_THINKING_LEVELS.map((l) => (
@@ -769,13 +778,16 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           DICTATION_ENGINES.find(
                             (e) => e.value === dictationEngine
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {DICTATION_ENGINES.map((e) => (
@@ -800,9 +812,12 @@ function General() {
                 actions={
                   <DropdownMenu onOpenChange={loadMics}>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium max-w-56 truncate">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                      >
                         {micDevice || 'Mac default input'}
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {['', ...(mics ?? [])].map((label) => (
@@ -868,13 +883,16 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           TRANSCRIBE_MODES.find(
                             (m) => m.value === transcribeMode
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {TRANSCRIBE_MODES.map((m) => (
@@ -899,12 +917,15 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           JUDGE_MODELS.find((m) => m.value === judgeModel)
                             ?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {JUDGE_MODELS.map((m) => (
@@ -929,10 +950,13 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {JUDGE_MODELS.find((m) => m.value === secondJudge)
                           ?.label ?? 'Off'}
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {[undefined, ...JUDGE_MODELS.map((m) => m.value)]
