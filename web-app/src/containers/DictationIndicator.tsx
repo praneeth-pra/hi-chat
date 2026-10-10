@@ -15,11 +15,6 @@ import {
   toggleDictation,
   useDictation,
 } from '@/lib/dictation'
-import {
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
 function elapsed(ms: number) {
   const s = Math.floor(ms / 1000)
@@ -138,30 +133,27 @@ export function DictationButton() {
   }, [])
   if (isPlatformTauri()) return null
   const recording = status === 'recording' || status === 'starting'
+  const label = recording ? 'Stop and send dictation' : 'Dictate'
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            data-test-id="dictation-toggle"
-            aria-pressed={recording}
-            disabled={status === 'transcribing'}
-            onClick={toggleDictation}
-            className={cn(
-              'h-7 px-2 flex items-center rounded-sm hover:bg-main-view-fg/10 transition-colors',
-              recording ? 'text-destructive' : 'text-main-view-fg/50'
-            )}
-          >
-            {recording ? (
-              <IconPlayerStopFilled size={16} />
-            ) : (
-              <IconMicrophone size={16} />
-            )}
-          </button>
-        </TooltipTrigger>
-      </Tooltip>
-    </TooltipProvider>
+    <button
+      type="button"
+      data-test-id="dictation-toggle"
+      aria-pressed={recording}
+      aria-label={label}
+      title={label}
+      disabled={status === 'transcribing'}
+      onClick={toggleDictation}
+      className={cn(
+        'h-7 px-2 flex items-center rounded-sm hover:bg-main-view-fg/10 transition-colors',
+        recording ? 'text-destructive' : 'text-main-view-fg/50'
+      )}
+    >
+      {recording ? (
+        <IconPlayerStopFilled size={16} />
+      ) : (
+        <IconMicrophone size={16} />
+      )}
+    </button>
   )
 }
