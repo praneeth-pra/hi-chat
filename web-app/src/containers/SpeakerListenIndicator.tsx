@@ -326,15 +326,24 @@ export function SpeakerSuggestions() {
 
 /** Small on/off chip in the chat box showing what the speaker listener is doing. */
 export function SpeakerListenIndicator() {
-  const { enabled, status, setEnabled, coding, setCoding } =
+  const { enabled, status, error, setEnabled, coding, setCoding } =
     useSpeakerTranscription()
+  // The chip only says "Speaker error" (and nothing on a phone): say why
+  useEffect(() => {
+    if (status === 'error' && error && !isPlatformTauri())
+      toast.error(`Speaker error: ${error}`, { id: 'speaker-error' })
+  }, [status, error])
   if (isPlatformTauri()) return null
 
   const active = ['listening', 'hearing', 'transcribing'].includes(status)
   const problem = ['no-device', 'blocked', 'unsupported', 'error'].includes(
     status
   )
-  const label = enabled ? LABELS[status] : LABELS.off
+  const label = !enabled
+    ? LABELS.off
+    : status === 'error' && error
+      ? `${LABELS.error}: ${error}`
+      : LABELS[status]
   return (
     <>
       {enabled && (
