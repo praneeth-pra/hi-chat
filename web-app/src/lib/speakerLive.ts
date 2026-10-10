@@ -981,6 +981,10 @@ export class GeminiLiveTranscriber {
   private settle: ReturnType<typeof setTimeout> | undefined
   private finals = ''
   private partial = ''
+  /** What came back, for the error when no text does */
+  private opened = false
+  private messages = 0
+  private lastRaw = ''
   lastTextAt = 0
 
   constructor(
@@ -993,7 +997,8 @@ export class GeminiLiveTranscriber {
         const params = new URLSearchParams({ access_token: token })
         const socket = makeSocket(`${GEMINI_LIVE_URL}?${params}`)
         this.socket = socket
-        socket.onopen = () =>
+        socket.onopen = () => {
+          this.opened = true
           socket.send(
             JSON.stringify({
               setup: {
@@ -1006,6 +1011,7 @@ export class GeminiLiveTranscriber {
               },
             })
           )
+        }
         socket.onmessage = (e) => void this.onMessage(e.data)
         socket.onerror = () =>
           this.abort(new Error('Gemini live connection failed'))
@@ -1014,7 +1020,7 @@ export class GeminiLiveTranscriber {
           else
             this.abort(
               new Error(
-                `Gemini live closed early (${e.code}${e.reason ? ` ${e.reason}` : ''})`
+                `Gemini live closed early (${e.code}${e.reason ? ` ${e.reason}` : ''}; ${this.diagnosis()})`
               )
             )
         }
@@ -1036,7 +1042,12 @@ export class GeminiLiveTranscriber {
       if (this.failed) return reject(this.failed)
       const timer = setTimeout(() => {
         if (this.heard()) this.resolveWith()
-        else this.abort(new Error('Gemini live transcript took too long'))
+        else
+          this.abort(
+            new Error(
+              `Gemini live transcript took too long (${this.diagnosis()})`
+            )
+          )
       }, timeoutMs)
       this.done = (text) => {
         clearTimeout(timer)
@@ -1057,6 +1068,17 @@ export class GeminiLiveTranscriber {
     this.failed = err
     this.close()
     this.fail?.(err)
+  }
+
+  private diagnosis() {
+    return [
+      this.opened ? 'opened' : 'never opened',
+      this.ready ? 'setup done' : 'no setupComplete',
+      `${this.messages} messages`,
+      this.lastRaw && `last ${this.lastRaw}`,
+    ]
+      .filter(Boolean)
+      .join(', ')
   }
 
   private heard() {
@@ -1117,6 +1139,8 @@ export class GeminiLiveTranscriber {
           : data instanceof Blob
             ? await data.text()
             : new TextDecoder().decode(data as ArrayBuffer)
+      this.messages++
+      this.lastRaw = text.replace(/\s+/g, ' ').slice(0, 160)
       msg = JSON.parse(text)
     } catch {
       return
