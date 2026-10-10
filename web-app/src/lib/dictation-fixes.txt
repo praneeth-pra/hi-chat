@@ -48,3 +48,4 @@ recipe call => REST API call
 round roving => round robin
 Nokta => Okta
 Elastic Box OS => Elastic Block Storage
+separate the rights => separate the writes
