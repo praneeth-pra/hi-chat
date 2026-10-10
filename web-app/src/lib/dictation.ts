@@ -7,11 +7,9 @@ import {
   rms,
 } from '@/lib/speakerCapture'
 import {
-  RELAY_TOKEN_HEADER,
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
-  relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
@@ -381,11 +379,7 @@ async function transcribe(samples: Float32Array): Promise<string> {
   const body = new FormData()
   body.append('file', encodeWav(samples, TARGET_SAMPLE_RATE), 'dictation.wav')
   body.append('need', '1')
-  const res = await fetch('/api/transcribe', {
-    method: 'POST',
-    body,
-    headers: { [RELAY_TOKEN_HEADER]: relayToken() },
-  })
+  const res = await fetch('/api/transcribe', { method: 'POST', body })
   const data = (await res.json().catch(() => ({}))) as {
     error?: string
     results?: { ok: boolean; text?: string; error?: string }[]
