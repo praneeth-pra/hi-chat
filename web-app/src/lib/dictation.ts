@@ -1,17 +1,10 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
+import { TARGET_SAMPLE_RATE, downsample, rms } from '@/lib/speakerCapture'
 import {
-  TARGET_SAMPLE_RATE,
-  concatSamples,
-  downsample,
-  rms,
-} from '@/lib/speakerCapture'
-import {
-  RELAY_TOKEN_HEADER,
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
-  relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
@@ -31,23 +24,19 @@ import {
 } from '@/lib/dictationJudge'
 
 /**
- * Dictation: your own voice, recorded here and turned into text by Aqua's
- * dictation route (through the relay, which adds AQUA_API_KEY), so your Aqua
- * dictionary, replacements and instructions apply. Separate from the speaker,
- * which listens to the interviewer. The text is sent like a question.
+ * Dictation: your own voice, recorded here and streamed to live
+ * speech-to-text engines while you talk. Separate from the speaker, which
+ * listens to the interviewer. The text is sent like a question.
  */
 
 /**
  * Which service turns your voice into text. Soniox gets your dictionary as
- * context terms and Cartesia the 100 that fit; Soniox, Cartesia, Grok and
- * ElevenLabs stream live while you talk, and Aqua (with your Aqua
- * dictionary) transcribes in pieces. Auto runs Cartesia, Soniox and
- * ElevenLabs: as soon as two agree their text is sent, else a judge model
- * writes the best version. Aqua and Grok were left out of Auto: on P's
- * questions they were the slowest and least accurate.
+ * context terms and Cartesia the 100 that fit; all four stream live while
+ * you talk. Auto runs Cartesia, Soniox and ElevenLabs: as soon as two agree
+ * their text is sent, else a judge model writes the best version. Grok was
+ * left out of Auto: on P's questions it was the slowest and least accurate.
  */
 export type DictationEngine =
-  | 'aqua'
   | 'grok'
   | 'elevenlabs'
   | 'soniox'
@@ -55,7 +44,6 @@ export type DictationEngine =
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
-  { value: 'aqua', label: 'Aqua' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
@@ -129,12 +117,12 @@ export const useDictation = create<DictationState>(() => ({
   startedAt: 0,
 }))
 
-/** Aqua takes up to 10 minutes; stop a little before. */
+/** A dictation stops by itself after this long. */
 export const MAX_DICTATION_MS = 9.5 * 60 * 1000
 /** Shorter than this is a slip of the key: nothing is sent. */
 const MIN_DICTATION_MS = 400
 
-/** 16-bit PCM mono WAV, the format Aqua's dictation route asks for. */
+/** 16-bit PCM mono WAV. */
 export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([wavBytes(samples, sampleRate)], { type: 'audio/wav' })
 }
@@ -192,23 +180,6 @@ class DictationTap extends AudioWorkletProcessor {
 registerProcessor('dictation-tap', DictationTap)
 `
 
-/**
- * While you talk, each stretch of speech that ends in a pause is sent to Aqua
- * right away, so when you stop only the last bit is left to transcribe.
- */
-const PIECE_MIN_MS = 3000
-const PAUSE_MS = 500
-/**
- * A block counts as a pause (used only to split) when it is this much quieter
- * than your recent speech, so it works whatever the mic's level. A fixed
- * 0.004 counted all of a quiet mic's speech as pause and cut every 4 s.
- */
-const PAUSE_SHARE = 0.15
-/** Never a pause above this loudness... */
-const SILENCE_FLOOR = 0.0003
-/** ...and the recent-speech level fades by this much per block (~6 s half-life). */
-const PEAK_DECAY = 0.995
-
 type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'>
 
 export type Recording = {
@@ -216,16 +187,8 @@ export type Recording = {
   engine: DictationEngine
   /** Live engines: the stream that gets every block as it comes */
   live?: LiveStream
-  /** Auto: the live engines running alongside Aqua's pieces */
+  /** Auto: the live engines that each get every block */
   autoLive?: { engine: DictationEngine; stream: LiveStream }[]
-  /** Audio not yet sent */
-  chunks: Float32Array[]
-  /** Silence at the end of chunks, in ms */
-  quietMs: number
-  /** Recent speech loudness, fading slowly */
-  peak?: number
-  /** The text of each piece sent so far, in order */
-  pieces: Promise<string>[]
   limit: ReturnType<typeof setTimeout>
 }
 
@@ -391,69 +354,13 @@ export function readyMicEarly() {
   window.addEventListener('keydown', onGesture, true)
 }
 
-/** Posts one piece of audio through the relay; resolves to its text. */
-async function transcribe(
-  chunks: Float32Array[],
-  rate: number,
-  engine: DictationEngine = 'aqua'
-) {
-  const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
-  // The mic had sent (almost) nothing; the engines reject an empty file
-  if (samples.length < TARGET_SAMPLE_RATE / 20) return ''
-  const wav = encodeWav(samples, TARGET_SAMPLE_RATE)
-  const body = new FormData()
-  if (engine === 'aqua') body.append('audio', wav, 'dictation.wav')
-  else {
-    body.append('file', wav, 'dictation.wav')
-    body.append('engines', engine)
-    body.append('need', '1')
-  }
-  const res = await fetch(
-    engine === 'aqua' ? '/api/dictate' : '/api/transcribe',
-    {
-      method: 'POST',
-      body,
-      headers: { [RELAY_TOKEN_HEADER]: relayToken() },
-    }
-  )
-  const data = (await res.json().catch(() => ({}))) as {
-    text?: string
-    error?: string
-    results?: { ok: boolean; text?: string; error?: string }[]
-  }
-  const result = data.results?.[0]
-  if (!res.ok)
-    throw new Error(result?.error ?? data.error ?? `status ${res.status}`)
-  return ((engine === 'aqua' ? data.text : result?.text) ?? '').trim()
-}
-
 /** Takes one block from the mic; exported for tests. */
 export function onBlock(rec: Recording, block: Float32Array) {
   const level = rms(block)
   useDictation.setState({ level: Math.min(1, level * 8) })
-  if (rec.live) {
-    rec.live.push(downsample(block, rec.rate / TARGET_SAMPLE_RATE))
-    return
-  }
-  if (rec.autoLive?.length) {
-    const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
-    rec.autoLive.forEach((l) => l.stream.push(down))
-    return
-  }
-  rec.chunks.push(block)
-  const blockMs = (block.length / rec.rate) * 1000
-  rec.peak = Math.max(level, (rec.peak ?? 0) * PEAK_DECAY)
-  const quiet = level < Math.max(SILENCE_FLOOR, rec.peak * PAUSE_SHARE)
-  rec.quietMs = quiet ? rec.quietMs + blockMs : 0
-  const heldMs = (rec.chunks.length * block.length * 1000) / rec.rate
-  if (rec.quietMs >= PAUSE_MS && heldMs >= PIECE_MIN_MS) {
-    const piece = rec.chunks
-    rec.chunks = []
-    rec.quietMs = 0
-    const text = transcribe(piece, rec.rate, rec.engine)
-    text.catch(() => {}) // reported when the dictation is sent
-    rec.pieces.push(text)
-  }
+  const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
+  rec.live?.push(down)
+  rec.autoLive?.forEach((l) => l.stream.push(down))
 }
 
 function liveStream(engine: DictationEngine): LiveStream | undefined {
@@ -551,7 +458,7 @@ export function gatherAuto(
     const finish = () => {
       clearTimeout(grace)
       if (!done.length && errors.length) reject(new Error(errors.join('; ')))
-      // Keep the engines' order, so ties go to Aqua
+      // Keep the engines' order, so ties go to the first (Cartesia)
       else
         resolve(jobs.flatMap((j) => done.filter((d) => d.engine === j.engine)))
     }
@@ -583,9 +490,6 @@ function begin(m: Mic) {
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
-    chunks: [],
-    quietMs: 0,
-    pieces: [],
     limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
   }
   recording = rec
@@ -620,13 +524,13 @@ export async function startDictation() {
   }
 }
 
-/** Stops recording and sends the text Aqua returns, like a question. */
+/** Stops recording and sends the engines' text, like a question. */
 export async function stopDictation() {
   const { status, startedAt } = useDictation.getState()
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { chunks, rate, pieces, engine, live, autoLive } = recording
+  const { engine, live, autoLive } = recording
   // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
   recording.autoLive = undefined
@@ -641,11 +545,7 @@ export async function stopDictation() {
   const stoppedAt = Date.now()
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
   try {
-    const batch = () =>
-      Promise.all([...pieces, transcribe(chunks, rate, engine)]).then((texts) =>
-        texts.filter(Boolean).join(' ')
-      )
-    let text: string
+    let text = ''
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
       const took: Partial<Record<DictationEngine, number>> = {}
@@ -678,7 +578,7 @@ export async function stopDictation() {
         judgeMs: best ? Date.now() - judgeStart : undefined,
         judged,
       })
-    } else text = await batch()
+    }
     if (!autoLive)
       reportClip(
         `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`

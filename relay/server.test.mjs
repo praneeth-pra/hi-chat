@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  dictate,
   createRelay,
   liveToken,
   speakerLogLine,
@@ -13,7 +12,7 @@ import {
 } from './server.mjs'
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
-const env = { AQUA_API_KEY: 'a', ELEVENLABS_API_KEY: 'e' }
+const env = { XAI_API_KEY: 'x', ELEVENLABS_API_KEY: 'e' }
 const engine = (name, keyVar, ms, text) => ({
   name,
   keyVar,
@@ -27,18 +26,18 @@ const engine = (name, keyVar, ms, text) => ({
     }),
 })
 
-test('returns both transcripts, Aqua first, when both answer in time', async () => {
+test('returns both transcripts, in engine order, when both answer in time', async () => {
   const out = await transcribeAll(file, {
     env,
     engines: [
-      engine('aqua', 'AQUA_API_KEY', 60, 'aqua text'),
+      engine('grok', 'XAI_API_KEY', 60, 'grok text'),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 30, 'eleven text'),
     ],
   })
   assert.deepEqual(
     out.map((r) => [r.name, r.ok, r.text]),
     [
-      ['aqua', true, 'aqua text'],
+      ['grok', true, 'grok text'],
       ['elevenlabs', true, 'eleven text'],
     ]
   )
@@ -50,7 +49,7 @@ test('waits only the cap for the slower engine', async () => {
     env,
     waitMs: 50,
     engines: [
-      engine('aqua', 'AQUA_API_KEY', 20, 'fast'),
+      engine('grok', 'XAI_API_KEY', 20, 'fast'),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 2000, 'late'),
     ],
   })
@@ -62,9 +61,9 @@ test('waits only the cap for the slower engine', async () => {
 
 test('reports failures and skips engines with no key', async () => {
   const out = await transcribeAll(file, {
-    env: { AQUA_API_KEY: 'a' },
+    env: { XAI_API_KEY: 'x' },
     engines: [
-      engine('aqua', 'AQUA_API_KEY', 10, new Error('down')),
+      engine('grok', 'XAI_API_KEY', 10, new Error('down')),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 10, 'x'),
     ],
   })
@@ -104,10 +103,6 @@ test('HTTP: one upload reaches every engine with its key', async () => {
     assert.deepEqual(
       results.filter((r) => !r.off).map((r) => r.text),
       ['from eleven', 'from grok']
-    )
-    assert.equal(
-      results.some((r) => r.name === 'aqua'),
-      false
     )
     assert.equal(calls.length, 2)
     assert.equal(calls[0].headers['xi-api-key'], 'e')
@@ -372,54 +367,6 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
   } finally {
     server.close()
   }
-})
-
-test('dictation: sends the WAV to Aqua with its key and returns the text', async () => {
-  const calls = []
-  const fetchImpl = async (url, init) => {
-    calls.push({
-      url,
-      headers: init.headers,
-      audio: init.body.get('audio'),
-      language: init.body.get('language'),
-    })
-    return new Response(JSON.stringify({ raw_text: 'cube ctl', text: 'kubectl' }))
-  }
-  const server = createRelay({ env: { AQUA_API_KEY: 'a' }, fetchImpl }).listen(
-    0,
-    '127.0.0.1'
-  )
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const post = () => {
-      const form = new FormData()
-      form.append(
-        'audio',
-        new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/wav' }),
-        'dictation.wav'
-      )
-      return fetch(`http://127.0.0.1:${server.address().port}/api/dictate`, {
-        method: 'POST',
-        body: form,
-      })
-    }
-    const res = await post()
-    assert.equal(res.status, 200)
-    assert.deepEqual(await res.json(), { text: 'kubectl' })
-    assert.equal(calls[0].url, 'https://api.aquavoice.com/v1/dictations')
-    assert.equal(calls[0].headers.Authorization, 'Bearer a')
-    assert.equal(calls[0].audio.size, 4)
-    assert.equal(calls[0].language, 'en')
-  } finally {
-    server.close()
-  }
-})
-
-test('dictation: 503 without an Aqua key', async () => {
-  await assert.rejects(
-    dictate(new Blob([]), { env: {} }),
-    (err) => err.status === 503
-  )
 })
 
 test('soniox live: a temporary key plus the dictionary as terms', async () => {

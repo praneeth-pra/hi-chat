@@ -73,7 +73,7 @@ describe('judgeDictation', () => {
     const fetcher = reply('x')
     const near = [
       {
-        engine: 'aqua',
+        engine: 'cartesia',
         text: 'Okay, so did you face any issues in your past?',
       },
       {
@@ -96,7 +96,7 @@ describe('judgeDictation', () => {
     const fetcher = reply('x')
     const close = [
       {
-        engine: 'aqua',
+        engine: 'cartesia',
         text: "S3 bucket. And if it's a cross-account, then you also have to mention inside the bucket policies that this is",
       },
       {

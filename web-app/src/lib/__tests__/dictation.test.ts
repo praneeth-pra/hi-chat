@@ -43,7 +43,7 @@ describe('dictation', () => {
     expect(view.getInt16(48, true)).toBe(-0x8000)
   })
 
-  it('does nothing while Aqua is transcribing', () => {
+  it('does nothing while the engines are transcribing', () => {
     useDictation.setState({ status: 'transcribing' })
     toggleDictation()
     expect(useDictation.getState().status).toBe('transcribing')
@@ -56,93 +56,16 @@ describe('dictation', () => {
     expect(useDictation.getState().status).toBe('idle')
   })
 
-  it('sends a piece to Aqua at a pause once 3 s are held', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ text: 'first part.' }), { status: 200 })
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    const rec = {
-      rate: 16000,
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    const loud = new Float32Array(2048).fill(0.2)
-    const quiet = new Float32Array(2048)
-    for (let i = 0; i < 15; i++) onBlock(rec, loud) // 1.9 s
-    for (let i = 0; i < 5; i++) onBlock(rec, quiet) // a pause, but too soon
-    expect(rec.pieces).toHaveLength(0)
-    for (let i = 0; i < 15; i++) onBlock(rec, loud) // now past 3 s
-    for (let i = 0; i < 4; i++) onBlock(rec, quiet) // 0.5 s pause
-    expect(rec.pieces).toHaveLength(1)
-    expect(rec.chunks).toHaveLength(0)
-    expect(await rec.pieces[0]).toBe('first part.')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    vi.unstubAllGlobals()
-  })
-
-  it('a quiet mic is split at its pauses, not every 3 s', () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
-    )
-    const rec = {
-      rate: 16000,
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    // Speech at 0.003 is under the old fixed 0.004 pause level
-    const speech = new Float32Array(2048).fill(0.003)
-    const pause = new Float32Array(2048).fill(0.0001)
-    for (let i = 0; i < 40; i++) onBlock(rec, speech) // 5 s, no pause
-    expect(rec.pieces).toHaveLength(0)
-    for (let i = 0; i < 5; i++) onBlock(rec, pause)
-    expect(rec.pieces).toHaveLength(1)
-    vi.unstubAllGlobals()
-  })
-
-  it('sends Grok pieces to the transcribe route and reads its result', async () => {
-    const fetchMock = vi.fn(
-      async (_url: string, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ results: [{ ok: true, text: 'grok text' }] }),
-          { status: 200 }
-        )
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    const rec = {
-      rate: 16000,
-      engine: 'grok',
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    const loud = new Float32Array(2048).fill(0.2)
-    for (let i = 0; i < 35; i++) onBlock(rec, loud)
-    for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
-    expect(await rec.pieces[0]).toBe('grok text')
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/transcribe')
-    expect((init.body as FormData).get('engines')).toBe('grok')
-    vi.unstubAllGlobals()
-  })
-
-  it('streams every block to ElevenLabs live instead of making pieces', () => {
+  it('streams every block to ElevenLabs live, at 16 kHz', () => {
     const push = vi.fn()
     const rec = {
       rate: 48000,
       engine: 'elevenlabs',
       live: { push },
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
     } as unknown as Recording
     onBlock(rec, new Float32Array(2048).fill(0.2))
     expect(push).toHaveBeenCalledTimes(1)
     expect(push.mock.calls[0][0]).toHaveLength(682) // 48 kHz to 16 kHz
-    expect(rec.chunks).toHaveLength(0)
   })
 
   it('remembers the chosen engine, Auto by default', () => {
@@ -259,33 +182,29 @@ describe('dictation', () => {
     expect(textAgreement('a b c d', 'a x c d')).toBe(0.75)
     expect(
       pickBest([
-        { engine: 'aqua', text: 'What is cube cuddle?' },
+        { engine: 'cartesia', text: 'What is cube cuddle?' },
         { engine: 'grok', text: 'What is kubectl?' },
         { engine: 'elevenlabs', text: 'What is kubectl.' },
       ])?.engine
     ).toBe('grok')
-    // Two answers (or a tie): Aqua first
+    // Two answers (or a tie): the first
     expect(
       pickBest([
-        { engine: 'aqua', text: 'one' },
+        { engine: 'cartesia', text: 'one' },
         { engine: 'grok', text: 'two' },
       ])?.engine
-    ).toBe('aqua')
+    ).toBe('cartesia')
     expect(
       pickBest([
-        { engine: 'aqua', text: '' },
+        { engine: 'cartesia', text: '' },
         { engine: 'grok', text: 'two' },
       ])?.text
     ).toBe('two')
   })
 
-  it('Auto streams to the live engines and sends no Aqua pieces', () => {
+  it('Auto streams every block to each live engine', () => {
     const grok = { push: vi.fn() }
     const eleven = { push: vi.fn() }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
-    )
     const rec = {
       rate: 16000,
       engine: 'auto',
@@ -293,33 +212,27 @@ describe('dictation', () => {
         { engine: 'grok', stream: grok },
         { engine: 'elevenlabs', stream: eleven },
       ],
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
     } as unknown as Recording
     const loud = new Float32Array(2048).fill(0.2)
     for (let i = 0; i < 35; i++) onBlock(rec, loud)
     for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
     expect(grok.push).toHaveBeenCalledTimes(40)
     expect(eleven.push).toHaveBeenCalledTimes(40)
-    expect(rec.pieces).toHaveLength(0)
-    expect(rec.chunks).toHaveLength(0)
-    vi.unstubAllGlobals()
   })
 
   it('Auto gives the slower engines a short grace once one has answered', async () => {
     vi.useFakeTimers()
     try {
       const results = gatherAuto([
-        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'cartesia', text: new Promise(() => {}) },
         { engine: 'grok', text: Promise.resolve('fast') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ])
       await vi.advanceTimersByTimeAsync(1000)
       await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
-      // Two engines that agree: sent at once, without waiting for Aqua
+      // Two engines that agree: sent at once, without waiting for Cartesia
       const quorum = gatherAuto([
-        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'cartesia', text: new Promise(() => {}) },
         { engine: 'soniox', text: Promise.resolve('What is an S3 bucket?') },
         { engine: 'elevenlabs', text: Promise.resolve('what is an S3 bucket') },
       ])
@@ -330,19 +243,19 @@ describe('dictation', () => {
       ])
       await expect(
         gatherAuto([
-          { engine: 'aqua', text: Promise.reject(new Error('no key')) },
+          { engine: 'cartesia', text: Promise.reject(new Error('no key')) },
         ])
-      ).rejects.toThrow('aqua: no key')
+      ).rejects.toThrow('cartesia: no key')
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('logs the engines that lost the race once they answer', async () => {
-    let lateAqua!: (t: string) => void
+    let lateGrok!: (t: string) => void
     const done = reportAuto(
       [
-        { engine: 'aqua', text: new Promise((r) => (lateAqua = r)) },
+        { engine: 'grok', text: new Promise((r) => (lateGrok = r)) },
         { engine: 'soniox', text: Promise.resolve('What is EKS?') },
         { engine: 'cartesia', text: Promise.resolve('What is EKS?') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
@@ -350,11 +263,11 @@ describe('dictation', () => {
       { soniox: 300, cartesia: 120 },
       { sent: 'soniox', totalMs: 310 }
     )
-    lateAqua('What is EKS? ')
+    lateGrok('What is EKS? ')
     await done
     const line = reportClip.mock.calls.at(-1)?.[0] as string
     expect(line).toContain('sent=soniox total=310ms')
-    expect(line).toContain('aqua: "What is EKS?"')
+    expect(line).toContain('grok: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
   })
 

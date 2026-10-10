@@ -40,9 +40,10 @@ export function textAgreement(a: string, b: string): number {
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 1500
 /**
- * Texts this alike skip the judge and Aqua's is sent. On P's questions,
+ * Texts this alike skip the judge and the vote is sent. On P's questions,
  * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
- * vs "Extra bucket" 0.95 (Aqua right both times); a real mix-up scored 0.89.
+ * vs "Extra bucket" 0.95 (the first engine right both times); a real mix-up
+ * scored 0.89.
  */
 export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
@@ -51,7 +52,6 @@ const MIN_AGREEMENT = 0.6
 export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Soniox and Cartesia are given the speaker's own dictionary, so trust their spelling of names and technical words. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
-  aqua: 'Aqua',
   grok: 'Grok',
   elevenlabs: 'ElevenLabs',
   soniox: 'Soniox',
