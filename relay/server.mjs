@@ -1,7 +1,8 @@
 // Transcription relay: the browser uploads each clip once to
 // /api/transcribe; this sends it to every engine with a key at the same time,
 // adding the keys (ELEVENLABS_API_KEY, XAI_API_KEY) so
-// they never reach the browser. nginx checks the relay token before forwarding here.
+// they never reach the browser. nginx lets only signed-in browsers through
+// (the site login, auth.mjs).
 //
 // Once one engine answers, the others get SECOND_ENGINE_WAIT_MS more (the
 // browser can ask for less); whatever has arrived by then is returned in
@@ -12,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
+import { handleAuth } from './auth.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -219,8 +221,8 @@ export async function liveToken({
 /**
  * Grok live goes through the relay (wsProxy.mjs), so its "token" is a
  * single-use ticket for /api/grok-live?ticket=…, valid for 10 minutes.
- * Browsers can't send the relay token on a WebSocket, so the ticket, fetched
- * with the relay token, stands in for it.
+ * The ticket, fetched by a signed-in browser, lets the WebSocket through to
+ * the relay.
  */
 const GROK_TICKET_MS = 10 * 60 * 1000
 const grokTickets = new Map()
@@ -394,7 +396,7 @@ export function speakerLogLine(body) {
 
 /**
  * Logged Auto dictations (each engine's text) for Settings > Dictation judge
- * test. Served behind the relay token, not bundled, since they are interviews.
+ * test. Served behind the site login, not bundled, since they are interviews.
  */
 export function judgeSamples(
   file = fileURLToPath(new URL('./judge-samples.json', import.meta.url))
@@ -432,6 +434,8 @@ function send(res, status, body) {
 
 export function createRelay(options = {}) {
   const server = createServer(async (req, res) => {
+    // The site login (/login, /auth/*), see auth.mjs
+    if (await handleAuth(req, res, options.env, options.fetchImpl)) return
     if (
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&

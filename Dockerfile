@@ -51,12 +51,13 @@ ENV ELEVENLABS_API_KEY=""
 ENV XAI_API_KEY=""
 # Dictation (your own voice) goes to Aqua, which applies your dictionary
 ENV AQUA_API_KEY=""
-# Shared secret the browser sends to use the transcription relay; without it
-# the relay stays off (503).
-ENV RELAY_TOKEN=""
+# Site login (relay/auth.mjs): a code emailed to LOGIN_EMAIL through Resend.
+# Without LOGIN_EMAIL nobody can sign in.
+ENV LOGIN_EMAIL=""
+ENV RESEND_API_KEY=""
 
 # The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
-COPY relay/server.mjs relay/wsProxy.mjs relay/dictionary.txt relay/judge-samples.json /relay/
+COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/logo.png relay/dictionary.txt relay/judge-samples.json /relay/
 COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
 
 EXPOSE 80

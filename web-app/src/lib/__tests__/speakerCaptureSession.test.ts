@@ -109,7 +109,6 @@ describe('transcribeClip', () => {
   beforeEach(() => {
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    localStorage.setItem('speaker-relay-token', 'tok')
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -130,7 +129,6 @@ describe('transcribeClip', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/transcribe')
-    expect(init.headers['X-Relay-Token']).toBe('tok')
     expect((init.body as FormData).get('file')).toBeInstanceOf(Blob)
     // Grok live without live mode uploads to Grok instead
     expect((init.body as FormData).get('engines')).toBe('elevenlabs,grok')
@@ -178,10 +176,9 @@ describe('transcribeClip', () => {
     expect(out.timings).toEqual([{ name: 'grok', ms: 800, ok: true }])
   })
 
-  it('forgets a rejected token so it is asked for again', async () => {
-    fetchMock.mockResolvedValue(reply(401, {}, { 'X-Relay-Rejected': '1' }))
-    await expect(transcribeClip(audio)).rejects.toThrow('Relay token')
-    expect(localStorage.getItem('speaker-relay-token')).toBeNull()
+  it('says to sign in again when the site login refuses', async () => {
+    fetchMock.mockResolvedValue(reply(401, {}))
+    await expect(transcribeClip(audio)).rejects.toThrow('Signed out')
   })
 })
 
@@ -192,7 +189,6 @@ describe('transcribe mode', () => {
   })
 
   it('asks the relay for ElevenLabs only when that is chosen', async () => {
-    localStorage.setItem('speaker-relay-token', 'tok')
     setTranscribeMode('elevenlabs')
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -233,28 +229,16 @@ describe('reportClip', () => {
     localStorage.clear()
   })
 
-  it('posts the clip line with the relay token', () => {
+  it('posts the clip line', () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
-    localStorage.setItem('speaker-relay-token', 'tok')
     reportClip('sent "What is a pod?"')
     const [url, init] = fetchMock.mock.calls[0] as unknown as [
       string,
       { body: string; headers: Record<string, string> },
     ]
     expect(url).toBe('/api/speaker-log')
-    expect(init.headers['X-Relay-Token']).toBe('tok')
     expect(JSON.parse(init.body)).toEqual({ line: 'sent "What is a pod?"' })
-  })
-
-  it('stays quiet without a token instead of asking for one', () => {
-    const fetchMock = vi.fn()
-    const prompt = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    vi.stubGlobal('prompt', prompt)
-    reportClip('skipped "Hi"')
-    expect(fetchMock).not.toHaveBeenCalled()
-    expect(prompt).not.toHaveBeenCalled()
   })
 })
 
