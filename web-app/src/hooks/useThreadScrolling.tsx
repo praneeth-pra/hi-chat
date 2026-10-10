@@ -7,6 +7,8 @@ import { THREAD_SCROLL_BEHAVIOR } from '@/constants/threadScroll'
 const VIEWPORT_PADDING = 40 // Offset from viewport bottom for user message positioning
 const MAX_DOM_RETRY_ATTEMPTS = 5 // Maximum attempts to find DOM elements before giving up
 const DOM_RETRY_DELAY = 100 // Delay in ms between DOM element retry attempts
+const USER_MESSAGE_TOP_GAP = 16 // Space kept above the question once it is scrolled to the top
+const MAX_PADDING_WAIT_FRAMES = 30 // Frames to wait for the padding to reach the DOM before scrolling anyway
 
 export const useThreadScrolling = (
   threadId: string,
@@ -196,13 +198,40 @@ export const useThreadScrolling = (
         setPaddingHeight(calculatedPadding)
         originalPaddingRef.current = calculatedPadding
 
-        // Scroll after padding is applied to the DOM
-        requestAnimationFrame(() => {
-          elements.scrollContainer.scrollTo({
-            top: elements.scrollContainer.scrollHeight,
+        // Bring the question to the top of the viewport. The padding is
+        // React state, so it may not be in the DOM by the next frame; until
+        // it is there is no room to scroll that far, so wait for it. Aiming
+        // at the question itself (not scrollHeight) keeps a late padding
+        // commit from leaving the question at the bottom.
+        const { scrollContainer, lastUserMessage } = elements
+        let frameCount = 0
+        const scrollQuestionToTop = () => {
+          if (!lastUserMessage.isConnected) return
+          const questionTop =
+            scrollContainer.scrollTop +
+            lastUserMessage.getBoundingClientRect().top -
+            scrollContainer.getBoundingClientRect().top
+          const maxTop =
+            scrollContainer.scrollHeight - scrollContainer.clientHeight
+          // With the padding in place the question can always get within
+          // VIEWPORT_PADDING of the top
+          if (
+            questionTop - VIEWPORT_PADDING > maxTop + 1 &&
+            frameCount < MAX_PADDING_WAIT_FRAMES
+          ) {
+            frameCount++
+            requestAnimationFrame(scrollQuestionToTop)
+            return
+          }
+          scrollContainer.scrollTo({
+            top: Math.max(
+              0,
+              Math.min(questionTop - USER_MESSAGE_TOP_GAP, maxTop)
+            ),
             behavior: 'smooth',
           })
-        })
+        }
+        requestAnimationFrame(scrollQuestionToTop)
       }
 
       let retryCount = 0
