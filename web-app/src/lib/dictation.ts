@@ -1,10 +1,17 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
-import { TARGET_SAMPLE_RATE, downsample, rms } from '@/lib/speakerCapture'
 import {
+  TARGET_SAMPLE_RATE,
+  concatSamples,
+  downsample,
+  rms,
+} from '@/lib/speakerCapture'
+import {
+  RELAY_TOKEN_HEADER,
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
+  relayToken,
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
@@ -109,6 +116,8 @@ type DictationState = {
   level: number
   /** When recording started (ms). */
   startedAt: number
+  /** Why the last dictation failed; its audio is kept for retryDictation(). */
+  failed?: string
 }
 
 export const useDictation = create<DictationState>(() => ({
@@ -116,6 +125,9 @@ export const useDictation = create<DictationState>(() => ({
   level: 0,
   startedAt: 0,
 }))
+
+/** The audio of the dictation that failed, until it is retried or dismissed. */
+let failedAudio: Float32Array | undefined
 
 /** A dictation stops by itself after this long. */
 export const MAX_DICTATION_MS = 9.5 * 60 * 1000
@@ -189,6 +201,11 @@ export type Recording = {
   live?: LiveStream
   /** Auto: the live engines that each get every block */
   autoLive?: { engine: DictationEngine; stream: LiveStream }[]
+  /**
+   * Every block at 16 kHz, for the batch route when the live engines fail
+   * or hear nothing (~64 KB a second)
+   */
+  audio: Float32Array[]
   limit: ReturnType<typeof setTimeout>
 }
 
@@ -354,11 +371,38 @@ export function readyMicEarly() {
   window.addEventListener('keydown', onGesture, true)
 }
 
+/**
+ * The relay's batch route (ElevenLabs and Grok, the first answer wins), for
+ * a dictation the live engines lost. Resolves to its text.
+ */
+async function transcribe(samples: Float32Array): Promise<string> {
+  // The mic had sent (almost) nothing; the engines reject an empty file
+  if (samples.length < TARGET_SAMPLE_RATE / 20) return ''
+  const body = new FormData()
+  body.append('file', encodeWav(samples, TARGET_SAMPLE_RATE), 'dictation.wav')
+  body.append('need', '1')
+  const res = await fetch('/api/transcribe', {
+    method: 'POST',
+    body,
+    headers: { [RELAY_TOKEN_HEADER]: relayToken() },
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string
+    results?: { ok: boolean; text?: string; error?: string }[]
+  }
+  if (!res.ok) {
+    const errors = data.results?.map((r) => r.error).filter(Boolean)
+    throw new Error(errors?.join('; ') || data.error || `status ${res.status}`)
+  }
+  return (data.results?.find((r) => r.ok)?.text ?? '').trim()
+}
+
 /** Takes one block from the mic; exported for tests. */
 export function onBlock(rec: Recording, block: Float32Array) {
   const level = rms(block)
   useDictation.setState({ level: Math.min(1, level * 8) })
   const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
+  rec.audio.push(down)
   rec.live?.push(down)
   rec.autoLive?.forEach((l) => l.stream.push(down))
 }
@@ -490,6 +534,7 @@ function begin(m: Mic) {
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
+    audio: [],
     limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
   }
   recording = rec
@@ -530,7 +575,7 @@ export async function stopDictation() {
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { engine, live, autoLive } = recording
+  const { engine, live, autoLive, audio } = recording
   // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
   recording.autoLive = undefined
@@ -544,8 +589,9 @@ export async function stopDictation() {
   useDictation.setState({ status: 'transcribing', level: 0 })
   const stoppedAt = Date.now()
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
+  let text = ''
+  let liveError: Error | undefined
   try {
-    let text = ''
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
       const took: Partial<Record<DictationEngine, number>> = {}
@@ -584,6 +630,24 @@ export async function stopDictation() {
         `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     text = applyFixes(text)
+  } catch (err) {
+    // Every live engine failed: the batch route below gets the audio
+    liveError = err as Error
+  }
+  try {
+    if (!text) {
+      const samples = concatSamples(audio)
+      try {
+        text = applyFixes(await transcribe(samples))
+      } catch (err) {
+        const why = (err as Error).message
+        keepFailed(samples, liveError ? `${liveError.message}; ${why}` : why)
+        return
+      }
+      reportClip(
+        `dictation fallback (${liveError ? 'live failed' : 'live empty'}): ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
+      )
+    }
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else toast(`${label} heard nothing`)
   } catch (err) {
@@ -591,6 +655,35 @@ export async function stopDictation() {
   } finally {
     useDictation.setState({ status: 'idle', level: 0 })
   }
+}
+
+/** Keeps a failed dictation's audio, so the banner can offer Retry. */
+function keepFailed(samples: Float32Array, why: string) {
+  failedAudio = samples
+  useDictation.setState({ failed: why })
+}
+
+/** Sends the failed dictation's audio to the batch route again. */
+export async function retryDictation() {
+  const samples = failedAudio
+  if (!samples || useDictation.getState().status !== 'idle') return
+  useDictation.setState({ status: 'transcribing', level: 0 })
+  try {
+    const text = applyFixes(await transcribe(samples))
+    dismissFailedDictation()
+    if (text) useSpeakerTranscription.getState().enqueue(text)
+    else toast('Dictation heard nothing')
+  } catch (err) {
+    keepFailed(samples, (err as Error).message)
+  } finally {
+    useDictation.setState({ status: 'idle', level: 0 })
+  }
+}
+
+/** Throws the failed dictation's audio away. */
+export function dismissFailedDictation() {
+  failedAudio = undefined
+  useDictation.setState({ failed: undefined })
 }
 
 /** How long the log waits for engines that lost the race. */

@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import {
   IconMicrophone,
   IconPlayerStopFilled,
+  IconRefresh,
   IconX,
 } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import {
   cancelDictation,
+  dismissFailedDictation,
   readyMicEarly,
+  retryDictation,
   toggleDictation,
   useDictation,
 } from '@/lib/dictation'
@@ -42,16 +45,46 @@ function LevelBars({ level }: { level: number }) {
 /**
  * A row above the prompt while dictating: a pulsing dot, bars that follow
  * your voice and the time, then "Transcribing" while the engines finish.
+ * When a dictation fails its audio is kept, and the row offers Retry.
  */
 export function DictationBanner() {
-  const { status, level, startedAt } = useDictation()
+  const { status, level, startedAt, failed } = useDictation()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (status !== 'recording') return
     const t = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(t)
   }, [status])
-  if (isPlatformTauri() || status === 'idle') return null
+  if (isPlatformTauri()) return null
+  if (status === 'idle' && failed)
+    return (
+      <div
+        data-test-id="dictation-failed"
+        role="alert"
+        className="flex items-center gap-2 mx-2 mt-2 px-2 h-8 rounded-md text-xs bg-destructive/10 text-destructive"
+      >
+        <span className="truncate" title={failed}>
+          Dictation failed: {failed}
+        </span>
+        <button
+          type="button"
+          onClick={() => void retryDictation()}
+          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-sm font-medium hover:bg-destructive/15 shrink-0"
+        >
+          <IconRefresh size={14} aria-hidden />
+          Retry
+        </button>
+        <button
+          type="button"
+          aria-label="Discard the failed dictation"
+          onClick={dismissFailedDictation}
+          className="p-1 rounded-sm hover:bg-destructive/15 shrink-0"
+        >
+          <IconX size={14} />
+        </button>
+      </div>
+    )
+  if (status === 'idle') return null
 
   return (
     <div
