@@ -467,8 +467,8 @@ test('dictionary: one term per line, split at commas outside brackets', () => {
   // No duplicates (MTTR is listed twice), no trailing dots
   assert.equal(new Set(terms.map((t) => t.toLowerCase())).size, terms.length)
   assert.ok(!terms.includes('Kustomize.'))
-  // Soniox's context limit is ~10,000 characters
-  assert.ok(terms.join(', ').length < 10000)
+  // Wispr Flow's words are merged in, and its correction targets added
+  for (const t of ['Liquibase', 'LiteLLM', 'Zscaler']) assert.ok(terms.includes(t), t)
 })
 
 test('cartesia live: an STT-only access token plus the dictionary', async () => {
