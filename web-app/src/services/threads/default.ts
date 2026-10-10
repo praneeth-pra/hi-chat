@@ -118,7 +118,7 @@ export class DefaultThreadsService implements ThreadsService {
               engine: thread.model?.provider ?? 'llamacpp',
             },
             id: 'jan',
-            name: 'Jan',
+            name: 'Hi-chat',
           },
         ],
         metadata: {

@@ -843,7 +843,7 @@ function General() {
               />
               <CardItem
                 title="Keep the mic ready"
-                description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Jan is open."
+                description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Hi-chat is open."
                 actions={
                   <Switch
                     checked={keepMic}

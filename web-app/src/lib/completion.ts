@@ -246,7 +246,7 @@ export const sendCompletion = async (
     ...(provider.provider === 'openrouter' && {
       defaultHeaders: {
         'HTTP-Referer': 'https://jan.ai',
-        'X-Title': 'Jan',
+        'X-Title': 'Hi-chat',
       },
     }),
     // Add Origin header for local providers to avoid CORS issues

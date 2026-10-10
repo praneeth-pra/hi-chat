@@ -39,7 +39,7 @@ const setLastUsedAssistantId = (assistantId: string) => {
 
 export const defaultAssistant: Assistant = {
   id: 'jan',
-  name: 'Jan',
+  name: 'Hi-chat',
   created_at: 1747029866.542,
   parameters: {},
   avatar: '👋',

@@ -13,8 +13,22 @@ describe('WebAssistantsService', () => {
     service = new WebAssistantsService()
   })
 
-  it('starts with the built-in Jan assistant', async () => {
+  it('starts with the built-in assistant', async () => {
     expect((await service.getAssistants())?.map((x) => x.id)).toEqual(['jan'])
+  })
+
+  it('shows the built-in assistant saved as "Jan" as Hi-chat', async () => {
+    localStorage.setItem(
+      WEB_ASSISTANTS_STORAGE_KEY,
+      JSON.stringify([
+        { id: 'jan', name: 'Jan' },
+        { id: 'a', name: 'Jan' },
+      ])
+    )
+    const names = (await new WebAssistantsService().getAssistants())?.map(
+      (x) => x.name
+    )
+    expect(names).toEqual(['Hi-chat', 'Jan'])
   })
 
   it('saves, updates and deletes assistants in localStorage', async () => {
