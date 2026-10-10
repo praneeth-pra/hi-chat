@@ -1209,8 +1209,18 @@ export function createRelevanceFilter(
         : {}),
     }))
 
+  // release() runs on its own timer and awaits a judge call: one at a time
+  // with accept(), so a held question never goes out after a newer one
+  let queue: Promise<unknown> = Promise.resolve()
+  const oneAtATime = <T>(job: () => Promise<T>): Promise<T> => {
+    const run = queue.then(job, job)
+    queue = run.catch(() => {})
+    return run
+  }
+
   // Nothing joined the held clip in time: judge it as it stands.
-  const release = async (force = false) => {
+  const release = (force = false) => oneAtATime(() => releaseNow(force))
+  const releaseNow = async (force: boolean) => {
     const clip = held
     held = null
     if (!clip || stopped) return
@@ -1251,6 +1261,17 @@ export function createRelevanceFilter(
       }
     }
     if (stopped) return
+    // Asked again while it was held: it already went out
+    const cutoff = now() - REPEAT_WINDOW_MS
+    while (sent.length && sent[0].at < cutoff) sent.shift()
+    if (text && sent.some((s) => isRepeatOf(clip.text, s.text))) {
+      text = null
+      check = {
+        model: 'repeat check',
+        ms: 0,
+        note: 'Skipped: repeats a question just sent',
+      }
+    }
     remember(clip.text, text !== null)
     if (text && (revisions.has(text) || revises(text)) && check)
       check = withNote(check, 'Replaces the question just sent')
@@ -1258,7 +1279,9 @@ export function createRelevanceFilter(
     hold?.onLate?.({ text: text ?? clip.text, sent: text !== null, check })
   }
 
-  const accept = async (texts: string[], turn?: TurnCheck | null) => {
+  const accept = (texts: string[], turn?: TurnCheck | null) =>
+    oneAtATime(() => acceptNow(texts, turn))
+  const acceptNow = async (texts: string[], turn?: TurnCheck | null) => {
     const joining = held
     if (joining) {
       clearTimeout(joining.timer)
