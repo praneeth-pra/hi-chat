@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
+  jumpToCode,
   listenForSpeakerKeys,
   stripFunctionKeyChars,
   takeDictationPaste,
@@ -192,5 +193,33 @@ describe('speaker remote keys', () => {
 
     stop()
     box.remove()
+  })
+
+  it('Shift + F16 jumps to the last code block, then to earlier ones', () => {
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id)
+    }
+    for (const id of ['one', 'two', 'three']) {
+      const block = document.createElement('div')
+      block.id = id
+      block.setAttribute('data-code-block', '')
+      document.body.appendChild(block)
+    }
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F16', shiftKey: true })
+    )
+    expect(scrolled).toEqual(['three'])
+    stop()
+
+    jumpToCode(100_000)
+    jumpToCode(101_000)
+    jumpToCode(102_000)
+    jumpToCode(103_000)
+    // Later on, it starts from the last one again
+    jumpToCode(200_000)
+    expect(scrolled).toEqual(['three', 'three', 'two', 'one', 'one', 'three'])
+    document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
   })
 })
