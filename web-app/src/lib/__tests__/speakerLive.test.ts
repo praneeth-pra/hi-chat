@@ -7,6 +7,7 @@ import {
   LiveTranscriber,
   LIVE_URL,
   CartesiaLiveTranscriber,
+  elevenLabsTerms,
   cartesiaTerms,
   SONIOX_LIVE_URL,
   SonioxLiveTranscriber,
@@ -490,5 +491,34 @@ describe('CartesiaLiveTranscriber', () => {
     expect(out).toHaveLength(100)
     expect(out.slice(0, 3)).toEqual(['Grafana', 'RBAC', 'word0'])
     expect(out.join('').length).toBeLessThanOrEqual(1200)
+  })
+})
+
+describe('elevenLabsTerms', () => {
+  it('keeps the top 50 terms that fit 20 characters', () => {
+    const terms = [
+      'Horizontal Pod Autoscaler',
+      ...Array.from({ length: 60 }, (_, i) => `t${i}`),
+    ]
+    const out = elevenLabsTerms(terms)
+    expect(out).toHaveLength(50)
+    expect(out[0]).toBe('t0')
+  })
+
+  it('sends them as keyterms on the ElevenLabs socket', async () => {
+    let url = ''
+    new LiveTranscriber(
+      Promise.resolve('tok'),
+      (u) => {
+        url = u
+        return new FakeSocket(u) as unknown as WebSocket
+      },
+      ['EKS', 'RBAC']
+    )
+    await Promise.resolve()
+    expect(new URL(url).searchParams.getAll('keyterms')).toEqual([
+      'EKS',
+      'RBAC',
+    ])
   })
 })
