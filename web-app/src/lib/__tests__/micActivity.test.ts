@@ -5,6 +5,10 @@ import {
   ECHO_MS,
   createTurnTracker,
   findMicDevice,
+  getDictationMic,
+  getMicDevice,
+  setDictationMic,
+  setMicDevice,
   SPEAKING_MS,
   TURN_MAX_MS,
 } from '../micActivity'
@@ -184,5 +188,23 @@ describe('createTurnTracker', () => {
     expect(turns.next('And on-prem?').text).toBe(
       'How do you secure a VPC with many accounts? And on-prem?'
     )
+  })
+})
+
+describe('microphone settings', () => {
+  it('keeps dictation and speaker mics apart, starting from the shared one', () => {
+    localStorage.clear()
+    localStorage.setItem('speaker-mic-device', 'USB Mic')
+    // Before the split both used this one
+    expect(getDictationMic()).toBe('USB Mic')
+
+    setMicDevice('MacBook Mic')
+    expect(getMicDevice()).toBe('MacBook Mic')
+    expect(getDictationMic()).toBe('USB Mic')
+
+    setDictationMic('')
+    expect(getDictationMic()).toBe('')
+    expect(getMicDevice()).toBe('MacBook Mic')
+    localStorage.clear()
   })
 })

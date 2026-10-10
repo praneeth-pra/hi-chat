@@ -21,7 +21,12 @@ import {
   switchMic,
   type Recording,
 } from '../dictation'
-import { MIC_DEVICE_STORAGE_KEY, setMicDevice } from '@/lib/micActivity'
+import {
+  DICTATION_MIC_STORAGE_KEY,
+  MIC_DEVICE_STORAGE_KEY,
+  setDictationMic,
+  setMicDevice,
+} from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
@@ -471,7 +476,7 @@ describe('dictation', () => {
         (getUserMedia.mock.calls[call][0].audio as MediaTrackConstraints)
           .deviceId as { exact: string }
       ).exact
-    setMicDevice('MacBook Mic')
+    setDictationMic('MacBook Mic')
     setKeepMicReady(true)
     useDictation.setState({ status: 'idle' })
 
@@ -480,14 +485,20 @@ describe('dictation', () => {
     expect(deviceOf(0)).toBe('mac')
 
     // Chosen in Settings: the open mic moves at once
-    setMicDevice('USB Mic')
+    setDictationMic('USB Mic')
     switchMic()
     await new Promise((r) => setTimeout(r, 0))
     expect(tracks[0].stop).toHaveBeenCalled()
     expect(deviceOf(1)).toBe('usb')
 
-    // Changed elsewhere (another tab): the next dictation reopens
+    // Speaker's mic is its own setting: dictation stays on USB
     setMicDevice('MacBook Mic')
+    await startDictation()
+    expect(getUserMedia).toHaveBeenCalledTimes(2)
+    cancelDictation()
+
+    // Changed elsewhere (another tab): the next dictation reopens
+    setDictationMic('MacBook Mic')
     await startDictation()
     expect(useDictation.getState().status).toBe('recording')
     expect(tracks[1].stop).toHaveBeenCalled()
@@ -497,6 +508,7 @@ describe('dictation', () => {
     setKeepMicReady(false)
     localStorage.removeItem('dictation-keep-mic')
     localStorage.removeItem(MIC_DEVICE_STORAGE_KEY)
+    localStorage.removeItem(DICTATION_MIC_STORAGE_KEY)
     vi.unstubAllGlobals()
   })
 

@@ -27,7 +27,7 @@ export function setMicTurns(on: boolean) {
 }
 
 /**
- * Settings > Speaker: which microphone to watch, by its name (device ids can
+ * Settings > Speaker > Microphone: which microphone to watch, by its name (device ids can
  * change between sessions). Empty means the Mac's default input.
  */
 export const MIC_DEVICE_STORAGE_KEY = 'speaker-mic-device'
@@ -42,7 +42,38 @@ export function getMicDevice(): string {
 
 export function setMicDevice(label: string) {
   try {
+    // Dictation used to share this setting: keep its mic where it was
+    if (localStorage.getItem(DICTATION_MIC_STORAGE_KEY) === null) {
+      localStorage.setItem(DICTATION_MIC_STORAGE_KEY, getMicDevice())
+    }
     localStorage.setItem(MIC_DEVICE_STORAGE_KEY, label)
+  } catch {
+    // Storage blocked: the default input stays in use
+  }
+}
+
+/**
+ * Settings > Dictation > Microphone: which microphone dictation records from,
+ * by name. Until it is picked, it is the mic Speaker had (they were one
+ * setting before); empty means the Mac's default input.
+ */
+export const DICTATION_MIC_STORAGE_KEY = 'dictation-mic-device'
+
+export function getDictationMic(): string {
+  try {
+    return (
+      localStorage.getItem(DICTATION_MIC_STORAGE_KEY) ??
+      localStorage.getItem(MIC_DEVICE_STORAGE_KEY) ??
+      ''
+    )
+  } catch {
+    return ''
+  }
+}
+
+export function setDictationMic(label: string) {
+  try {
+    localStorage.setItem(DICTATION_MIC_STORAGE_KEY, label)
   } catch {
     // Storage blocked: the default input stays in use
   }
