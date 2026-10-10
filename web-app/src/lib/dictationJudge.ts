@@ -48,7 +48,7 @@ export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
-export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Soniox, Cartesia and AssemblyAI are given the speaker's own key terms, so trust their spelling of names and technical words. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
+export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Soniox and Cartesia are given the speaker's own dictionary, so trust their spelling of names and technical words. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
   aqua: 'Aqua',
@@ -56,7 +56,6 @@ const ENGINE_NAMES: Record<string, string> = {
   elevenlabs: 'ElevenLabs',
   soniox: 'Soniox',
   cartesia: 'Cartesia',
-  assemblyai: 'AssemblyAI',
 }
 
 function judgeTarget() {
@@ -170,7 +169,7 @@ export async function judgeDictation(
  * so it has less to write. Shipped only if it matches judgeDictation.
  */
 
-export const DICTATION_SPOTS_PROMPT = `You get one dictation, transcribed by several speech engines. The text is one engine's version, with numbered spots like [1: words] where the engines disagree; below it are each engine's words for every spot. For each spot, write what the speaker most likely said there. Use the wording most engines agree on, unless another one makes more sense in context or matches a key term. Soniox, Cartesia and AssemblyAI are given the speaker's own key terms, so trust their spelling of names and technical words. Leave out filler words such as uh and um. Keep the speaker's own words; do not rephrase. Reply with one line per spot: the number, a colon, then the words (nothing after the colon to drop the spot's words).`
+export const DICTATION_SPOTS_PROMPT = `You get one dictation, transcribed by several speech engines. The text is one engine's version, with numbered spots like [1: words] where the engines disagree; below it are each engine's words for every spot. For each spot, write what the speaker most likely said there. Use the wording most engines agree on, unless another one makes more sense in context or matches a key term. Soniox and Cartesia are given the speaker's own dictionary, so trust their spelling of names and technical words. Leave out filler words such as uh and um. Keep the speaker's own words; do not rephrase. Reply with one line per spot: the number, a colon, then the words (nothing after the colon to drop the spot's words).`
 
 type Token = { raw: string; norm: string }
 

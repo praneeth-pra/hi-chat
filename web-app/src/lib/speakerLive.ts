@@ -195,24 +195,6 @@ export class LiveTranscriber {
 export const ASSEMBLY_LIVE_URL = 'wss://streaming.assemblyai.com/v3/ws'
 export const ASSEMBLY_LIVE_MODEL = 'universal-3-6-pro'
 
-/** AssemblyAI ignores longer key terms and rejects more than 100. */
-const ASSEMBLY_TERM_CHARS = 50
-const ASSEMBLY_MAX_TERMS = 100
-
-/** The assistant's key terms as AssemblyAI takes them. */
-export function assemblyTerms(keyterms: string[]): string[] {
-  const seen = new Set<string>()
-  return keyterms
-    .map((t) => t.replace(/\s+/g, ' ').trim())
-    .filter((t) => {
-      if (!t || t.length > ASSEMBLY_TERM_CHARS) return false
-      if (seen.has(t.toLowerCase())) return false
-      seen.add(t.toLowerCase())
-      return true
-    })
-    .slice(0, ASSEMBLY_MAX_TERMS)
-}
-
 /** AssemblyAI wants 50-1000 ms per audio message. */
 const ASSEMBLY_MIN_SAMPLES = TARGET_SAMPLE_RATE / 20
 
@@ -227,11 +209,10 @@ export function toPcm16(samples: Float32Array): ArrayBuffer {
 }
 
 /**
- * One utterance streamed to AssemblyAI (Universal-3.6 Pro), beside the
+ * One utterance streamed to AssemblyAI (Universal-Streaming), beside the
  * ElevenLabs stream. AssemblyAI ends turns by itself on pauses, so every turn
  * is kept by its number. `finish()` forces the last turn to end, closes the
  * session (it is billed while open) and resolves with all turns joined.
- * The assistant's key terms (up to 100) go as keyterms_prompt.
  */
 export class AssemblyLiveTranscriber {
   private socket: SocketLike | null = null
@@ -245,8 +226,7 @@ export class AssemblyLiveTranscriber {
 
   constructor(
     token: Promise<string>,
-    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
-    keyterms: string[] = []
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url)
   ) {
     token.then(
       (t) => {
@@ -258,8 +238,6 @@ export class AssemblyLiveTranscriber {
           format_turns: 'true',
           token: t,
         })
-        const terms = assemblyTerms(keyterms)
-        if (terms.length) params.set('keyterms_prompt', JSON.stringify(terms))
         const socket = makeSocket(`${ASSEMBLY_LIVE_URL}?${params}`)
         this.socket = socket
         socket.onopen = () => {
