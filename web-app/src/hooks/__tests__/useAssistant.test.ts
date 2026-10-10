@@ -148,7 +148,7 @@ describe('useAssistant', () => {
     const { result } = renderHook(() => useAssistant())
 
     expect(result.current.currentAssistant.id).toBe('jan')
-    expect(result.current.currentAssistant.name).toBe('Jan')
+    expect(result.current.currentAssistant.name).toBe('Hi-chat')
     expect(result.current.currentAssistant.avatar).toBe('👋')
     expect(result.current.currentAssistant.description).toContain(
       'helpful assistant'

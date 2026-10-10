@@ -103,7 +103,7 @@ const FLOW_HISTORY_FRAMES = [
 const createFlowHistoryFrames = () =>
   Array.from(FLOW_HISTORY_FRAMES, (frame) => ({ ...frame }))
 
-const FLOW_TYPING_TEXT = 'Jan, help me summarize this'
+const FLOW_TYPING_TEXT = 'Hi-chat, help me summarize this'
 // Mirror Flow's history reveal timing so the typing cadence stays aligned.
 const STICKY_USER_MESSAGE_DELAY =
   FLOW_HISTORY_FRAMES.length * 160 + 380

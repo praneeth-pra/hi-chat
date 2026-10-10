@@ -122,10 +122,15 @@ export class WebAssistantsService implements AssistantsService {
 
   constructor(private store: AssistantStore = defaultStore()) {}
 
-  // Starts with the built-in Jan assistant, like the desktop app's assistant folder
+  // Starts with the built-in assistant, like the desktop app's assistant
+  // folder. The built-in one saved under its old name "Jan" reads as Hi-chat.
   private async read(): Promise<Assistant[]> {
-    return (
-      (await this.store.get()) ?? [defaultAssistant as unknown as Assistant]
+    const saved = await this.store.get()
+    if (!saved) return [defaultAssistant as unknown as Assistant]
+    return saved.map((a) =>
+      a.id === defaultAssistant.id && a.name === 'Jan'
+        ? { ...a, name: defaultAssistant.name }
+        : a
     )
   }
 

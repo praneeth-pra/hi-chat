@@ -47,7 +47,7 @@ const DropdownAssistant = () => {
                   </span>
                 )}
                 <div className="truncate max-w-30">
-                  <span>{selectedAssistant?.name || 'Jan'}</span>
+                  <span>{selectedAssistant?.name || 'Hi-chat'}</span>
                 </div>
               </div>
             </button>
