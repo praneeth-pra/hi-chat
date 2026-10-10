@@ -42,6 +42,7 @@ import {
 import { CODING_OFFER_COOLDOWN_MS, isCodingCue } from '@/lib/codingCue'
 import { TurnCheck, createTurnListener, getSmartTurn } from '@/lib/smartTurn'
 import { toast } from 'sonner'
+import { isPlatformTauri } from '@/lib/platform/utils'
 import {
   listenForSpeakerKeys,
   setScenarioSender,
@@ -68,12 +69,6 @@ function offerCodingMode(text: string) {
 const speakerKeyTerms = () =>
   activeKeyTerms(useAssistant.getState().currentAssistant?.keyterms)
 setKeyTermsSource(speakerKeyTerms)
-import { isPlatformTauri } from '@/lib/platform/utils'
-import {
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
 const LABELS: Record<SpeakerStatus, string> = {
   'off': 'Speaker off',
@@ -300,98 +295,100 @@ export function SpeakerSuggestions() {
   if (isPlatformTauri() || !enabled || suggestions.length === 0) return null
 
   return (
-    <TooltipProvider>
-      <div className="flex flex-wrap gap-1 p-2 pb-0">
-        {suggestions.map((text) => (
-          <div
-            key={text}
-            data-test-id="speaker-suggestion"
-            className="h-7 max-w-full flex items-center rounded-sm text-xs bg-accent/10 text-accent"
+    <div className="flex flex-wrap gap-1 p-2 pb-0">
+      {suggestions.map((text) => (
+        <div
+          key={text}
+          data-test-id="speaker-suggestion"
+          className="h-7 max-w-full flex items-center rounded-sm text-xs bg-accent/10 text-accent"
+        >
+          <button
+            type="button"
+            title={text}
+            onClick={() => acceptSuggestion(text)}
+            className="h-full min-w-0 px-2 truncate hover:bg-accent/15 rounded-l-sm"
           >
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => acceptSuggestion(text)}
-                  className="h-full min-w-0 px-2 truncate hover:bg-accent/15 rounded-l-sm"
-                >
-                  {text}
-                </button>
-              </TooltipTrigger>
-            </Tooltip>
-            <button
-              type="button"
-              aria-label="Dismiss suggestion"
-              onClick={() => dismissSuggestion(text)}
-              className="h-full px-1 shrink-0 hover:bg-accent/15 rounded-r-sm"
-            >
-              <IconX size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </TooltipProvider>
+            {text}
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss suggestion"
+            onClick={() => dismissSuggestion(text)}
+            className="h-full px-1 shrink-0 hover:bg-accent/15 rounded-r-sm"
+          >
+            <IconX size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
   )
 }
 
 /** Small on/off chip in the chat box showing what the speaker listener is doing. */
 export function SpeakerListenIndicator() {
-  const { enabled, status, setEnabled, coding, setCoding } =
+  const { enabled, status, error, setEnabled, coding, setCoding } =
     useSpeakerTranscription()
+  // The chip only says "Speaker error" (and nothing on a phone): say why
+  useEffect(() => {
+    if (status === 'error' && error && !isPlatformTauri())
+      toast.error(`Speaker error: ${error}`, { id: 'speaker-error' })
+  }, [status, error])
   if (isPlatformTauri()) return null
 
   const active = ['listening', 'hearing', 'transcribing'].includes(status)
   const problem = ['no-device', 'blocked', 'unsupported', 'error'].includes(
     status
   )
+  const label = !enabled
+    ? LABELS.off
+    : status === 'error' && error
+      ? `${LABELS.error}: ${error}`
+      : LABELS[status]
   return (
-    <TooltipProvider>
+    <>
       {enabled && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              data-test-id="speaker-coding-toggle"
-              aria-pressed={coding}
-              onClick={() => setCoding(!coding)}
-              className={cn(
-                'h-7 px-2 flex items-center gap-1 rounded-sm text-xs whitespace-nowrap hover:bg-main-view-fg/10 transition-colors',
-                coding ? 'text-accent bg-accent/10' : 'text-main-view-fg/50'
-              )}
-            >
-              <IconCode size={16} />
-              {coding && <span className="hidden sm:inline">Coding</span>}
-            </button>
-          </TooltipTrigger>
-        </Tooltip>
+        <button
+          type="button"
+          data-test-id="speaker-coding-toggle"
+          aria-pressed={coding}
+          aria-label="Coding mode"
+          title="Coding mode"
+          onClick={() => setCoding(!coding)}
+          className={cn(
+            'h-7 px-2 flex items-center gap-1 rounded-sm text-xs whitespace-nowrap hover:bg-main-view-fg/10 transition-colors',
+            coding ? 'text-accent bg-accent/10' : 'text-main-view-fg/50'
+          )}
+        >
+          <IconCode size={16} />
+          {coding && <span className="hidden sm:inline">Coding</span>}
+        </button>
       )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            data-test-id="speaker-listen-toggle"
-            onClick={() => setEnabled(!enabled)}
-            className={cn(
-              'h-7 px-2 flex items-center gap-1 rounded-sm text-xs whitespace-nowrap hover:bg-main-view-fg/10 transition-colors',
-              active && 'text-accent',
-              problem && 'text-destructive',
-              !active && !problem && 'text-main-view-fg/50'
-            )}
-          >
-            {enabled ? (
-              <IconHeadphones
-                size={16}
-                className={cn(status === 'hearing' && 'animate-pulse')}
-              />
-            ) : (
-              <IconHeadphonesOff size={16} />
-            )}
-            <span className="hidden sm:inline">
-              {enabled ? LABELS[status] : LABELS.off}
-            </span>
-          </button>
-        </TooltipTrigger>
-      </Tooltip>
-    </TooltipProvider>
+      <button
+        type="button"
+        data-test-id="speaker-listen-toggle"
+        aria-pressed={enabled}
+        aria-label={label}
+        title={label}
+        onClick={() => setEnabled(!enabled)}
+        className={cn(
+          'h-7 px-2 flex items-center gap-1 rounded-sm text-xs whitespace-nowrap hover:bg-main-view-fg/10 transition-colors',
+          active && 'text-accent',
+          problem && 'text-destructive',
+          !active && !problem && 'text-main-view-fg/50'
+        )}
+      >
+        {enabled ? (
+          <IconHeadphones
+            size={16}
+            className={cn(status === 'hearing' && 'animate-pulse')}
+          />
+        ) : (
+          <IconHeadphonesOff size={16} />
+        )}
+        <span className="hidden sm:inline">
+          {enabled ? LABELS[status] : LABELS.off}
+        </span>
+      </button>
+    </>
   )
 }

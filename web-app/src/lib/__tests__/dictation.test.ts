@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   wavBytes,
   toggleDictation,
@@ -16,15 +16,120 @@ import {
   reportAuto,
   withoutFillers,
   textAgreement,
+  retryDictation,
+  dismissFailedDictation,
+  switchMic,
   type Recording,
 } from '../dictation'
+import { MIC_DEVICE_STORAGE_KEY, setMicDevice } from '@/lib/micActivity'
+import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 const reportClip = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/speakerCaptureSession', async (orig) => ({
   ...(await orig<object>()),
   reportClip,
+  // The fake live streams below never use their token
+  fetchLiveToken: () => new Promise(() => {}),
+  fetchLiveKeyWithTerms: () => new Promise(() => {}),
 }))
+// What every live stream's finish() gives (all four engines share it)
+const liveResult = vi.hoisted(() => ({
+  finish: (): Promise<string> => Promise.resolve(''),
+}))
+vi.mock('@/lib/speakerLive', async (orig) => {
+  class FakeLive {
+    push() {}
+    abort() {}
+    finish() {
+      return liveResult.finish()
+    }
+  }
+  return {
+    ...(await orig<object>()),
+    LiveTranscriber: FakeLive,
+    GrokLiveTranscriber: FakeLive,
+    SonioxLiveTranscriber: FakeLive,
+    CartesiaLiveTranscriber: FakeLive,
+  }
+})
+
+/** A mic that opens when `open()` is called; `say()` sends it a block. */
+function fakeMic() {
+  const track = { readyState: 'live', stop: vi.fn() }
+  const stream = { getTracks: () => [track], getAudioTracks: () => [track] }
+  let open!: () => void
+  const opened = new Promise<void>((r) => (open = r))
+  const getUserMedia = vi.fn(async () => {
+    await opened
+    return stream
+  })
+  vi.stubGlobal('navigator', {
+    mediaDevices: { getUserMedia, enumerateDevices: async () => [] },
+  })
+  const nodes: { port: { onmessage: ((e: unknown) => void) | null } }[] = []
+  class FakeContext {
+    state = 'running'
+    sampleRate = 16000
+    destination = {}
+    audioWorklet = { addModule: async () => {} }
+    createMediaStreamSource = () => ({ connect: () => {} })
+    resume = async () => {}
+    close = async () => {}
+  }
+  class FakeNode {
+    port = { onmessage: null }
+    constructor() {
+      nodes.push(this)
+    }
+    connect() {}
+    disconnect() {}
+  }
+  vi.stubGlobal('AudioContext', FakeContext)
+  vi.stubGlobal('AudioWorkletNode', FakeNode)
+  URL.createObjectURL = () => 'blob:x'
+  URL.revokeObjectURL = () => {}
+  const say = (seconds: number) => {
+    for (let i = 0; i < (seconds * 16000) / 2048; i++)
+      nodes.at(-1)?.port.onmessage?.({
+        data: new Float32Array(2048).fill(0.2),
+      })
+  }
+  return { track, getUserMedia, open, say }
+}
+
+/** Records `seconds` of speech with the chosen engine, then stops. */
+async function dictate(engine: 'auto' | 'elevenlabs', seconds = 1) {
+  setKeepMicReady(false)
+  setDictationEngine(engine)
+  useDictation.setState({ status: 'idle', failed: undefined })
+  const mic = fakeMic()
+  mic.open()
+  await startDictation()
+  mic.say(seconds)
+  useDictation.setState({ startedAt: Date.now() - seconds * 1000 })
+  await stopDictation()
+  return mic
+}
+
+/** A relay that answers /api/transcribe with `text`, or fails with `error`. */
+function relay(answer: { text?: string; error?: string }) {
+  const fetchMock = vi.fn(
+    async (_url: string, _init: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          results: [
+            answer.error
+              ? { ok: false, error: answer.error }
+              : { ok: true, text: answer.text },
+          ],
+        }),
+        { status: answer.error ? 502 : 200 }
+      )
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
 
 describe('dictation', () => {
   it('encodes 16-bit mono WAV with a correct header', () => {
@@ -43,7 +148,7 @@ describe('dictation', () => {
     expect(view.getInt16(48, true)).toBe(-0x8000)
   })
 
-  it('does nothing while Aqua is transcribing', () => {
+  it('does nothing while the engines are transcribing', () => {
     useDictation.setState({ status: 'transcribing' })
     toggleDictation()
     expect(useDictation.getState().status).toBe('transcribing')
@@ -56,93 +161,19 @@ describe('dictation', () => {
     expect(useDictation.getState().status).toBe('idle')
   })
 
-  it('sends a piece to Aqua at a pause once 3 s are held', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ text: 'first part.' }), { status: 200 })
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    const rec = {
-      rate: 16000,
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    const loud = new Float32Array(2048).fill(0.2)
-    const quiet = new Float32Array(2048)
-    for (let i = 0; i < 15; i++) onBlock(rec, loud) // 1.9 s
-    for (let i = 0; i < 5; i++) onBlock(rec, quiet) // a pause, but too soon
-    expect(rec.pieces).toHaveLength(0)
-    for (let i = 0; i < 15; i++) onBlock(rec, loud) // now past 3 s
-    for (let i = 0; i < 4; i++) onBlock(rec, quiet) // 0.5 s pause
-    expect(rec.pieces).toHaveLength(1)
-    expect(rec.chunks).toHaveLength(0)
-    expect(await rec.pieces[0]).toBe('first part.')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    vi.unstubAllGlobals()
-  })
-
-  it('a quiet mic is split at its pauses, not every 3 s', () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
-    )
-    const rec = {
-      rate: 16000,
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    // Speech at 0.003 is under the old fixed 0.004 pause level
-    const speech = new Float32Array(2048).fill(0.003)
-    const pause = new Float32Array(2048).fill(0.0001)
-    for (let i = 0; i < 40; i++) onBlock(rec, speech) // 5 s, no pause
-    expect(rec.pieces).toHaveLength(0)
-    for (let i = 0; i < 5; i++) onBlock(rec, pause)
-    expect(rec.pieces).toHaveLength(1)
-    vi.unstubAllGlobals()
-  })
-
-  it('sends Grok pieces to the transcribe route and reads its result', async () => {
-    const fetchMock = vi.fn(
-      async (_url: string, _init: RequestInit) =>
-        new Response(
-          JSON.stringify({ results: [{ ok: true, text: 'grok text' }] }),
-          { status: 200 }
-        )
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    const rec = {
-      rate: 16000,
-      engine: 'grok',
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
-    } as unknown as Recording
-    const loud = new Float32Array(2048).fill(0.2)
-    for (let i = 0; i < 35; i++) onBlock(rec, loud)
-    for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
-    expect(await rec.pieces[0]).toBe('grok text')
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/transcribe')
-    expect((init.body as FormData).get('engines')).toBe('grok')
-    vi.unstubAllGlobals()
-  })
-
-  it('streams every block to ElevenLabs live instead of making pieces', () => {
+  it('streams every block to ElevenLabs live, at 16 kHz', () => {
     const push = vi.fn()
     const rec = {
       rate: 48000,
       engine: 'elevenlabs',
       live: { push },
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
+      audio: [],
     } as unknown as Recording
     onBlock(rec, new Float32Array(2048).fill(0.2))
     expect(push).toHaveBeenCalledTimes(1)
     expect(push.mock.calls[0][0]).toHaveLength(682) // 48 kHz to 16 kHz
-    expect(rec.chunks).toHaveLength(0)
+    // ...and keeps the same samples in case the stream fails
+    expect(rec.audio).toEqual([push.mock.calls[0][0]])
   })
 
   it('remembers the chosen engine, Auto by default', () => {
@@ -259,33 +290,29 @@ describe('dictation', () => {
     expect(textAgreement('a b c d', 'a x c d')).toBe(0.75)
     expect(
       pickBest([
-        { engine: 'aqua', text: 'What is cube cuddle?' },
+        { engine: 'cartesia', text: 'What is cube cuddle?' },
         { engine: 'grok', text: 'What is kubectl?' },
         { engine: 'elevenlabs', text: 'What is kubectl.' },
       ])?.engine
     ).toBe('grok')
-    // Two answers (or a tie): Aqua first
+    // Two answers (or a tie): the first
     expect(
       pickBest([
-        { engine: 'aqua', text: 'one' },
+        { engine: 'cartesia', text: 'one' },
         { engine: 'grok', text: 'two' },
       ])?.engine
-    ).toBe('aqua')
+    ).toBe('cartesia')
     expect(
       pickBest([
-        { engine: 'aqua', text: '' },
+        { engine: 'cartesia', text: '' },
         { engine: 'grok', text: 'two' },
       ])?.text
     ).toBe('two')
   })
 
-  it('Auto streams to the live engines and sends no Aqua pieces', () => {
+  it('Auto streams every block to each live engine', () => {
     const grok = { push: vi.fn() }
     const eleven = { push: vi.fn() }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('{"text":"x"}', { status: 200 }))
-    )
     const rec = {
       rate: 16000,
       engine: 'auto',
@@ -293,33 +320,28 @@ describe('dictation', () => {
         { engine: 'grok', stream: grok },
         { engine: 'elevenlabs', stream: eleven },
       ],
-      chunks: [],
-      quietMs: 0,
-      pieces: [],
+      audio: [],
     } as unknown as Recording
     const loud = new Float32Array(2048).fill(0.2)
     for (let i = 0; i < 35; i++) onBlock(rec, loud)
     for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
     expect(grok.push).toHaveBeenCalledTimes(40)
     expect(eleven.push).toHaveBeenCalledTimes(40)
-    expect(rec.pieces).toHaveLength(0)
-    expect(rec.chunks).toHaveLength(0)
-    vi.unstubAllGlobals()
   })
 
   it('Auto gives the slower engines a short grace once one has answered', async () => {
     vi.useFakeTimers()
     try {
       const results = gatherAuto([
-        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'cartesia', text: new Promise(() => {}) },
         { engine: 'grok', text: Promise.resolve('fast') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ])
       await vi.advanceTimersByTimeAsync(1000)
       await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
-      // Two engines that agree: sent at once, without waiting for Aqua
+      // Two engines that agree: sent at once, without waiting for Cartesia
       const quorum = gatherAuto([
-        { engine: 'aqua', text: new Promise(() => {}) },
+        { engine: 'cartesia', text: new Promise(() => {}) },
         { engine: 'soniox', text: Promise.resolve('What is an S3 bucket?') },
         { engine: 'elevenlabs', text: Promise.resolve('what is an S3 bucket') },
       ])
@@ -330,19 +352,19 @@ describe('dictation', () => {
       ])
       await expect(
         gatherAuto([
-          { engine: 'aqua', text: Promise.reject(new Error('no key')) },
+          { engine: 'cartesia', text: Promise.reject(new Error('no key')) },
         ])
-      ).rejects.toThrow('aqua: no key')
+      ).rejects.toThrow('cartesia: no key')
     } finally {
       vi.useRealTimers()
     }
   })
 
   it('logs the engines that lost the race once they answer', async () => {
-    let lateAqua!: (t: string) => void
+    let lateGrok!: (t: string) => void
     const done = reportAuto(
       [
-        { engine: 'aqua', text: new Promise((r) => (lateAqua = r)) },
+        { engine: 'grok', text: new Promise((r) => (lateGrok = r)) },
         { engine: 'soniox', text: Promise.resolve('What is EKS?') },
         { engine: 'cartesia', text: Promise.resolve('What is EKS?') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
@@ -350,11 +372,11 @@ describe('dictation', () => {
       { soniox: 300, cartesia: 120 },
       { sent: 'soniox', totalMs: 310 }
     )
-    lateAqua('What is EKS? ')
+    lateGrok('What is EKS? ')
     await done
     const line = reportClip.mock.calls.at(-1)?.[0] as string
     expect(line).toContain('sent=soniox total=310ms')
-    expect(line).toContain('aqua: "What is EKS?"')
+    expect(line).toContain('grok: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
   })
 
@@ -371,5 +393,179 @@ describe('dictation', () => {
     expect(withoutFillers('Uh, my career started in TCS')).toBe(
       'My career started in TCS'
     )
+  })
+  it('cancel then start again while the mic opens records once, on an open mic', async () => {
+    setKeepMicReady(false)
+    useDictation.setState({ status: 'idle' })
+    const mic = fakeMic()
+    const first = startDictation()
+    cancelDictation()
+    const second = startDictation()
+    expect(useDictation.getState().status).toBe('starting')
+    mic.open()
+    await Promise.all([first, second])
+    // The first start gave up: it neither recorded nor closed the mic
+    // under the second one
+    expect(useDictation.getState().status).toBe('recording')
+    expect(mic.getUserMedia).toHaveBeenCalledTimes(1)
+    expect(mic.track.stop).not.toHaveBeenCalled()
+    cancelDictation()
+    expect(mic.track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
+  it('a start cancelled while the mic opens closes it once it opens', async () => {
+    setKeepMicReady(false)
+    useDictation.setState({ status: 'idle' })
+    const mic = fakeMic()
+    const start = startDictation()
+    cancelDictation()
+    mic.open()
+    await start
+    expect(useDictation.getState().status).toBe('idle')
+    expect(mic.track.stop).toHaveBeenCalled()
+    localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
+  it('a newly chosen mic replaces the open one', async () => {
+    const tracks: { readyState: string; stop: ReturnType<typeof vi.fn> }[] = []
+    const getUserMedia = vi.fn(async (_c: MediaStreamConstraints) => {
+      const track = { readyState: 'live', stop: vi.fn() }
+      tracks.push(track)
+      return { getTracks: () => [track], getAudioTracks: () => [track] }
+    })
+    const devices = [
+      {
+        kind: 'audioinput',
+        label: 'MacBook Mic',
+        deviceId: 'mac',
+        groupId: 'g1',
+      },
+      { kind: 'audioinput', label: 'USB Mic', deviceId: 'usb', groupId: 'g2' },
+    ]
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia, enumerateDevices: async () => devices },
+    })
+    class FakeContext {
+      state = 'running'
+      sampleRate = 48000
+      destination = {}
+      audioWorklet = { addModule: async () => {} }
+      createMediaStreamSource = () => ({ connect: () => {} })
+      resume = async () => {}
+      close = async () => {}
+    }
+    class FakeNode {
+      port = { onmessage: null }
+      connect() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('AudioContext', FakeContext)
+    vi.stubGlobal('AudioWorkletNode', FakeNode)
+    URL.createObjectURL = () => 'blob:x'
+    URL.revokeObjectURL = () => {}
+    const deviceOf = (call: number) =>
+      (
+        (getUserMedia.mock.calls[call][0].audio as MediaTrackConstraints)
+          .deviceId as { exact: string }
+      ).exact
+    setMicDevice('MacBook Mic')
+    setKeepMicReady(true)
+    useDictation.setState({ status: 'idle' })
+
+    await startDictation()
+    cancelDictation()
+    expect(deviceOf(0)).toBe('mac')
+
+    // Chosen in Settings: the open mic moves at once
+    setMicDevice('USB Mic')
+    switchMic()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tracks[0].stop).toHaveBeenCalled()
+    expect(deviceOf(1)).toBe('usb')
+
+    // Changed elsewhere (another tab): the next dictation reopens
+    setMicDevice('MacBook Mic')
+    await startDictation()
+    expect(useDictation.getState().status).toBe('recording')
+    expect(tracks[1].stop).toHaveBeenCalled()
+    expect(deviceOf(2)).toBe('mac')
+    cancelDictation()
+
+    setKeepMicReady(false)
+    localStorage.removeItem('dictation-keep-mic')
+    localStorage.removeItem(MIC_DEVICE_STORAGE_KEY)
+    vi.unstubAllGlobals()
+  })
+
+  describe('when the live engines lose a dictation', () => {
+    const enqueue = vi.fn()
+    beforeEach(() => {
+      enqueue.mockReset()
+      useSpeakerTranscription.setState({ enqueue })
+    })
+    afterEach(() => {
+      liveResult.finish = () => Promise.resolve('')
+      dismissFailedDictation()
+      localStorage.removeItem('dictation-engine')
+      localStorage.removeItem('dictation-keep-mic')
+      vi.unstubAllGlobals()
+    })
+
+    it('sends live text without touching the batch route', async () => {
+      liveResult.finish = () => Promise.resolve('What is EKS?')
+      const fetchMock = relay({ text: 'unused' })
+      await dictate('elevenlabs')
+      expect(enqueue).toHaveBeenCalledWith('What is EKS?')
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('Auto: every stream failing sends the recording to the batch route', async () => {
+      liveResult.finish = () => Promise.reject(new Error('no token'))
+      const fetchMock = relay({ text: 'What is a NAT gateway?' })
+      await dictate('auto', 2)
+      expect(enqueue).toHaveBeenCalledWith('What is a NAT gateway?')
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe('/api/transcribe')
+      const body = init.body as FormData
+      expect(body.get('need')).toBe('1')
+      // Every block (16 of 2048 samples), 16-bit, plus the 44-byte header
+      expect((body.get('file') as Blob).size).toBe(44 + 16 * 2048 * 2)
+      expect(useDictation.getState()).toMatchObject({
+        status: 'idle',
+        failed: undefined,
+      })
+    })
+
+    it('a live engine that heard nothing also falls back', async () => {
+      const fetchMock = relay({ text: 'Run kubectl get pods.' })
+      await dictate('elevenlabs')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(enqueue).toHaveBeenCalledWith('Run kubectl get pods.')
+    })
+
+    it('keeps the audio when the batch route fails too, and Retry resends it', async () => {
+      liveResult.finish = () => Promise.reject(new Error('offline'))
+      relay({ error: 'ElevenLabs failed (500)' })
+      await dictate('elevenlabs')
+      expect(enqueue).not.toHaveBeenCalled()
+      expect(useDictation.getState()).toMatchObject({
+        status: 'idle',
+        failed: 'offline; ElevenLabs failed (500)',
+      })
+
+      const fetchMock = relay({ text: 'What is EKS?' })
+      await retryDictation()
+      expect(enqueue).toHaveBeenCalledWith('What is EKS?')
+      expect(
+        (fetchMock.mock.calls[0][1].body as FormData).get('file')
+      ).toBeTruthy()
+      expect(useDictation.getState().failed).toBeUndefined()
+      // Nothing left to retry
+      await retryDictation()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
   })
 })

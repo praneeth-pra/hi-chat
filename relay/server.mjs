@@ -309,7 +309,7 @@ export async function cartesiaToken({
 }
 
 /**
- * P's dictionary (copied from Aqua, one entry per line; "a, b" lines give
+ * P's dictionary (one entry per line; "a, b" lines give
  * each term). Soniox and Cartesia get it with their keys; the browser fits
  * it to each engine's limit.
  */
@@ -350,35 +350,6 @@ function liveTokenEngine(body) {
 }
 
 /**
- * Dictation: your own recorded voice (16 kHz mono WAV) goes to Aqua's
- * dictation route with AQUA_API_KEY, so Aqua applies your dictionary,
- * replacements and custom instructions, as its Mac app does. Returns the
- * final text.
- */
-export async function dictate(audio, { env = process.env, fetchImpl = fetch, signal } = {}) {
-  const key = env.AQUA_API_KEY
-  if (!key)
-    throw Object.assign(new Error('AQUA_API_KEY not set'), { status: 503 })
-  const form = new FormData()
-  form.append('audio', audio, 'dictation.wav')
-  // Saves Aqua detecting the language
-  form.append('language', 'en')
-  const res = await fetchImpl('https://api.aquavoice.com/v1/dictations', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-    body: form,
-    signal,
-  })
-  if (!res.ok)
-    throw Object.assign(
-      new Error(`Aqua failed (${res.status}): ${await errorText(res)}`),
-      { status: 502 }
-    )
-  const body = await res.json()
-  return String(body.text ?? body.raw_text ?? '')
-}
-
-/**
  * Speaker clip log: the browser reports each clip it judged (text, verdict,
  * timings, notes) so it shows in Railway's logs next to the timings. One line,
  * capped, so a bad request can't flood the log.
@@ -392,20 +363,6 @@ export function speakerLogLine(body) {
   }
   line = line.replace(/\s+/g, ' ').trim().slice(0, 6000)
   return line ? `speaker ${line}` : null
-}
-
-/**
- * Logged Auto dictations (each engine's text) for Settings > Dictation judge
- * test. Served behind the site login, not bundled, since they are interviews.
- */
-export function judgeSamples(
-  file = fileURLToPath(new URL('./judge-samples.json', import.meta.url))
-) {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8'))
-  } catch {
-    return []
-  }
 }
 
 function readBody(req) {
@@ -439,14 +396,10 @@ export function createRelay(options = {}) {
     if (
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
-      req.url !== '/api/speaker-log' &&
-      req.url !== '/api/judge-samples' &&
-      req.url !== '/api/dictate'
+      req.url !== '/api/speaker-log'
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
-    if (req.url === '/api/judge-samples')
-      return send(res, 200, judgeSamples())
     if (req.url === '/api/speaker-log') {
       try {
         const line = speakerLogLine(await readBody(req))
@@ -457,29 +410,6 @@ export function createRelay(options = {}) {
         send(res, err.status ?? 400, { error: err.message })
       }
       return
-    }
-    if (req.url === '/api/dictate') {
-      const started = Date.now()
-      try {
-        const body = await readBody(req)
-        const form = await new Request('http://relay/', {
-          method: 'POST',
-          headers: { 'content-type': req.headers['content-type'] ?? '' },
-          body,
-        }).formData()
-        const audio = form.get('audio')
-        if (!audio || typeof audio === 'string')
-          return send(res, 400, { error: 'No audio file' })
-        const abort = AbortSignal.timeout(ENGINE_TIMEOUT_MS)
-        const text = await dictate(audio, { ...options, signal: abort })
-        console.log(
-          `dictation ${(audio.size / 1024).toFixed(0)} KB: ${text.length} chars in ${Date.now() - started} ms`
-        )
-        return send(res, 200, { text })
-      } catch (err) {
-        console.log(`dictation failed in ${Date.now() - started} ms: ${err.message}`)
-        return send(res, err.status ?? 400, { error: err.message })
-      }
     }
     if (req.url === '/api/live-token') {
       const started = Date.now()

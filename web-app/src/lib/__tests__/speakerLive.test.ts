@@ -123,6 +123,29 @@ describe('speakerLive', () => {
     await expect(text).rejects.toThrow('too long')
     vi.useRealTimers()
   })
+
+  it('returns the segments it already has when the last one is late', async () => {
+    let socket!: FakeSocket
+    const live = new LiveTranscriber(Promise.resolve('t'), (url) => {
+      socket = new FakeSocket(url)
+      return socket as unknown as WebSocket
+    })
+    await tick()
+    socket.open()
+    socket.reply({
+      message_type: 'committed_transcript',
+      text: 'If the route table points',
+    })
+    vi.useFakeTimers()
+    try {
+      const text = live.finish(1000)
+      vi.advanceTimersByTime(1000)
+      await expect(text).resolves.toBe('If the route table points')
+      expect(socket.closed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('GrokLiveTranscriber', () => {

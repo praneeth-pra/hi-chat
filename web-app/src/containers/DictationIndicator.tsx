@@ -2,21 +2,19 @@ import { useEffect, useState } from 'react'
 import {
   IconMicrophone,
   IconPlayerStopFilled,
+  IconRefresh,
   IconX,
 } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import {
   cancelDictation,
+  dismissFailedDictation,
   readyMicEarly,
+  retryDictation,
   toggleDictation,
   useDictation,
 } from '@/lib/dictation'
-import {
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
 function elapsed(ms: number) {
   const s = Math.floor(ms / 1000)
@@ -42,16 +40,46 @@ function LevelBars({ level }: { level: number }) {
 /**
  * A row above the prompt while dictating: a pulsing dot, bars that follow
  * your voice and the time, then "Transcribing" while the engines finish.
+ * When a dictation fails its audio is kept, and the row offers Retry.
  */
 export function DictationBanner() {
-  const { status, level, startedAt } = useDictation()
+  const { status, level, startedAt, failed } = useDictation()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (status !== 'recording') return
     const t = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(t)
   }, [status])
-  if (isPlatformTauri() || status === 'idle') return null
+  if (isPlatformTauri()) return null
+  if (status === 'idle' && failed)
+    return (
+      <div
+        data-test-id="dictation-failed"
+        role="alert"
+        className="flex items-center gap-2 mx-2 mt-2 px-2 h-8 rounded-md text-xs bg-destructive/10 text-destructive"
+      >
+        <span className="truncate" title={failed}>
+          Dictation failed: {failed}
+        </span>
+        <button
+          type="button"
+          onClick={() => void retryDictation()}
+          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-sm font-medium hover:bg-destructive/15 shrink-0"
+        >
+          <IconRefresh size={14} aria-hidden />
+          Retry
+        </button>
+        <button
+          type="button"
+          aria-label="Discard the failed dictation"
+          onClick={dismissFailedDictation}
+          className="p-1 rounded-sm hover:bg-destructive/15 shrink-0"
+        >
+          <IconX size={14} />
+        </button>
+      </div>
+    )
+  if (status === 'idle') return null
 
   return (
     <div
@@ -105,30 +133,27 @@ export function DictationButton() {
   }, [])
   if (isPlatformTauri()) return null
   const recording = status === 'recording' || status === 'starting'
+  const label = recording ? 'Stop and send dictation' : 'Dictate'
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            data-test-id="dictation-toggle"
-            aria-pressed={recording}
-            disabled={status === 'transcribing'}
-            onClick={toggleDictation}
-            className={cn(
-              'h-7 px-2 flex items-center rounded-sm hover:bg-main-view-fg/10 transition-colors',
-              recording ? 'text-destructive' : 'text-main-view-fg/50'
-            )}
-          >
-            {recording ? (
-              <IconPlayerStopFilled size={16} />
-            ) : (
-              <IconMicrophone size={16} />
-            )}
-          </button>
-        </TooltipTrigger>
-      </Tooltip>
-    </TooltipProvider>
+    <button
+      type="button"
+      data-test-id="dictation-toggle"
+      aria-pressed={recording}
+      aria-label={label}
+      title={label}
+      disabled={status === 'transcribing'}
+      onClick={toggleDictation}
+      className={cn(
+        'h-7 px-2 flex items-center rounded-sm hover:bg-main-view-fg/10 transition-colors',
+        recording ? 'text-destructive' : 'text-main-view-fg/50'
+      )}
+    >
+      {recording ? (
+        <IconPlayerStopFilled size={16} />
+      ) : (
+        <IconMicrophone size={16} />
+      )}
+    </button>
   )
 }

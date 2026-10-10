@@ -38,6 +38,7 @@ import {
   getKeepMicReady,
   setDictationEngine,
   setKeepMicReady,
+  switchMic,
 } from '@/lib/dictation'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -60,12 +61,6 @@ import {
   replaySummary,
   type ReplayResult,
 } from '@/lib/replayBench'
-import {
-  loadJudgeSamples,
-  runJudgeTest,
-  judgeTestSummary,
-  type JudgeTestRow,
-} from '@/lib/judgeTest'
 import {
   getJudgeModel,
   getWaitMode,
@@ -192,34 +187,6 @@ function General() {
       )
     } finally {
       setBenchRunning(false)
-    }
-  }
-  const [judgeTest, setJudgeTest] = useState<JudgeTestRow[] | null>(null)
-  const [judgeTestProgress, setJudgeTestProgress] = useState<string | null>(
-    null
-  )
-  const runJudgeTestNow = async () => {
-    const providers = useModelProvider.getState()
-    if (
-      !providers.getProviderByName('cerebras')?.api_key &&
-      !providers.getProviderByName('groq')?.api_key
-    ) {
-      toast.error('Add a Cerebras or Groq key first')
-      return
-    }
-    setJudgeTest(null)
-    setJudgeTestProgress('Loading...')
-    try {
-      const samples = await loadJudgeSamples()
-      setJudgeTest(
-        await runJudgeTest(samples, (done, total) =>
-          setJudgeTestProgress(`${done}/${total}`)
-        )
-      )
-    } catch (err) {
-      toast.error(`Judge test failed: ${(err as Error).message}`)
-    } finally {
-      setJudgeTestProgress(null)
     }
   }
   const [replay, setReplay] = useState<ReplayResult | null>(null)
@@ -686,9 +653,12 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {CHAT_MODELS.find((m) => m.value === chatModel)?.label}
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_MODELS.map((m) => (
@@ -722,12 +692,15 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           CHAT_MODELS.find((m) => m.value === chatFallback)
                             ?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_MODELS.filter((m) => m.value !== chatModel).map(
@@ -767,13 +740,16 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           CHAT_THINKING_LEVELS.find(
                             (l) => l.value === chatThinking
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {CHAT_THINKING_LEVELS.map((l) => (
@@ -798,17 +774,20 @@ function General() {
             <Card title="Dictation">
               <CardItem
                 title="Dictation engine"
-                description="Turns your own voice into text when you tap Left Control or the mic button. Auto runs Cartesia, Soniox and ElevenLabs live and sends as soon as two agree (else a judge picks). Soniox gets your whole dictionary and Cartesia the 100 words that fit; Aqua applies your Aqua dictionary but is slower."
+                description="Turns your own voice into text when you tap Left Control or the mic button. Auto runs Cartesia, Soniox and ElevenLabs live and sends as soon as two agree (else a judge picks). Soniox gets your whole dictionary and Cartesia the 100 words that fit."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           DICTATION_ENGINES.find(
                             (e) => e.value === dictationEngine
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {DICTATION_ENGINES.map((e) => (
@@ -823,6 +802,41 @@ function General() {
                           {e.label}
                         </DropdownMenuItem>
                       ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                }
+              />
+              <CardItem
+                title="Microphone"
+                description="The mic dictation records from, also used by One answer until you speak. BlackHole is never used."
+                actions={
+                  <DropdownMenu onOpenChange={loadMics}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                      >
+                        {micDevice || 'Mac default input'}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {['', ...(mics ?? [])].map((label) => (
+                        <DropdownMenuItem
+                          key={label || 'default'}
+                          className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
+                          onClick={() => {
+                            setMicDevice(label)
+                            setMicDeviceState(label)
+                            // An open dictation mic moves to it now
+                            switchMic()
+                          }}
+                        >
+                          {label || 'Mac default input'}
+                        </DropdownMenuItem>
+                      ))}
+                      {mics === null && (
+                        <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 }
@@ -846,7 +860,7 @@ function General() {
             <Card title="Speaker">
               <CardItem
                 title="Live transcription"
-                description="Streams the speaker's audio while they talk, so the text is ready the moment they pause."
+                description="Streams the speaker's audio to ElevenLabs while they talk, so the text is ready the moment they pause. The live engines below need it."
                 actions={
                   <Switch
                     checked={liveMode}
@@ -858,18 +872,27 @@ function General() {
                 }
               />
               <CardItem
-                title="Second transcription engine"
-                description="Engines next to ElevenLabs; the judge merges the transcripts to fix misheard words. Soniox + Cartesia (the default) get your dictionary. The live options need live transcription. None is fastest."
+                title="Engines beside ElevenLabs"
+                description={
+                  !liveMode && transcribeMode === 'live-soniox-cartesia'
+                    ? 'Live transcription is off, so the speaker uses ElevenLabs alone. Turn it on to stream to Soniox and Cartesia too.'
+                    : !liveMode && transcribeMode === 'live'
+                      ? 'Live transcription is off, so Grok transcribes each clip after the pause instead of streaming. Turn it on for Grok live.'
+                      : 'The judge merges their transcripts with ElevenLabs to fix misheard words. Soniox + Cartesia (the default) get your dictionary. None is fastest.'
+                }
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           TRANSCRIBE_MODES.find(
                             (m) => m.value === transcribeMode
                           )?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {TRANSCRIBE_MODES.map((m) => (
@@ -894,12 +917,15 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {
                           JUDGE_MODELS.find((m) => m.value === judgeModel)
                             ?.label
                         }
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {JUDGE_MODELS.map((m) => (
@@ -924,10 +950,13 @@ function General() {
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                      >
                         {JUDGE_MODELS.find((m) => m.value === secondJudge)
                           ?.label ?? 'Off'}
-                      </span>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {[undefined, ...JUDGE_MODELS.map((m) => m.value)]
@@ -1001,38 +1030,6 @@ function General() {
                   />
                 }
               />
-              {micTurns && (
-                <CardItem
-                  title="Microphone"
-                  description="The mic it watches for your voice. BlackHole is never used. Takes effect the next time listening starts."
-                  actions={
-                    <DropdownMenu onOpenChange={loadMics}>
-                      <DropdownMenuTrigger asChild>
-                        <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium max-w-56 truncate">
-                          {micDevice || 'Mac default input'}
-                        </span>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {['', ...(mics ?? [])].map((label) => (
-                          <DropdownMenuItem
-                            key={label || 'default'}
-                            className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
-                            onClick={() => {
-                              setMicDevice(label)
-                              setMicDeviceState(label)
-                            }}
-                          >
-                            {label || 'Mac default input'}
-                          </DropdownMenuItem>
-                        ))}
-                        {mics === null && (
-                          <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  }
-                />
-              )}
               <CardItem
                 title="Your dictionary"
                 description={`Names and terms the transcription should spell right, one per line or separated by commas (${dictionaryTerms().length} saved).`}
@@ -1053,28 +1050,6 @@ function General() {
 
             {/* Speaker test */}
             <Card title="Speaker test">
-              <CardItem
-                title="Dictation judge test"
-                description="Runs your logged Auto dictations through today's judge and a faster version that only rewrites the words the engines disagree on, and shows how often they match. Nothing changes in dictation."
-                actions={
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="p-0"
-                    disabled={judgeTestProgress !== null}
-                    onClick={runJudgeTestNow}
-                  >
-                    <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                      {judgeTestProgress ?? 'Run test'}
-                    </div>
-                  </Button>
-                }
-              />
-              {judgeTest && (
-                <div className="text-sm text-main-view-fg/80 px-1 pb-2">
-                  {judgeTestSummary(judgeTest)}
-                </div>
-              )}
               <CardItem
                 title="Compare judgement models"
                 description="Runs each judgement model you have a key for on 58 recorded clips and shows how many it gets right, and how fast."

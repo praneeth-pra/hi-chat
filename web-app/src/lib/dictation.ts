@@ -29,23 +29,19 @@ import {
 } from '@/lib/dictationJudge'
 
 /**
- * Dictation: your own voice, recorded here and turned into text by Aqua's
- * dictation route (through the relay, which adds AQUA_API_KEY), so your Aqua
- * dictionary, replacements and instructions apply. Separate from the speaker,
- * which listens to the interviewer. The text is sent like a question.
+ * Dictation: your own voice, recorded here and streamed to live
+ * speech-to-text engines while you talk. Separate from the speaker, which
+ * listens to the interviewer. The text is sent like a question.
  */
 
 /**
  * Which service turns your voice into text. Soniox gets your dictionary as
- * context terms and Cartesia the 100 that fit; Soniox, Cartesia, Grok and
- * ElevenLabs stream live while you talk, and Aqua (with your Aqua
- * dictionary) transcribes in pieces. Auto runs Cartesia, Soniox and
- * ElevenLabs: as soon as two agree their text is sent, else a judge model
- * writes the best version. Aqua and Grok were left out of Auto: on P's
- * questions they were the slowest and least accurate.
+ * context terms and Cartesia the 100 that fit; all four stream live while
+ * you talk. Auto runs Cartesia, Soniox and ElevenLabs: as soon as two agree
+ * their text is sent, else a judge model writes the best version. Grok was
+ * left out of Auto: on P's questions it was the slowest and least accurate.
  */
 export type DictationEngine =
-  | 'aqua'
   | 'grok'
   | 'elevenlabs'
   | 'soniox'
@@ -53,7 +49,6 @@ export type DictationEngine =
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
-  { value: 'aqua', label: 'Aqua' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
@@ -119,6 +114,8 @@ type DictationState = {
   level: number
   /** When recording started (ms). */
   startedAt: number
+  /** Why the last dictation failed; its audio is kept for retryDictation(). */
+  failed?: string
 }
 
 export const useDictation = create<DictationState>(() => ({
@@ -127,12 +124,15 @@ export const useDictation = create<DictationState>(() => ({
   startedAt: 0,
 }))
 
-/** Aqua takes up to 10 minutes; stop a little before. */
+/** The audio of the dictation that failed, until it is retried or dismissed. */
+let failedAudio: Float32Array | undefined
+
+/** A dictation stops by itself after this long. */
 export const MAX_DICTATION_MS = 9.5 * 60 * 1000
 /** Shorter than this is a slip of the key: nothing is sent. */
 const MIN_DICTATION_MS = 400
 
-/** 16-bit PCM mono WAV, the format Aqua's dictation route asks for. */
+/** 16-bit PCM mono WAV. */
 export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([wavBytes(samples, sampleRate)], { type: 'audio/wav' })
 }
@@ -190,23 +190,6 @@ class DictationTap extends AudioWorkletProcessor {
 registerProcessor('dictation-tap', DictationTap)
 `
 
-/**
- * While you talk, each stretch of speech that ends in a pause is sent to Aqua
- * right away, so when you stop only the last bit is left to transcribe.
- */
-const PIECE_MIN_MS = 3000
-const PAUSE_MS = 500
-/**
- * A block counts as a pause (used only to split) when it is this much quieter
- * than your recent speech, so it works whatever the mic's level. A fixed
- * 0.004 counted all of a quiet mic's speech as pause and cut every 4 s.
- */
-const PAUSE_SHARE = 0.15
-/** Never a pause above this loudness... */
-const SILENCE_FLOOR = 0.0003
-/** ...and the recent-speech level fades by this much per block (~6 s half-life). */
-const PEAK_DECAY = 0.995
-
 type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'>
 
 export type Recording = {
@@ -214,16 +197,13 @@ export type Recording = {
   engine: DictationEngine
   /** Live engines: the stream that gets every block as it comes */
   live?: LiveStream
-  /** Auto: the live engines running alongside Aqua's pieces */
+  /** Auto: the live engines that each get every block */
   autoLive?: { engine: DictationEngine; stream: LiveStream }[]
-  /** Audio not yet sent */
-  chunks: Float32Array[]
-  /** Silence at the end of chunks, in ms */
-  quietMs: number
-  /** Recent speech loudness, fading slowly */
-  peak?: number
-  /** The text of each piece sent so far, in order */
-  pieces: Promise<string>[]
+  /**
+   * Every block at 16 kHz, for the batch route when the live engines fail
+   * or hear nothing (~64 KB a second)
+   */
+  audio: Float32Array[]
   limit: ReturnType<typeof setTimeout>
 }
 
@@ -236,6 +216,10 @@ type Mic = {
   tap: AudioWorkletNode
   /** The last moments before a dictation starts, so no first word is lost */
   preroll: Float32Array[]
+  /** The Microphone setting it was opened for */
+  device: string
+  /** Which input that was (its group), to notice when the default changes */
+  deviceKey?: string
 }
 let mic: Mic | undefined
 const PREROLL_BLOCKS = 3 // ~130 ms at 48 kHz
@@ -247,27 +231,37 @@ function micAlive(m: Mic) {
   )
 }
 
-async function getMicStream(): Promise<MediaStream> {
-  const media = navigator.mediaDevices
-  const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
-  return media.getUserMedia({
+/** The input the Microphone setting picks right now, and its key. */
+async function wantedMic() {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  const device = findMicDevice(devices, getMicDevice())
+  return { device, key: device ? device.groupId || device.deviceId : undefined }
+}
+
+type MicStream = { stream: MediaStream; device: string; key?: string }
+
+async function getMicStream(): Promise<MicStream> {
+  const label = getMicDevice()
+  const { device, key } = await wantedMic()
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
       echoCancellation: true,
       noiseSuppression: true,
     },
   })
+  return { stream, device: label, key }
 }
 
 /** A mic stream opened when Jan loads, before any click allows audio. */
-let early: { stream: MediaStream; device: string } | undefined
+let early: MicStream | undefined
 
-function takeEarlyStream(): MediaStream | undefined {
+function takeEarlyStream(): MicStream | undefined {
   const e = early
   early = undefined
   if (!e) return undefined
   const live = e.stream.getAudioTracks().some((t) => t.readyState === 'live')
-  if (live && e.device === getMicDevice()) return e.stream
+  if (live && e.device === getMicDevice()) return e
   e.stream.getTracks().forEach((t) => t.stop())
   return undefined
 }
@@ -275,7 +269,7 @@ function takeEarlyStream(): MediaStream | undefined {
 // A new audio context each time the mic opens, made once the mic is open
 // (Safari doesn't reliably restart a suspended one, so it's never suspended).
 async function openMic(): Promise<Mic> {
-  const stream = takeEarlyStream() ?? (await getMicStream())
+  const { stream, device, key } = takeEarlyStream() ?? (await getMicStream())
   let ctx: AudioContext | undefined
   try {
     ctx = new AudioContext()
@@ -297,7 +291,7 @@ async function openMic(): Promise<Mic> {
   ctx.createMediaStreamSource(stream).connect(tap)
   // Outputs silence; the connection just keeps the node running.
   tap.connect(ctx.destination)
-  const m: Mic = { stream, ctx, tap, preroll: [] }
+  const m: Mic = { stream, ctx, tap, preroll: [], device, deviceKey: key }
   tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
     if (recording) return onBlock(recording, e.data)
     m.preroll.push(e.data)
@@ -308,7 +302,7 @@ async function openMic(): Promise<Mic> {
 
 function closeMic() {
   takeEarlyStream()
-    ?.getTracks()
+    ?.stream.getTracks()
     .forEach((t) => t.stop())
   if (!mic) return
   mic.tap.port.onmessage = null
@@ -330,9 +324,14 @@ function release() {
 
 let opening: Promise<Mic> | undefined
 
+/** The mic is open, and on the input the Microphone setting picks. */
+function micReady(m: Mic) {
+  return micAlive(m) && m.device === getMicDevice()
+}
+
 /** The open mic, opening it if needed (one open at a time). */
 function ensureMic(): Promise<Mic> {
-  if (mic && micAlive(mic)) return Promise.resolve(mic)
+  if (mic && micReady(mic)) return Promise.resolve(mic)
   if (!opening) {
     if (mic) closeMic()
     opening = openMic()
@@ -370,10 +369,10 @@ export function readyMicEarly() {
   void wanted().then(async (yes) => {
     if (!yes || early || mic || opening) return
     try {
-      const stream = await getMicStream()
+      const opened = await getMicStream()
       if (early || mic || opening || !getKeepMicReady()) {
-        stream.getTracks().forEach((t) => t.stop())
-      } else early = { stream, device: getMicDevice() }
+        opened.stream.getTracks().forEach((t) => t.stop())
+      } else early = opened
     } catch {
       // Opens on the first dictation instead
     }
@@ -387,70 +386,60 @@ export function readyMicEarly() {
   }
   window.addEventListener('pointerdown', onGesture, true)
   window.addEventListener('keydown', onGesture, true)
+  // A mic plugged in or out (AirPods connecting) can change which input the
+  // setting picks; the open mic follows it
+  navigator.mediaDevices.addEventListener?.('devicechange', () => {
+    if (recording || opening || !mic) return
+    const open = mic
+    void wantedMic()
+      .then(({ key }) => {
+        if (mic === open && key !== open.deviceKey) switchMic()
+      })
+      .catch(() => {})
+  })
 }
 
-/** Posts one piece of audio through the relay; resolves to its text. */
-async function transcribe(
-  chunks: Float32Array[],
-  rate: number,
-  engine: DictationEngine = 'aqua'
-) {
-  const samples = downsample(concatSamples(chunks), rate / TARGET_SAMPLE_RATE)
+/**
+ * Moves an open mic to the input the Microphone setting picks now (after
+ * the setting changes). A dictation in progress keeps its mic; the next one
+ * opens the new input.
+ */
+export function switchMic() {
+  if (recording || opening || (!mic && !early)) return
+  closeMic()
+  if (getKeepMicReady()) ensureMic().catch(() => {})
+}
+
+/**
+ * The relay's batch route (ElevenLabs and Grok, the first answer wins), for
+ * a dictation the live engines lost. Resolves to its text.
+ */
+async function transcribe(samples: Float32Array): Promise<string> {
   // The mic had sent (almost) nothing; the engines reject an empty file
   if (samples.length < TARGET_SAMPLE_RATE / 20) return ''
-  const wav = encodeWav(samples, TARGET_SAMPLE_RATE)
   const body = new FormData()
-  if (engine === 'aqua') body.append('audio', wav, 'dictation.wav')
-  else {
-    body.append('file', wav, 'dictation.wav')
-    body.append('engines', engine)
-    body.append('need', '1')
-  }
-  const res = await fetch(
-    engine === 'aqua' ? '/api/dictate' : '/api/transcribe',
-    {
-      method: 'POST',
-      body,
-    }
-  )
+  body.append('file', encodeWav(samples, TARGET_SAMPLE_RATE), 'dictation.wav')
+  body.append('need', '1')
+  const res = await fetch('/api/transcribe', { method: 'POST', body })
   const data = (await res.json().catch(() => ({}))) as {
-    text?: string
     error?: string
     results?: { ok: boolean; text?: string; error?: string }[]
   }
-  const result = data.results?.[0]
-  if (!res.ok)
-    throw new Error(result?.error ?? data.error ?? `status ${res.status}`)
-  return ((engine === 'aqua' ? data.text : result?.text) ?? '').trim()
+  if (!res.ok) {
+    const errors = data.results?.map((r) => r.error).filter(Boolean)
+    throw new Error(errors?.join('; ') || data.error || `status ${res.status}`)
+  }
+  return (data.results?.find((r) => r.ok)?.text ?? '').trim()
 }
 
 /** Takes one block from the mic; exported for tests. */
 export function onBlock(rec: Recording, block: Float32Array) {
   const level = rms(block)
   useDictation.setState({ level: Math.min(1, level * 8) })
-  if (rec.live) {
-    rec.live.push(downsample(block, rec.rate / TARGET_SAMPLE_RATE))
-    return
-  }
-  if (rec.autoLive?.length) {
-    const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
-    rec.autoLive.forEach((l) => l.stream.push(down))
-    return
-  }
-  rec.chunks.push(block)
-  const blockMs = (block.length / rec.rate) * 1000
-  rec.peak = Math.max(level, (rec.peak ?? 0) * PEAK_DECAY)
-  const quiet = level < Math.max(SILENCE_FLOOR, rec.peak * PAUSE_SHARE)
-  rec.quietMs = quiet ? rec.quietMs + blockMs : 0
-  const heldMs = (rec.chunks.length * block.length * 1000) / rec.rate
-  if (rec.quietMs >= PAUSE_MS && heldMs >= PIECE_MIN_MS) {
-    const piece = rec.chunks
-    rec.chunks = []
-    rec.quietMs = 0
-    const text = transcribe(piece, rec.rate, rec.engine)
-    text.catch(() => {}) // reported when the dictation is sent
-    rec.pieces.push(text)
-  }
+  const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
+  rec.audio.push(down)
+  rec.live?.push(down)
+  rec.autoLive?.forEach((l) => l.stream.push(down))
 }
 
 function liveStream(engine: DictationEngine): LiveStream | undefined {
@@ -548,7 +537,7 @@ export function gatherAuto(
     const finish = () => {
       clearTimeout(grace)
       if (!done.length && errors.length) reject(new Error(errors.join('; ')))
-      // Keep the engines' order, so ties go to Aqua
+      // Keep the engines' order, so ties go to the first (Cartesia)
       else
         resolve(jobs.flatMap((j) => done.filter((d) => d.engine === j.engine)))
     }
@@ -580,15 +569,19 @@ function begin(m: Mic) {
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
-    chunks: [],
-    quietMs: 0,
-    pieces: [],
+    audio: [],
     limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
   }
   recording = rec
   for (const block of m.preroll.splice(0)) onBlock(rec, block)
   useDictation.setState({ status: 'recording', startedAt: Date.now() })
 }
+
+/**
+ * Each start gets a number; cancelling, or a newer start, makes an older one
+ * still waiting for the mic give up without touching the mic.
+ */
+let generation = 0
 
 export async function startDictation() {
   if (useDictation.getState().status !== 'idle') return
@@ -600,30 +593,34 @@ export async function startDictation() {
     return
   }
   // The mic is already open: start right away
-  if (mic && micAlive(mic)) return begin(mic)
+  if (mic && micReady(mic)) return begin(mic)
+  const gen = ++generation
   useDictation.setState({ status: 'starting', level: 0 })
   try {
     const m = await ensureMic()
-    // Cancelled while the mic was opening
-    if (useDictation.getState().status !== 'starting') {
-      if (!getKeepMicReady()) closeMic()
+    // Cancelled while the mic was opening (and maybe started again, in
+    // which case the newer start owns the mic)
+    if (gen !== generation || useDictation.getState().status !== 'starting') {
+      if (useDictation.getState().status === 'idle' && !getKeepMicReady())
+        closeMic()
       return
     }
     begin(m)
   } catch (err) {
+    if (gen !== generation) return
     release()
     useDictation.setState({ status: 'idle', level: 0 })
     toast(`Microphone unavailable: ${(err as Error).message}`)
   }
 }
 
-/** Stops recording and sends the text Aqua returns, like a question. */
+/** Stops recording and sends the engines' text, like a question. */
 export async function stopDictation() {
   const { status, startedAt } = useDictation.getState()
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { chunks, rate, pieces, engine, live, autoLive } = recording
+  const { engine, live, autoLive, audio } = recording
   // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
   recording.autoLive = undefined
@@ -637,12 +634,9 @@ export async function stopDictation() {
   useDictation.setState({ status: 'transcribing', level: 0 })
   const stoppedAt = Date.now()
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
+  let text = ''
+  let liveError: Error | undefined
   try {
-    const batch = () =>
-      Promise.all([...pieces, transcribe(chunks, rate, engine)]).then((texts) =>
-        texts.filter(Boolean).join(' ')
-      )
-    let text: string
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
       const took: Partial<Record<DictationEngine, number>> = {}
@@ -675,12 +669,30 @@ export async function stopDictation() {
         judgeMs: best ? Date.now() - judgeStart : undefined,
         judged,
       })
-    } else text = await batch()
+    }
     if (!autoLive)
       reportClip(
         `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     text = applyFixes(text)
+  } catch (err) {
+    // Every live engine failed: the batch route below gets the audio
+    liveError = err as Error
+  }
+  try {
+    if (!text) {
+      const samples = concatSamples(audio)
+      try {
+        text = applyFixes(await transcribe(samples))
+      } catch (err) {
+        const why = (err as Error).message
+        keepFailed(samples, liveError ? `${liveError.message}; ${why}` : why)
+        return
+      }
+      reportClip(
+        `dictation fallback (${liveError ? 'live failed' : 'live empty'}): ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
+      )
+    }
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else toast(`${label} heard nothing`)
   } catch (err) {
@@ -688,6 +700,35 @@ export async function stopDictation() {
   } finally {
     useDictation.setState({ status: 'idle', level: 0 })
   }
+}
+
+/** Keeps a failed dictation's audio, so the banner can offer Retry. */
+function keepFailed(samples: Float32Array, why: string) {
+  failedAudio = samples
+  useDictation.setState({ failed: why })
+}
+
+/** Sends the failed dictation's audio to the batch route again. */
+export async function retryDictation() {
+  const samples = failedAudio
+  if (!samples || useDictation.getState().status !== 'idle') return
+  useDictation.setState({ status: 'transcribing', level: 0 })
+  try {
+    const text = applyFixes(await transcribe(samples))
+    dismissFailedDictation()
+    if (text) useSpeakerTranscription.getState().enqueue(text)
+    else toast('Dictation heard nothing')
+  } catch (err) {
+    keepFailed(samples, (err as Error).message)
+  } finally {
+    useDictation.setState({ status: 'idle', level: 0 })
+  }
+}
+
+/** Throws the failed dictation's audio away. */
+export function dismissFailedDictation() {
+  failedAudio = undefined
+  useDictation.setState({ failed: undefined })
 }
 
 /** How long the log waits for engines that lost the race. */
@@ -734,6 +775,7 @@ export async function reportAuto(
 export function cancelDictation() {
   const { status } = useDictation.getState()
   if (status !== 'recording' && status !== 'starting') return
+  generation++
   release()
   useDictation.setState({ status: 'idle', level: 0 })
 }

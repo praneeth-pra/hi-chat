@@ -64,7 +64,6 @@ export function groqFetch(
     const controllers: AbortController[] = []
     let settled = false
     let running = 0
-    let timer: ReturnType<typeof setTimeout> | undefined
 
     const start = (route: GroqRoute) => {
       const own = new AbortController()
@@ -105,7 +104,8 @@ export function groqFetch(
     }
 
     start('direct')
-    timer = setTimeout(() => {
+    // Only read by the callbacks above, which run after this line
+    const timer = setTimeout(() => {
       if (!settled && controllers.length === 1) start('server')
     }, hedgeMs)
   })

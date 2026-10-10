@@ -1,10 +1,11 @@
 import { TARGET_SAMPLE_RATE } from './speakerCapture'
 
 /**
- * Live mode: while the speaker talks, audio streams to ElevenLabs' realtime
- * model (scribe_v2_realtime), so the text is ready moments after the pause
- * instead of after uploading and transcribing the whole clip. Kept in this
- * browser; off by default.
+ * Live transcription: audio streams to ElevenLabs' realtime model
+ * (scribe_v2_realtime), Grok, Soniox or Cartesia while someone talks, so the
+ * text is ready moments after the pause instead of after uploading the whole
+ * clip. Dictation always streams. For the speaker it is live mode, kept in
+ * this browser and off by default.
  */
 export const LIVE_MODE_STORAGE_KEY = 'speaker-live-mode'
 
@@ -54,10 +55,6 @@ type SocketLike = Pick<WebSocket, 'send' | 'close' | 'readyState'> & {
   onclose: ((ev: CloseEvent) => unknown) | null
 }
 
-/**
- * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
- * is held and sent on open. `finish()` commits and resolves with the text.
- */
 /** ElevenLabs realtime takes at most 50 key terms of up to 20 characters. */
 const ELEVENLABS_MAX_TERMS = 50
 const ELEVENLABS_TERM_CHARS = 20
@@ -76,6 +73,10 @@ export function elevenLabsTerms(keyterms: string[]): string[] {
     .slice(0, ELEVENLABS_MAX_TERMS)
 }
 
+/**
+ * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
+ * is held and sent on open. `finish()` commits and resolves with the text.
+ */
 export class LiveTranscriber {
   private socket: SocketLike | null = null
   private queue: string[] = []
@@ -134,10 +135,11 @@ export class LiveTranscriber {
   finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
     return new Promise((resolve, reject) => {
       if (this.failed) return reject(this.failed)
-      const timer = setTimeout(
-        () => this.abort(new Error('Live transcript took too long')),
-        timeoutMs
-      )
+      // Late: send what ElevenLabs already committed, if anything
+      const timer = setTimeout(() => {
+        if (this.earlier.length) this.resolveWith('')
+        else this.abort(new Error('Live transcript took too long'))
+      }, timeoutMs)
       this.done = (text) => {
         clearTimeout(timer)
         resolve(text)
@@ -186,17 +188,19 @@ export class LiveTranscriber {
     if (msg.message_type === 'committed_transcript' && !this.committed) {
       if (msg.text?.trim()) this.earlier.push(msg.text.trim())
     } else if (msg.message_type === 'committed_transcript') {
-      const finish = this.done
-      this.done = null
-      this.fail = null
-      this.failed = new Error('Live transcription finished')
-      this.close()
-      finish?.(
-        [...this.earlier, msg.text?.trim() ?? ''].filter(Boolean).join(' ')
-      )
+      this.resolveWith(msg.text ?? '')
     } else if (msg.error) {
       this.abort(new Error(`ElevenLabs live: ${msg.error}`))
     }
+  }
+
+  private resolveWith(last: string) {
+    const finish = this.done
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Live transcription finished')
+    this.close()
+    finish?.([...this.earlier, last.trim()].filter(Boolean).join(' '))
   }
 
   private close() {

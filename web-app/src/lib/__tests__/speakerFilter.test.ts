@@ -858,7 +858,7 @@ describe('speakerFilter', () => {
     ).toBe(null)
   })
 
-  it('falls back to the Aqua text if the model answers instead of copying', async () => {
+  it('falls back to the first text if the model answers instead of copying', async () => {
     vi.stubGlobal(
       'fetch',
       groqReply(
@@ -1196,6 +1196,77 @@ describe('speakerFilter', () => {
           text: 'Tell me about your last project',
           sent: true,
         })
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a held question judged late still goes out before a newer one', async () => {
+    vi.useFakeTimers()
+    try {
+      // The held clip's own judgement is slow; the next clip's is quick
+      let answerHeld!: () => void
+      const reply = (content: string) => ({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content } }] }),
+      })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(reply('WAIT'))
+        .mockImplementationOnce(
+          () => new Promise((r) => (answerHeld = () => r(reply('YES'))))
+        )
+        .mockResolvedValue(reply('YES'))
+      vi.stubGlobal('fetch', fetchMock)
+      const order: string[] = []
+      const accept = createRelevanceFilter(
+        () => ({ apiKey: 'k' }),
+        undefined,
+        Date.now,
+        {
+          enabled: () => true,
+          onLate: (clip) => clip.sent && order.push(clip.text),
+          holdMs: 4000,
+        }
+      )
+      expect(await accept(['Tell me about your last project'])).toBeNull()
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      const newer = accept([
+        'How do you size an EKS cluster for a spike?',
+      ]).then((text) => text && order.push(text))
+      await vi.advanceTimersByTimeAsync(0)
+      answerHeld()
+      await newer
+      expect(order).toEqual([
+        'Tell me about your last project',
+        'How do you size an EKS cluster for a spike?',
+      ])
+      accept.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a held question asked again while it waited is not sent twice', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', groqReplies('WAIT', 'YES'))
+      const late = vi.fn()
+      const accept = createRelevanceFilter(
+        () => ({ apiKey: 'k' }),
+        undefined,
+        Date.now,
+        { enabled: () => true, onLate: late, holdMs: 4000 }
+      )
+      const question =
+        'How would you migrate a monolith to microservices on EKS'
+      expect(await accept([question])).toBeNull()
+      accept.markSent(`${question}?`)
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(late).toHaveBeenCalledWith(
+        expect.objectContaining({ text: question, sent: false })
       )
     } finally {
       vi.useRealTimers()
