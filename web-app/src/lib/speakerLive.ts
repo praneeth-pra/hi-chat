@@ -134,10 +134,11 @@ export class LiveTranscriber {
   finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
     return new Promise((resolve, reject) => {
       if (this.failed) return reject(this.failed)
-      const timer = setTimeout(
-        () => this.abort(new Error('Live transcript took too long')),
-        timeoutMs
-      )
+      // Late: send what ElevenLabs already committed, if anything
+      const timer = setTimeout(() => {
+        if (this.earlier.length) this.resolveWith('')
+        else this.abort(new Error('Live transcript took too long'))
+      }, timeoutMs)
       this.done = (text) => {
         clearTimeout(timer)
         resolve(text)
@@ -186,17 +187,19 @@ export class LiveTranscriber {
     if (msg.message_type === 'committed_transcript' && !this.committed) {
       if (msg.text?.trim()) this.earlier.push(msg.text.trim())
     } else if (msg.message_type === 'committed_transcript') {
-      const finish = this.done
-      this.done = null
-      this.fail = null
-      this.failed = new Error('Live transcription finished')
-      this.close()
-      finish?.(
-        [...this.earlier, msg.text?.trim() ?? ''].filter(Boolean).join(' ')
-      )
+      this.resolveWith(msg.text ?? '')
     } else if (msg.error) {
       this.abort(new Error(`ElevenLabs live: ${msg.error}`))
     }
+  }
+
+  private resolveWith(last: string) {
+    const finish = this.done
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Live transcription finished')
+    this.close()
+    finish?.([...this.earlier, last.trim()].filter(Boolean).join(' '))
   }
 
   private close() {
