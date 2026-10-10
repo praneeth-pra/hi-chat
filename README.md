@@ -40,19 +40,21 @@ yarn build:web-app      # output in web-app/dist-web
 ## Deploy
 
 ```bash
-docker build -t jan-web .
+docker build -t hi-chat .
 docker run -p 8080:8080 -e PORT=8080 \
+  -e LOGIN_EMAIL=... -e RESEND_API_KEY=... \
   -e ELEVENLABS_API_KEY=... -e XAI_API_KEY=... \
-  -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... -e RELAY_TOKEN=... jan-web
+  -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... hi-chat
 ```
+
+The whole site sits behind a login: a 6-digit code is emailed to
+`LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
+can sign in.
 
 Dictation's Auto mode streams to Cartesia, Soniox and ElevenLabs, so it
 needs all three keys; the speaker uses ElevenLabs plus the engines picked in
 Settings. Keys for Groq, Cerebras (the judges) and Anthropic are entered in
 the app under Model Providers.
-
-`RELAY_TOKEN` is the shared secret the browser sends to use the transcription
-relay; without it the relay stays off. The Groq API key is entered in the app.
 
 ## License
 

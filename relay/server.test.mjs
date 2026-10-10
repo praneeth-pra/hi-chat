@@ -8,7 +8,6 @@ import {
   useGrokTicket,
   clipLogLine,
   dictionaryTerms,
-  judgeSamples,
 } from './server.mjs'
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
@@ -458,11 +457,4 @@ test('cartesia live: an STT-only access token plus the dictionary', async () => 
     liveToken({ env: {}, engine: 'cartesia' }),
     (err) => err.status === 503
   )
-})
-
-test('judge samples are logged dictations with two or more engines', () => {
-  const samples = judgeSamples()
-  assert.ok(samples.length > 10)
-  for (const s of samples) assert.ok(Object.keys(s.texts).length >= 2)
-  assert.deepEqual(judgeSamples('/nonexistent.json'), [])
 })
