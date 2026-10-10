@@ -8,7 +8,7 @@ function greeting(name: string) {
 }
 
 // Call the function
-const message = greeting('Jan');
+const message = greeting('Hi-chat');
 console.log(message);  // Outputs: Hello, Jan!
 \`\`\``
 
