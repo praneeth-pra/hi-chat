@@ -798,7 +798,7 @@ function General() {
             <Card title="Dictation">
               <CardItem
                 title="Dictation engine"
-                description="Turns your own voice into text when you tap Left Control or the mic button. Auto runs Cartesia, Soniox and ElevenLabs live and sends as soon as two agree (else a judge picks). Soniox gets your whole dictionary and Cartesia the 100 words that fit; Aqua applies your Aqua dictionary but is slower."
+                description="Turns your own voice into text when you tap Left Control or the mic button. Auto runs Cartesia, Soniox, AssemblyAI and ElevenLabs live and sends as soon as two agree (else a judge picks). Soniox gets your whole dictionary, Cartesia the 100 words that fit and AssemblyAI the assistant's key terms; Aqua applies your Aqua dictionary but is slower."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
