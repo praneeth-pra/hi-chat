@@ -952,7 +952,7 @@ export class CartesiaLiveTranscriber {
 }
 
 export const GEMINI_LIVE_URL =
-  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
+  'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained'
 export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
 /** After the last words arrive, how long to wait for more before finishing. */
 const GEMINI_SETTLE_MS = 400
