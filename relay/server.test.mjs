@@ -622,3 +622,49 @@ test('judge samples are logged dictations with two or more engines', () => {
   for (const s of samples) assert.ok(Object.keys(s.texts).length >= 2)
   assert.deepEqual(judgeSamples('/nonexistent.json'), [])
 })
+
+test('gemini live: a single-use token locked to the model and key terms', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, key: init.headers['x-goog-api-key'], body: JSON.parse(init.body) })
+    return new Response(JSON.stringify({ name: 'auth_tokens/gem' }))
+  }
+  const server = createRelay({ env: { GEMINI_API_KEY: 'g' }, fetchImpl }).listen(
+    0,
+    '127.0.0.1'
+  )
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/live-token`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ engine: 'gemini', terms: ['FinOps', 'finops', ' EC2 '] }),
+      }
+    )
+    assert.equal(res.status, 200)
+    assert.deepEqual(await res.json(), {
+      token: 'auth_tokens/gem',
+      terms: ['FinOps', 'EC2'],
+    })
+    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/auth_tokens')
+    assert.equal(calls[0].key, 'g')
+    assert.equal(calls[0].body.uses, 1)
+    assert.deepEqual(calls[0].body.liveConnectConstraints, {
+      model: 'models/gemini-3.5-transcribe-live',
+      config: {
+        responseModalities: ['TEXT'],
+        inputAudioTranscription: {
+          languageCodes: ['en-US'],
+          customVocabulary: ['FinOps', 'EC2'],
+        },
+      },
+    })
+  } finally {
+    server.close()
+  }
+  await assert.rejects(
+    liveToken({ env: {}, engine: 'gemini' }),
+    (err) => err.status === 503
+  )
+})

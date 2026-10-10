@@ -216,10 +216,12 @@ export async function liveToken({
   env = process.env,
   fetchImpl = fetch,
   engine = 'elevenlabs',
+  terms = [],
 } = {}) {
   if (engine === 'grok') return grokTicket(env)
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
+  if (engine === 'gemini') return geminiToken({ env, fetchImpl, terms })
   const assembly = engine === 'assemblyai'
   const keyVar = assembly ? 'ASSEMBLYAI_API_KEY' : 'ELEVENLABS_API_KEY'
   const key = env[keyVar]
@@ -245,6 +247,57 @@ export async function liveToken({
     )
   const { token } = await res.json()
   return token
+}
+
+/**
+ * Gemini live (logged beside Auto, not yet voting): a single-use ephemeral
+ * token lets the browser stream straight to Google without GEMINI_API_KEY.
+ * The token is locked to the transcription model and this config, so the
+ * browser's setup message must send the same terms.
+ */
+export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
+export function geminiLiveConfig(terms = []) {
+  return {
+    responseModalities: ['TEXT'],
+    inputAudioTranscription: {
+      languageCodes: ['en-US'],
+      ...(terms.length ? { customVocabulary: terms } : {}),
+    },
+  }
+}
+export async function geminiToken({
+  env = process.env,
+  fetchImpl = fetch,
+  terms = [],
+} = {}) {
+  if (!env.GEMINI_API_KEY)
+    throw Object.assign(new Error('GEMINI_API_KEY not set'), { status: 503 })
+  const res = await fetchImpl(
+    'https://generativelanguage.googleapis.com/v1beta/auth_tokens',
+    {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': env.GEMINI_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        uses: 1,
+        expireTime: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        newSessionExpireTime: new Date(Date.now() + 60 * 1000).toISOString(),
+        liveConnectConstraints: {
+          model: GEMINI_LIVE_MODEL,
+          config: geminiLiveConfig(terms),
+        },
+      }),
+    }
+  )
+  if (!res.ok)
+    throw Object.assign(
+      new Error(`Gemini token failed (${res.status}): ${await errorText(res)}`),
+      { status: 502 }
+    )
+  const { name } = await res.json()
+  return name
 }
 
 /**
@@ -367,14 +420,19 @@ export function dictionaryTerms(
 }
 
 /** The engine a live-token request asks for: `{"engine":"assemblyai"}`. */
-function liveTokenEngine(body) {
+function liveTokenRequest(body) {
   try {
-    const engine = JSON.parse(body.toString('utf8')).engine
-    return ['assemblyai', 'grok', 'soniox', 'cartesia'].includes(engine)
-      ? engine
-      : 'elevenlabs'
+    const { engine, terms } = JSON.parse(body.toString('utf8'))
+    return {
+      engine: ['assemblyai', 'grok', 'soniox', 'cartesia', 'gemini'].includes(
+        engine
+      )
+        ? engine
+        : 'elevenlabs',
+      terms: Array.isArray(terms) ? cleanKeyterms(terms) : [],
+    }
   } catch {
-    return 'elevenlabs'
+    return { engine: 'elevenlabs', terms: [] }
   }
 }
 
@@ -512,12 +570,16 @@ export function createRelay(options = {}) {
       const started = Date.now()
       let engine = 'elevenlabs'
       try {
-        engine = liveTokenEngine(await readBody(req))
-        const token = await liveToken({ ...options, engine })
+        const request = liveTokenRequest(await readBody(req))
+        engine = request.engine
+        const token = await liveToken({ ...options, ...request })
         console.log(`live token ${engine} ${Date.now() - started} ms`)
         // Soniox and Cartesia are sent the dictionary as key terms
         if (engine === 'soniox' || engine === 'cartesia')
           return send(res, 200, { token, terms: dictionaryTerms() })
+        // Gemini's token is locked to the terms it was made with
+        if (engine === 'gemini')
+          return send(res, 200, { token, terms: request.terms })
         return send(res, 200, { token })
       } catch (err) {
         console.log(`live token ${engine} failed: ${err.message}`)

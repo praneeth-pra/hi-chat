@@ -8,6 +8,7 @@ import {
 } from '@/lib/speakerCapture'
 import {
   RELAY_TOKEN_HEADER,
+  fetchGeminiToken,
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
@@ -17,6 +18,7 @@ import {
 import {
   elevenLabsTerms,
   CartesiaLiveTranscriber,
+  GeminiLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
   SonioxLiveTranscriber,
@@ -218,6 +220,8 @@ export type Recording = {
   live?: LiveStream
   /** Auto: the live engines running alongside Aqua's pieces */
   autoLive?: { engine: DictationEngine; stream: LiveStream }[]
+  /** Auto: Gemini, on trial: logged beside the others, never sent */
+  trial?: GeminiLiveTranscriber
   /** Audio not yet sent */
   chunks: Float32Array[]
   /** Silence at the end of chunks, in ms */
@@ -325,6 +329,7 @@ function release() {
     clearTimeout(recording.limit)
     recording.live?.abort()
     recording.autoLive?.forEach((l) => l.stream.abort())
+    recording.trial?.abort()
     recording = undefined
   }
   if (!getKeepMicReady()) closeMic()
@@ -438,6 +443,7 @@ export function onBlock(rec: Recording, block: Float32Array) {
   if (rec.autoLive?.length) {
     const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
     rec.autoLive.forEach((l) => l.stream.push(down))
+    rec.trial?.push(down)
     return
   }
   rec.chunks.push(block)
@@ -495,6 +501,8 @@ function autoLiveStreams() {
 }
 
 export type EngineText = { engine: DictationEngine; text: string }
+/** Engines that are logged in Auto: the ones that vote, and Gemini on trial */
+type LoggedEngine = DictationEngine | 'gemini'
 export { textAgreement }
 
 /**
@@ -583,6 +591,10 @@ function begin(m: Mic) {
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
+    trial:
+      engine === 'auto'
+        ? new GeminiLiveTranscriber(fetchGeminiToken(keyTerms()))
+        : undefined,
     chunks: [],
     quietMs: 0,
     pieces: [],
@@ -626,14 +638,16 @@ export async function stopDictation() {
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { chunks, rate, pieces, engine, live, autoLive } = recording
+  const { chunks, rate, pieces, engine, live, autoLive, trial } = recording
   // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
   recording.autoLive = undefined
+  recording.trial = undefined
   release()
   if (Date.now() - startedAt < MIN_DICTATION_MS) {
     live?.abort()
     autoLive?.forEach((l) => l.stream.abort())
+    trial?.abort()
     useDictation.setState({ status: 'idle', level: 0 })
     return
   }
@@ -648,7 +662,7 @@ export async function stopDictation() {
     let text: string
     if (live) text = (await live.finish(LIVE_FINISH_MS)).trim()
     else if (autoLive) {
-      const took: Partial<Record<DictationEngine, number>> = {}
+      const took: Partial<Record<LoggedEngine, number>> = {}
       const timed = (engine: DictationEngine, text: Promise<string>) => ({
         engine,
         text: text.then((t) => {
@@ -659,6 +673,19 @@ export async function stopDictation() {
       const jobs = autoLive.map((l) =>
         timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
       )
+      // Gemini is only logged, but stopped now with the others; its time is
+      // when its last words arrived (finishing waits a moment for more)
+      const trialJobs = trial
+        ? [
+            {
+              engine: 'gemini' as const,
+              text: trial.finish(LIVE_FINISH_MS).then((t) => {
+                took.gemini = (trial.lastTextAt || Date.now()) - stoppedAt
+                return t
+              }),
+            },
+          ]
+        : []
       // Known mistakes fixed first, so two engines sharing one still agree
       // on the right text
       const results = (await gatherAuto(jobs)).map((r) => ({
@@ -672,7 +699,7 @@ export async function stopDictation() {
       text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
-      void reportAuto(jobs, took, {
+      void reportAuto([...jobs, ...trialJobs], took, {
         sent: judged ? 'judge' : (best?.engine ?? 'none'),
         totalMs: Date.now() - stoppedAt,
         judgeMs: best ? Date.now() - judgeStart : undefined,
@@ -702,12 +729,12 @@ const REPORT_WAIT_MS = 10000
  * after you stopped it answered, and which text was sent.
  */
 export async function reportAuto(
-  jobs: { engine: DictationEngine; text: Promise<string> }[],
-  took: Partial<Record<DictationEngine, number>>,
+  jobs: { engine: LoggedEngine; text: Promise<string> }[],
+  took: Partial<Record<LoggedEngine, number>>,
   info: { sent: string; totalMs: number; judgeMs?: number; judged?: string },
   waitMs = REPORT_WAIT_MS
 ) {
-  const heard = new Map<DictationEngine, string>()
+  const heard = new Map<LoggedEngine, string>()
   let wait: ReturnType<typeof setTimeout> | undefined
   await Promise.race([
     Promise.allSettled(
