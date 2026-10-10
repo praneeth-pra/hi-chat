@@ -20,7 +20,7 @@ export const SCENARIO_KEY = 'F16'
  */
 export const SUGGESTION_KEY = 'F15'
 /**
- * F14 starts dictating your own voice (Aqua) and, pressed again, stops and
+ * F14 starts dictating your own voice and, pressed again, stops and
  * sends the text; F13 only stops. Hammerspoon sends F14 on a tap of Left
  * Control.
  */

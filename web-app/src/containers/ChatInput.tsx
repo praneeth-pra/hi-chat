@@ -1290,7 +1290,8 @@ const ChatInput = ({
                 setRows(Math.min(newRows, maxRows))
               }}
               onKeyDown={(e) => {
-                // Typing by hand (not Aqua's Ctrl or Cmd+V) ends dictation
+                // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
+                // dictation
                 if (
                   (e.key.length === 1 || e.key === 'Backspace') &&
                   !e.metaKey &&

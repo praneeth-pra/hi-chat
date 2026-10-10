@@ -1,10 +1,11 @@
 import { TARGET_SAMPLE_RATE } from './speakerCapture'
 
 /**
- * Live mode: while the speaker talks, audio streams to ElevenLabs' realtime
- * model (scribe_v2_realtime), so the text is ready moments after the pause
- * instead of after uploading and transcribing the whole clip. Kept in this
- * browser; off by default.
+ * Live transcription: audio streams to ElevenLabs' realtime model
+ * (scribe_v2_realtime), Grok, Soniox or Cartesia while someone talks, so the
+ * text is ready moments after the pause instead of after uploading the whole
+ * clip. Dictation always streams. For the speaker it is live mode, kept in
+ * this browser and off by default.
  */
 export const LIVE_MODE_STORAGE_KEY = 'speaker-live-mode'
 
@@ -54,10 +55,6 @@ type SocketLike = Pick<WebSocket, 'send' | 'close' | 'readyState'> & {
   onclose: ((ev: CloseEvent) => unknown) | null
 }
 
-/**
- * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
- * is held and sent on open. `finish()` commits and resolves with the text.
- */
 /** ElevenLabs realtime takes at most 50 key terms of up to 20 characters. */
 const ELEVENLABS_MAX_TERMS = 50
 const ELEVENLABS_TERM_CHARS = 20
@@ -76,6 +73,10 @@ export function elevenLabsTerms(keyterms: string[]): string[] {
     .slice(0, ELEVENLABS_MAX_TERMS)
 }
 
+/**
+ * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
+ * is held and sent on open. `finish()` commits and resolves with the text.
+ */
 export class LiveTranscriber {
   private socket: SocketLike | null = null
   private queue: string[] = []

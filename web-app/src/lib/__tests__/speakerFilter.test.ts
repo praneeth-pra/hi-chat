@@ -858,7 +858,7 @@ describe('speakerFilter', () => {
     ).toBe(null)
   })
 
-  it('falls back to the Aqua text if the model answers instead of copying', async () => {
+  it('falls back to the first text if the model answers instead of copying', async () => {
     vi.stubGlobal(
       'fetch',
       groqReply(
