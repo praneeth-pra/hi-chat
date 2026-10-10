@@ -647,7 +647,7 @@ test('gemini live: a single-use token locked to the model and key terms', async 
       token: 'auth_tokens/gem',
       terms: ['FinOps', 'EC2'],
     })
-    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/auth_tokens')
+    assert.equal(calls[0].url, 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens')
     assert.equal(calls[0].key, 'g')
     assert.equal(calls[0].body.uses, 1)
     assert.deepEqual(calls[0].body.liveConnectConstraints, {
@@ -667,4 +667,25 @@ test('gemini live: a single-use token locked to the model and key terms', async 
     liveToken({ env: {}, engine: 'gemini' }),
     (err) => err.status === 503
   )
+})
+
+test('gemini live: falls back to an unlocked token when the lock is refused', async () => {
+  const bodies = []
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body)
+    bodies.push(body)
+    return body.liveConnectConstraints
+      ? new Response('{\n "error": "Unknown name"\n}', { status: 400 })
+      : new Response(JSON.stringify({ name: 'auth_tokens/open' }))
+  }
+  const token = await liveToken({
+    env: { GEMINI_API_KEY: 'g' },
+    fetchImpl,
+    engine: 'gemini',
+    terms: ['EC2'],
+  })
+  assert.equal(token, 'auth_tokens/open')
+  assert.equal(bodies.length, 2)
+  assert.equal(bodies[1].liveConnectConstraints, undefined)
+  assert.equal(bodies[1].uses, 1)
 })

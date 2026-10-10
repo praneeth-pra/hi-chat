@@ -92,7 +92,8 @@ export const ENGINES = [
 
 async function errorText(res) {
   try {
-    return (await res.text()).slice(0, 200)
+    // One line, so Railway keeps the whole message together
+    return (await res.text()).replace(/\s+/g, ' ').slice(0, 300)
   } catch {
     return ''
   }
@@ -255,6 +256,9 @@ export async function liveToken({
  * The token is locked to the transcription model and this config, so the
  * browser's setup message must send the same terms.
  */
+// Ephemeral tokens are created on v1alpha (v1beta rejects the constraints)
+const GEMINI_TOKEN_URL =
+  'https://generativelanguage.googleapis.com/v1alpha/auth_tokens'
 export const GEMINI_LIVE_MODEL = 'models/gemini-3.5-transcribe-live'
 export function geminiLiveConfig(terms = []) {
   return {
@@ -272,9 +276,8 @@ export async function geminiToken({
 } = {}) {
   if (!env.GEMINI_API_KEY)
     throw Object.assign(new Error('GEMINI_API_KEY not set'), { status: 503 })
-  const res = await fetchImpl(
-    'https://generativelanguage.googleapis.com/v1beta/auth_tokens',
-    {
+  const create = (locked) =>
+    fetchImpl(GEMINI_TOKEN_URL, {
       method: 'POST',
       headers: {
         'x-goog-api-key': env.GEMINI_API_KEY,
@@ -284,13 +287,23 @@ export async function geminiToken({
         uses: 1,
         expireTime: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
         newSessionExpireTime: new Date(Date.now() + 60 * 1000).toISOString(),
-        liveConnectConstraints: {
-          model: GEMINI_LIVE_MODEL,
-          config: geminiLiveConfig(terms),
-        },
+        ...(locked
+          ? {
+              liveConnectConstraints: {
+                model: GEMINI_LIVE_MODEL,
+                config: geminiLiveConfig(terms),
+              },
+            }
+          : {}),
       }),
-    }
-  )
+    })
+  let res = await create(true)
+  // If Google won't lock the token to the config, an unlocked single-use
+  // token still works (the browser sends the same setup either way)
+  if (res.status === 400) {
+    console.log(`gemini token: locked token refused: ${await errorText(res)}`)
+    res = await create(false)
+  }
   if (!res.ok)
     throw Object.assign(
       new Error(`Gemini token failed (${res.status}): ${await errorText(res)}`),
