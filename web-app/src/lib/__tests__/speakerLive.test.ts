@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   AssemblyLiveTranscriber,
+  assemblyTerms,
   GrokLiveTranscriber,
   ASSEMBLY_LIVE_MODEL,
   ASSEMBLY_LIVE_URL,
@@ -128,6 +129,30 @@ describe('speakerLive', () => {
 })
 
 describe('AssemblyLiveTranscriber', () => {
+  it("sends the assistant's key terms as keyterms_prompt", async () => {
+    let socket!: FakeSocket
+    new AssemblyLiveTranscriber(
+      Promise.resolve('aai'),
+      (url) => {
+        socket = new FakeSocket(url)
+        return socket as unknown as WebSocket
+      },
+      ['EKS', 'kubectl', 'eks', 'x'.repeat(51)]
+    )
+    await Promise.resolve()
+    const url = new URL(socket.url)
+    expect(JSON.parse(url.searchParams.get('keyterms_prompt')!)).toEqual([
+      'EKS',
+      'kubectl',
+    ])
+  })
+
+  it('keeps at most 100 key terms', () => {
+    const many = Array.from({ length: 150 }, (_, i) => `term${i}`)
+    expect(assemblyTerms(many)).toHaveLength(100)
+    expect(assemblyTerms(many)[0]).toBe('term0')
+  })
+
   const connect = () => {
     let socket!: FakeSocket
     const live = new AssemblyLiveTranscriber(Promise.resolve('aai'), (url) => {
