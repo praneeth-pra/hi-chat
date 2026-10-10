@@ -1,0 +1,25 @@
+# Dictation replacement list: known mistakes the speech engines keep making.
+# One per line, "wrong => right". Matched as whole words, ignoring case.
+# Updated by the daily dictation check (10 PM IST) from the server logs.
+rollbacks asset controls => role-based access controls
+rollback asset controls => role-based access controls
+role-based asset controls => role-based access controls
+Pinoops => FinOps
+Beta Varches => GitHub Actions
+Prom etheus => Prometheus
+FMRI => ephemeral
+Emphemeral => ephemeral
+Emphepheral => ephemeral
+EC 2 => EC2
+S 3 => S3
+Argo CD => ArgoCD
+cloud front => CloudFront
+cloud trail => CloudTrail
+cloud formation => CloudFormation
+load balances => load balancers
+two tire => two-tier
+three tire => three-tier
+2 tire => 2-tier
+3 tire => 3-tier
+circuit group => security group
+inbound pods => inbound ports

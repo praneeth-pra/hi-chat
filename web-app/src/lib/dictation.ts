@@ -15,11 +15,13 @@ import {
   reportClip,
 } from '@/lib/speakerCaptureSession'
 import {
+  elevenLabsTerms,
   CartesiaLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
   SonioxLiveTranscriber,
 } from '@/lib/speakerLive'
+import { applyFixes } from '@/lib/dictationFixes'
 import { findMicDevice, getMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
@@ -456,7 +458,11 @@ export function onBlock(rec: Recording, block: Float32Array) {
 
 function liveStream(engine: DictationEngine): LiveStream | undefined {
   if (engine === 'elevenlabs')
-    return new LiveTranscriber(fetchLiveToken('elevenlabs'))
+    return new LiveTranscriber(
+      fetchLiveToken('elevenlabs'),
+      undefined,
+      elevenLabsTerms(keyTerms())
+    )
   if (engine === 'grok')
     return new GrokLiveTranscriber(
       fetchLiveToken('grok'),
@@ -653,12 +659,17 @@ export async function stopDictation() {
       const jobs = autoLive.map((l) =>
         timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
       )
-      const results = await gatherAuto(jobs)
+      // Known mistakes fixed first, so two engines sharing one still agree
+      // on the right text
+      const results = (await gatherAuto(jobs)).map((r) => ({
+        ...r,
+        text: applyFixes(r.text),
+      }))
       const best = pickBest(results)
       const judgeStart = Date.now()
       const judged =
         best && (await judgeDictation(results, best.text, keyTerms()))
-      text = withoutFillers(judged ?? best?.text ?? '')
+      text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
       void reportAuto(jobs, took, {
@@ -672,6 +683,7 @@ export async function stopDictation() {
       reportClip(
         `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
+    text = applyFixes(text)
     if (text) useSpeakerTranscription.getState().enqueue(text)
     else toast(`${label} heard nothing`)
   } catch (err) {

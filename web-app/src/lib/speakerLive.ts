@@ -58,6 +58,24 @@ type SocketLike = Pick<WebSocket, 'send' | 'close' | 'readyState'> & {
  * One utterance streamed to ElevenLabs. Audio pushed before the socket opens
  * is held and sent on open. `finish()` commits and resolves with the text.
  */
+/** ElevenLabs realtime takes at most 50 key terms of up to 20 characters. */
+const ELEVENLABS_MAX_TERMS = 50
+const ELEVENLABS_TERM_CHARS = 20
+
+/** The assistant's top key terms (they come most important first) that fit. */
+export function elevenLabsTerms(keyterms: string[]): string[] {
+  const seen = new Set<string>()
+  return keyterms
+    .map((t) => t.replace(/\s+/g, ' ').trim())
+    .filter((t) => {
+      if (!t || t.length > ELEVENLABS_TERM_CHARS) return false
+      if (seen.has(t.toLowerCase())) return false
+      seen.add(t.toLowerCase())
+      return true
+    })
+    .slice(0, ELEVENLABS_MAX_TERMS)
+}
+
 export class LiveTranscriber {
   private socket: SocketLike | null = null
   private queue: string[] = []
@@ -73,7 +91,8 @@ export class LiveTranscriber {
 
   constructor(
     token: Promise<string>,
-    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url)
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
+    keyterms: string[] = []
   ) {
     token.then(
       (t) => {
@@ -88,6 +107,8 @@ export class LiveTranscriber {
           language_code: 'en',
           token: t,
         })
+        // Key terms cost 20% more, so only dictation sends them
+        for (const term of keyterms) params.append('keyterms', term)
         const socket = makeSocket(`${LIVE_URL}?${params}`)
         this.socket = socket
         socket.onopen = () => {
