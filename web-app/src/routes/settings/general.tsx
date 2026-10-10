@@ -38,6 +38,7 @@ import {
   getKeepMicReady,
   setDictationEngine,
   setKeepMicReady,
+  switchMic,
 } from '@/lib/dictation'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -794,6 +795,38 @@ function General() {
                 }
               />
               <CardItem
+                title="Microphone"
+                description="The mic dictation records from, also used by One answer until you speak. BlackHole is never used."
+                actions={
+                  <DropdownMenu onOpenChange={loadMics}>
+                    <DropdownMenuTrigger asChild>
+                      <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium max-w-56 truncate">
+                        {micDevice || 'Mac default input'}
+                      </span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {['', ...(mics ?? [])].map((label) => (
+                        <DropdownMenuItem
+                          key={label || 'default'}
+                          className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
+                          onClick={() => {
+                            setMicDevice(label)
+                            setMicDeviceState(label)
+                            // An open dictation mic moves to it now
+                            switchMic()
+                          }}
+                        >
+                          {label || 'Mac default input'}
+                        </DropdownMenuItem>
+                      ))}
+                      {mics === null && (
+                        <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                }
+              />
+              <CardItem
                 title="Keep the mic ready"
                 description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Jan is open."
                 actions={
@@ -967,38 +1000,6 @@ function General() {
                   />
                 }
               />
-              {micTurns && (
-                <CardItem
-                  title="Microphone"
-                  description="The mic it watches for your voice. BlackHole is never used. Takes effect the next time listening starts."
-                  actions={
-                    <DropdownMenu onOpenChange={loadMics}>
-                      <DropdownMenuTrigger asChild>
-                        <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium max-w-56 truncate">
-                          {micDevice || 'Mac default input'}
-                        </span>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {['', ...(mics ?? [])].map((label) => (
-                          <DropdownMenuItem
-                            key={label || 'default'}
-                            className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
-                            onClick={() => {
-                              setMicDevice(label)
-                              setMicDeviceState(label)
-                            }}
-                          >
-                            {label || 'Mac default input'}
-                          </DropdownMenuItem>
-                        ))}
-                        {mics === null && (
-                          <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  }
-                />
-              )}
               <CardItem
                 title="Your dictionary"
                 description={`Names and terms the transcription should spell right, one per line or separated by commas (${dictionaryTerms().length} saved).`}

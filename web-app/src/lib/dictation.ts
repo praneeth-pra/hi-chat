@@ -216,6 +216,10 @@ type Mic = {
   tap: AudioWorkletNode
   /** The last moments before a dictation starts, so no first word is lost */
   preroll: Float32Array[]
+  /** The Microphone setting it was opened for */
+  device: string
+  /** Which input that was (its group), to notice when the default changes */
+  deviceKey?: string
 }
 let mic: Mic | undefined
 const PREROLL_BLOCKS = 3 // ~130 ms at 48 kHz
@@ -227,27 +231,37 @@ function micAlive(m: Mic) {
   )
 }
 
-async function getMicStream(): Promise<MediaStream> {
-  const media = navigator.mediaDevices
-  const device = findMicDevice(await media.enumerateDevices(), getMicDevice())
-  return media.getUserMedia({
+/** The input the Microphone setting picks right now, and its key. */
+async function wantedMic() {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  const device = findMicDevice(devices, getMicDevice())
+  return { device, key: device ? device.groupId || device.deviceId : undefined }
+}
+
+type MicStream = { stream: MediaStream; device: string; key?: string }
+
+async function getMicStream(): Promise<MicStream> {
+  const label = getMicDevice()
+  const { device, key } = await wantedMic()
+  const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
       echoCancellation: true,
       noiseSuppression: true,
     },
   })
+  return { stream, device: label, key }
 }
 
 /** A mic stream opened when Jan loads, before any click allows audio. */
-let early: { stream: MediaStream; device: string } | undefined
+let early: MicStream | undefined
 
-function takeEarlyStream(): MediaStream | undefined {
+function takeEarlyStream(): MicStream | undefined {
   const e = early
   early = undefined
   if (!e) return undefined
   const live = e.stream.getAudioTracks().some((t) => t.readyState === 'live')
-  if (live && e.device === getMicDevice()) return e.stream
+  if (live && e.device === getMicDevice()) return e
   e.stream.getTracks().forEach((t) => t.stop())
   return undefined
 }
@@ -255,7 +269,7 @@ function takeEarlyStream(): MediaStream | undefined {
 // A new audio context each time the mic opens, made once the mic is open
 // (Safari doesn't reliably restart a suspended one, so it's never suspended).
 async function openMic(): Promise<Mic> {
-  const stream = takeEarlyStream() ?? (await getMicStream())
+  const { stream, device, key } = takeEarlyStream() ?? (await getMicStream())
   let ctx: AudioContext | undefined
   try {
     ctx = new AudioContext()
@@ -277,7 +291,7 @@ async function openMic(): Promise<Mic> {
   ctx.createMediaStreamSource(stream).connect(tap)
   // Outputs silence; the connection just keeps the node running.
   tap.connect(ctx.destination)
-  const m: Mic = { stream, ctx, tap, preroll: [] }
+  const m: Mic = { stream, ctx, tap, preroll: [], device, deviceKey: key }
   tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
     if (recording) return onBlock(recording, e.data)
     m.preroll.push(e.data)
@@ -288,7 +302,7 @@ async function openMic(): Promise<Mic> {
 
 function closeMic() {
   takeEarlyStream()
-    ?.getTracks()
+    ?.stream.getTracks()
     .forEach((t) => t.stop())
   if (!mic) return
   mic.tap.port.onmessage = null
@@ -310,9 +324,14 @@ function release() {
 
 let opening: Promise<Mic> | undefined
 
+/** The mic is open, and on the input the Microphone setting picks. */
+function micReady(m: Mic) {
+  return micAlive(m) && m.device === getMicDevice()
+}
+
 /** The open mic, opening it if needed (one open at a time). */
 function ensureMic(): Promise<Mic> {
-  if (mic && micAlive(mic)) return Promise.resolve(mic)
+  if (mic && micReady(mic)) return Promise.resolve(mic)
   if (!opening) {
     if (mic) closeMic()
     opening = openMic()
@@ -350,10 +369,10 @@ export function readyMicEarly() {
   void wanted().then(async (yes) => {
     if (!yes || early || mic || opening) return
     try {
-      const stream = await getMicStream()
+      const opened = await getMicStream()
       if (early || mic || opening || !getKeepMicReady()) {
-        stream.getTracks().forEach((t) => t.stop())
-      } else early = { stream, device: getMicDevice() }
+        opened.stream.getTracks().forEach((t) => t.stop())
+      } else early = opened
     } catch {
       // Opens on the first dictation instead
     }
@@ -367,6 +386,28 @@ export function readyMicEarly() {
   }
   window.addEventListener('pointerdown', onGesture, true)
   window.addEventListener('keydown', onGesture, true)
+  // A mic plugged in or out (AirPods connecting) can change which input the
+  // setting picks; the open mic follows it
+  navigator.mediaDevices.addEventListener?.('devicechange', () => {
+    if (recording || opening || !mic) return
+    const open = mic
+    void wantedMic()
+      .then(({ key }) => {
+        if (mic === open && key !== open.deviceKey) switchMic()
+      })
+      .catch(() => {})
+  })
+}
+
+/**
+ * Moves an open mic to the input the Microphone setting picks now (after
+ * the setting changes). A dictation in progress keeps its mic; the next one
+ * opens the new input.
+ */
+export function switchMic() {
+  if (recording || opening || (!mic && !early)) return
+  closeMic()
+  if (getKeepMicReady()) ensureMic().catch(() => {})
 }
 
 /**
@@ -552,7 +593,7 @@ export async function startDictation() {
     return
   }
   // The mic is already open: start right away
-  if (mic && micAlive(mic)) return begin(mic)
+  if (mic && micReady(mic)) return begin(mic)
   const gen = ++generation
   useDictation.setState({ status: 'starting', level: 0 })
   try {

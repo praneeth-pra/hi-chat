@@ -18,8 +18,10 @@ import {
   textAgreement,
   retryDictation,
   dismissFailedDictation,
+  switchMic,
   type Recording,
 } from '../dictation'
+import { MIC_DEVICE_STORAGE_KEY, setMicDevice } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
@@ -424,6 +426,77 @@ describe('dictation', () => {
     expect(useDictation.getState().status).toBe('idle')
     expect(mic.track.stop).toHaveBeenCalled()
     localStorage.removeItem('dictation-keep-mic')
+    vi.unstubAllGlobals()
+  })
+
+  it('a newly chosen mic replaces the open one', async () => {
+    const tracks: { readyState: string; stop: ReturnType<typeof vi.fn> }[] = []
+    const getUserMedia = vi.fn(async (_c: MediaStreamConstraints) => {
+      const track = { readyState: 'live', stop: vi.fn() }
+      tracks.push(track)
+      return { getTracks: () => [track], getAudioTracks: () => [track] }
+    })
+    const devices = [
+      {
+        kind: 'audioinput',
+        label: 'MacBook Mic',
+        deviceId: 'mac',
+        groupId: 'g1',
+      },
+      { kind: 'audioinput', label: 'USB Mic', deviceId: 'usb', groupId: 'g2' },
+    ]
+    vi.stubGlobal('navigator', {
+      mediaDevices: { getUserMedia, enumerateDevices: async () => devices },
+    })
+    class FakeContext {
+      state = 'running'
+      sampleRate = 48000
+      destination = {}
+      audioWorklet = { addModule: async () => {} }
+      createMediaStreamSource = () => ({ connect: () => {} })
+      resume = async () => {}
+      close = async () => {}
+    }
+    class FakeNode {
+      port = { onmessage: null }
+      connect() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('AudioContext', FakeContext)
+    vi.stubGlobal('AudioWorkletNode', FakeNode)
+    URL.createObjectURL = () => 'blob:x'
+    URL.revokeObjectURL = () => {}
+    const deviceOf = (call: number) =>
+      (
+        (getUserMedia.mock.calls[call][0].audio as MediaTrackConstraints)
+          .deviceId as { exact: string }
+      ).exact
+    setMicDevice('MacBook Mic')
+    setKeepMicReady(true)
+    useDictation.setState({ status: 'idle' })
+
+    await startDictation()
+    cancelDictation()
+    expect(deviceOf(0)).toBe('mac')
+
+    // Chosen in Settings: the open mic moves at once
+    setMicDevice('USB Mic')
+    switchMic()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(tracks[0].stop).toHaveBeenCalled()
+    expect(deviceOf(1)).toBe('usb')
+
+    // Changed elsewhere (another tab): the next dictation reopens
+    setMicDevice('MacBook Mic')
+    await startDictation()
+    expect(useDictation.getState().status).toBe('recording')
+    expect(tracks[1].stop).toHaveBeenCalled()
+    expect(deviceOf(2)).toBe('mac')
+    cancelDictation()
+
+    setKeepMicReady(false)
+    localStorage.removeItem('dictation-keep-mic')
+    localStorage.removeItem(MIC_DEVICE_STORAGE_KEY)
     vi.unstubAllGlobals()
   })
 
