@@ -845,7 +845,7 @@ function General() {
             <Card title="Speaker">
               <CardItem
                 title="Live transcription"
-                description="Streams the speaker's audio while they talk, so the text is ready the moment they pause."
+                description="Streams the speaker's audio to ElevenLabs while they talk, so the text is ready the moment they pause. The live engines below need it."
                 actions={
                   <Switch
                     checked={liveMode}
@@ -857,8 +857,14 @@ function General() {
                 }
               />
               <CardItem
-                title="Second transcription engine"
-                description="Engines next to ElevenLabs; the judge merges the transcripts to fix misheard words. Soniox + Cartesia (the default) get your dictionary. The live options need live transcription. None is fastest."
+                title="Engines beside ElevenLabs"
+                description={
+                  !liveMode && transcribeMode === 'live-soniox-cartesia'
+                    ? 'Live transcription is off, so the speaker uses ElevenLabs alone. Turn it on to stream to Soniox and Cartesia too.'
+                    : !liveMode && transcribeMode === 'live'
+                      ? 'Live transcription is off, so Grok transcribes each clip after the pause instead of streaming. Turn it on for Grok live.'
+                      : 'The judge merges their transcripts with ElevenLabs to fix misheard words. Soniox + Cartesia (the default) get your dictionary. None is fastest.'
+                }
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
