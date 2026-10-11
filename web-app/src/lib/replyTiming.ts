@@ -14,6 +14,15 @@ export type StreamTiming = {
   attempts?: FetchAttempt[]
   /** Models skipped for this reply (Settings > General chat model order), and why. */
   fallbacks?: string[]
+  autoMode?: 'speed' | 'accuracy'
+  autoEvents?: {
+    model: string
+    provider: string
+    event: string
+    atMs: number
+    hidden?: boolean
+    reason?: string
+  }[]
 }
 
 /** One HTTP request to the provider: when it started, its status and headers. */
@@ -103,6 +112,8 @@ export function describeTiming(
         : undefined,
     requests: timing.attempts,
     fallbacks: timing.fallbacks,
+    auto_mode: timing.autoMode,
+    auto_race: timing.autoEvents,
     // The model that actually answered (image questions go to a vision model)
     model_used: request.model,
     // Its name as Settings shows it, e.g. "Claude Haiku 4.5"

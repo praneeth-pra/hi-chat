@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import DropdownModelProvider from '../DropdownModelProvider'
 import { getModelDisplayName } from '@/lib/utils'
@@ -49,7 +49,9 @@ vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: vi.fn(() => ({
     models: () => ({
       checkMmprojExists: vi.fn(() => Promise.resolve(false)),
-      checkMmprojExistsAndUpdateOffloadMMprojSetting: vi.fn(() => Promise.resolve()),
+      checkMmprojExistsAndUpdateOffloadMMprojSetting: vi.fn(() =>
+        Promise.resolve()
+      ),
     }),
   })),
 }))
@@ -80,7 +82,9 @@ vi.mock('@/lib/platform/const', () => ({
 
 // Mock UI components
 vi.mock('@/components/ui/popover', () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Popover: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="popover-trigger">{children}</div>
   ),
@@ -143,7 +147,7 @@ describe('DropdownModelProvider - Display Name Integration', () => {
 
   beforeEach(() => {
     // These tests pick models by name, so Auto is off
-    useChatAuto.setState({ auto: false })
+    useChatAuto.setState({ auto: false, mode: 'accuracy' })
     vi.clearAllMocks()
 
     // Reset the mock for each test
@@ -176,9 +180,27 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     render(<DropdownModelProvider />)
 
     // Auto in the trigger and as the first list item
-    expect(screen.getAllByText('Auto')).toHaveLength(2)
+    expect(screen.getAllByText('Auto · Accuracy')).toHaveLength(2)
+    expect(
+      screen.getByRole('button', { name: /Auto · Speed/ })
+    ).toBeInTheDocument()
     // The selected model is only listed, not shown in the trigger
     expect(screen.getAllByText('Custom Model 1')).toHaveLength(1)
+  })
+
+  it('selects Speed and Accuracy independently and keeps manual model names available', () => {
+    render(<DropdownModelProvider />)
+    fireEvent.click(screen.getByRole('button', { name: /Auto · Speed/ }))
+    expect(useChatAuto.getState()).toMatchObject({ auto: true, mode: 'speed' })
+    expect(
+      within(screen.getByTestId('popover-trigger')).getByRole('button')
+    ).toHaveTextContent('Auto · Speed')
+    fireEvent.click(screen.getByRole('button', { name: /Auto · Accuracy/ }))
+    expect(useChatAuto.getState()).toMatchObject({
+      auto: true,
+      mode: 'accuracy',
+    })
+    expect(screen.getByText('Custom Model 1')).toBeInTheDocument()
   })
 
   it('should fall back to model ID when no displayName is set', () => {
@@ -227,8 +249,12 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     } as Model
 
     expect(getModelDisplayName(modelWithDisplayName)).toBe('Short Name')
-    expect(getModelDisplayName(modelWithoutDisplayName)).toBe('model-without-display-name.gguf')
-    expect(getModelDisplayName(modelWithEmptyDisplayName)).toBe('model-with-empty.gguf')
+    expect(getModelDisplayName(modelWithoutDisplayName)).toBe(
+      'model-without-display-name.gguf'
+    )
+    expect(getModelDisplayName(modelWithEmptyDisplayName)).toBe(
+      'model-with-empty.gguf'
+    )
   })
 
   it('should maintain model ID for internal operations while showing display name', () => {
@@ -264,7 +290,9 @@ describe('DropdownModelProvider - Display Name Integration', () => {
     const { rerender } = render(<DropdownModelProvider />)
 
     // Check trigger shows Custom Model 1
-    const triggerButton = screen.getByRole('button')
+    const triggerButton = within(
+      screen.getByTestId('popover-trigger')
+    ).getByRole('button')
     expect(triggerButton).toHaveTextContent('Custom Model 1')
 
     // Update to select model2

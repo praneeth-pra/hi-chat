@@ -42,6 +42,15 @@ its own queue. If an answer is streaming, text waits until the chat can send it.
 An error restores the text for retry. The external F20-then-paste dictation path
 also uses the dictation queue. Ordinary text pastes remain drafts.
 
+## Auto answers
+
+The model picker offers **Auto · Speed** and **Auto · Accuracy**, using Groq 20B,
+Groq 120B and Cerebras 120B. Speed races all three with Low reasoning. Accuracy
+races the two 120B models with Medium reasoning and uses 20B only for recovery.
+Both stream one answer and cancel the unused requests. Manual model choices remain
+available. Parallel requests can increase API usage; Accuracy is a preference,
+not a correctness guarantee. See [Auto modes](docs/auto-modes.md).
+
 ## Hammerspoon shortcuts
 
 The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy

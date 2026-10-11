@@ -62,15 +62,8 @@ import {
   getChatThinking,
   setChatThinking,
 } from '@/lib/chatThinking'
-import {
-  CHAT_MODELS,
-  type ChatModelKey,
-  getChatFallback,
-  getChatModel,
-  setChatFallback,
-  setChatModel,
-  useChatAuto,
-} from '@/lib/chatModels'
+import { useChatAuto } from '@/lib/chatModels'
+import { AUTO_MODES } from '@/lib/autoRace'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -145,9 +138,8 @@ function General() {
       setAnswersRunning(false)
     }
   }
-  const [chatModel, setChatModelState] = useState<ChatModelKey>(getChatModel)
-  const [chatFallback, setChatFallbackState] =
-    useState<ChatModelKey>(getChatFallback)
+  const autoMode = useChatAuto((state) => state.mode)
+  const setAutoMode = useChatAuto((state) => state.setMode)
   const [chatThinking, setChatThinkingState] =
     useState<ChatThinking>(getChatThinking)
   const [dictationMic, setDictationMicState] = useState(getDictationMic)
@@ -527,75 +519,30 @@ function General() {
             {/* Chat */}
             <Card title="Chat">
               <CardItem
-                title="Chat model"
-                description="Answers when Auto is picked in the model picker. If it fails or says nothing for 1.5 s, the fallback takes over."
+                title="Auto mode"
+                description="Speed races Groq 20B, Groq 120B and Cerebras 120B. Accuracy prefers the two 120B models, with 20B as recovery. Both stream one answer and cancel unused requests. Racing can increase API usage; larger models do not guarantee correctness. Applies when Auto is selected; manually selected models keep their own settings."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
-                      >
-                        {CHAT_MODELS.find((m) => m.value === chatModel)?.label}
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {CHAT_MODELS.map((m) => (
-                        <DropdownMenuItem
-                          key={m.value}
-                          className={`cursor-pointer my-0.5 ${chatModel === m.value ? 'bg-main-view-fg/5' : ''}`}
-                          onClick={() => {
-                            setChatModel(m.value)
-                            setChatModelState(m.value)
-                            // Claude has no provider entry in the picker
-                            if (
-                              useChatAuto.getState().auto &&
-                              m.provider !== 'anthropic'
-                            )
-                              useModelProvider
-                                .getState()
-                                .selectModelProvider(m.provider, m.model)
-                            setChatFallbackState(getChatFallback())
-                          }}
-                        >
-                          {m.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
-              />
-              <CardItem
-                title="Chat fallback"
-                description="Tried next when the chat model fails or is slow to start."
-                actions={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm"
                       >
                         {
-                          CHAT_MODELS.find((m) => m.value === chatFallback)
+                          AUTO_MODES.find((mode) => mode.value === autoMode)
                             ?.label
                         }
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {CHAT_MODELS.filter((m) => m.value !== chatModel).map(
-                        (m) => (
-                          <DropdownMenuItem
-                            key={m.value}
-                            className={`cursor-pointer my-0.5 ${chatFallback === m.value ? 'bg-main-view-fg/5' : ''}`}
-                            onClick={() => {
-                              setChatFallback(m.value)
-                              setChatFallbackState(m.value)
-                            }}
-                          >
-                            {m.label}
-                          </DropdownMenuItem>
-                        )
-                      )}
+                      {AUTO_MODES.map((mode) => (
+                        <DropdownMenuItem
+                          key={mode.value}
+                          onClick={() => setAutoMode(mode.value)}
+                        >
+                          {mode.label}
+                        </DropdownMenuItem>
+                      ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 }
@@ -615,7 +562,7 @@ function General() {
               />
               <CardItem
                 title="Chat thinking"
-                description="How long gpt-oss thinks before answering. Low answers sooner."
+                description="Applies to manually selected gpt-oss models. Auto Speed uses Low; Auto Accuracy uses Medium."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

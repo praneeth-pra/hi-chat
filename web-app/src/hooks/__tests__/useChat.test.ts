@@ -1,6 +1,9 @@
+import { useChatAuto } from '@/lib/chatModels'
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { MessageStatus, ContentType } from '@janhq/core'
+
+let autoProviders: Record<string, any> = {}
 
 // Initialize mock functions immediately for use in vi.mock
 const mockAddMessage = vi.fn()
@@ -129,18 +132,21 @@ vi.mock('../useModelProvider', () => ({
   useModelProvider: Object.assign(
     (selector: any) => {
       const state = {
-        getProviderByName: vi.fn(() => ({
-          provider: 'llamacpp',
-          // FIX: Add a model to the provider to allow execution to proceed
-          models: [
-            {
-              id: 'test-model',
-              capabilities: ['tools', 'vision'],
-              settings: {},
-            },
-          ],
-          settings: [],
-        })),
+        getProviderByName: vi.fn(
+          (name: string) =>
+            autoProviders[name] ?? {
+              provider: 'llamacpp',
+              // FIX: Add a model to the provider to allow execution to proceed
+              models: [
+                {
+                  id: 'test-model',
+                  capabilities: ['tools', 'vision'],
+                  settings: {},
+                },
+              ],
+              settings: [],
+            }
+        ),
         selectedModel: {
           id: 'test-model',
           capabilities: ['tools', 'vision'],
@@ -152,18 +158,21 @@ vi.mock('../useModelProvider', () => ({
     },
     {
       getState: () => ({
-        getProviderByName: vi.fn(() => ({
-          provider: 'llamacpp',
-          // FIX: Add a model to the provider to allow execution to proceed
-          models: [
-            {
-              id: 'test-model',
-              capabilities: ['tools', 'vision'],
-              settings: {},
-            },
-          ],
-          settings: [],
-        })),
+        getProviderByName: vi.fn(
+          (name: string) =>
+            autoProviders[name] ?? {
+              provider: 'llamacpp',
+              // FIX: Add a model to the provider to allow execution to proceed
+              models: [
+                {
+                  id: 'test-model',
+                  capabilities: ['tools', 'vision'],
+                  settings: {},
+                },
+              ],
+              settings: [],
+            }
+        ),
         selectedModel: {
           id: 'test-model',
           capabilities: ['tools', 'vision'],
@@ -314,7 +323,8 @@ vi.mock('@/lib/completion', () => ({
     ],
     role: 'user',
   })),
-  newAssistantThreadContent: vi.fn((threadId, content) => ({
+  newAssistantThreadContent: vi.fn((threadId, content, metadata) => ({
+    metadata,
     thread_id: threadId,
     content: [
       { type: ContentType.Text, text: { value: content, annotations: [] } },
@@ -366,10 +376,14 @@ describe('useChat', () => {
   beforeEach(() => {
     // Clear mock call history
     vi.clearAllMocks()
+    autoProviders = {}
+    useChatAuto.setState({ auto: false, mode: 'accuracy' })
 
     // Reset mock implementations
     mockGetMessages.mockReturnValue([])
     mockStartModel.mockResolvedValue(undefined)
+    mockSendCompletion.mockReset()
+    vi.mocked(completionLib.isCompletionResponse).mockReturnValue(true)
     mockSendCompletion.mockResolvedValue({
       choices: [
         {
@@ -408,10 +422,7 @@ describe('useChat', () => {
       const { result } = renderHook(() => useChat())
 
       await act(async () => {
-        await result.current(
-          '  What is the capital\nof Australia?  ',
-          true
-        )
+        await result.current('  What is the capital\nof Australia?  ', true)
       })
 
       expect(mockCreateThread).toHaveBeenCalledWith(
@@ -738,6 +749,64 @@ describe('useChat', () => {
           status: MessageStatus.Ready,
         })
       )
+    })
+  })
+
+  describe('Groq/Cerebras Auto integration', () => {
+    const configure = (mode: 'speed' | 'accuracy') => {
+      vi.mocked(completionLib.isCompletionResponse).mockImplementation(
+        (value: any) => !value?.[Symbol.asyncIterator]
+      )
+      autoProviders = {
+        groq: { provider: 'groq', api_key: 'test-key', models: [] },
+        cerebras: { provider: 'cerebras', api_key: 'test-key', models: [] },
+      }
+      useChatAuto.setState({ auto: true, mode })
+    }
+    it('races all three models in Speed with Low reasoning and saves only the winner', async () => {
+      configure('speed')
+      mockSendCompletion.mockImplementation(async (thread: any) =>
+        (async function* () {
+          if (thread.model.id !== 'openai/gpt-oss-20b')
+            yield { choices: [{ delta: { reasoning_content: 'thinking' } }] }
+          yield {
+            choices: [{ delta: { content: `Answer from ${thread.model.id}` } }],
+          }
+        })()
+      )
+      const { result } = renderHook(() => useChat())
+      await act(async () => {
+        await result.current('Explain DNS.')
+      })
+      expect(
+        mockSendCompletion.mock.calls.map((args: any[]) => args[0].model.id)
+      ).toEqual(['gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'])
+      for (const args of mockSendCompletion.mock.calls as any[][])
+        expect(args[6]).toMatchObject({ reasoning_effort: 'low' })
+      expect(mockAddMessage).toHaveBeenCalledTimes(2)
+      const answer = mockAddMessage.mock.calls[1][0]
+      expect(answer.content[0].text.value).toContain(
+        'Answer from openai/gpt-oss-20b'
+      )
+      expect(answer.metadata.timings.answered_by).toBe('Groq gpt-oss-20b')
+    })
+    it('races the two 120B models in Accuracy with Medium reasoning', async () => {
+      configure('accuracy')
+      mockSendCompletion.mockImplementation(async () =>
+        (async function* () {
+          yield { choices: [{ delta: { content: 'Large answer' } }] }
+        })()
+      )
+      const { result } = renderHook(() => useChat())
+      await act(async () => {
+        await result.current('Explain DNS.')
+      })
+      expect(
+        mockSendCompletion.mock.calls.map((args: any[]) => args[0].model.id)
+      ).toEqual(['gpt-oss-120b', 'openai/gpt-oss-120b'])
+      for (const args of mockSendCompletion.mock.calls as any[][])
+        expect(args[6]).toMatchObject({ reasoning_effort: 'medium' })
+      expect(mockAddMessage).toHaveBeenCalledTimes(2)
     })
   })
 
