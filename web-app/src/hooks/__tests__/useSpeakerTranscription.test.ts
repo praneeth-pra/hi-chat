@@ -94,7 +94,7 @@ describe('speaker turn delivery state', () => {
     for (let i = 0; i < 5; i++) store.suggest(`question ${i}`, `reason ${i}`)
     expect(
       Object.keys(useSpeakerTranscription.getState().suggestionReasons)
-    ).toHaveLength(3)
+    ).toHaveLength(1)
     store.dismissSuggestion('question 4')
     expect(
       useSpeakerTranscription.getState().suggestionReasons['question 4']

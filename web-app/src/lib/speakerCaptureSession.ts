@@ -71,9 +71,9 @@ const MODE_ENGINES: Record<TranscribeMode, string[]> = {
   // These stream instead when live mode is on (see grokLive); without live
   // mode, Soniox + Cartesia falls back to ElevenLabs alone
   'live-soniox-cartesia': ['elevenlabs'],
-  'live': ['elevenlabs', 'grok'],
-  'grok': ['elevenlabs', 'grok'],
-  'elevenlabs': ['elevenlabs'],
+  live: ['elevenlabs', 'grok'],
+  grok: ['elevenlabs', 'grok'],
+  elevenlabs: ['elevenlabs'],
 }
 
 /** Engines that answer within SECOND_ENGINE_WAIT_MS of ElevenLabs. */
@@ -235,7 +235,8 @@ type Callbacks = {
     // Each engine's own words, for the log
     words?: { name: string; text: string }[],
     // How finished the speaker's turn sounded when the clip ended
-    turn?: TurnCheck | null
+    turn?: TurnCheck | null,
+    capture?: { clipId: number; captureEnd: number }
   ) => Promise<string | null>
   /** The call's level (RMS, 0-1) for each block of loopback audio. */
   onLevel?: (level: number) => void
@@ -314,6 +315,7 @@ export function startSpeakerCapture({
   let ctx: AudioContext | null = null
   let queue: Promise<void> = Promise.resolve()
   let pending = 0
+  let clipSequence = 0
   let speaking = false
   const cleanups: (() => void)[] = []
 
@@ -329,7 +331,7 @@ export function startSpeakerCapture({
   }
 
   // Live mode keeps one token in hand so a new utterance can connect at once.
-  const pool = <T>(fetchToken: () => Promise<T>, maxAge: number) => {
+  const pool = <T,>(fetchToken: () => Promise<T>, maxAge: number) => {
     let spare: { token: Promise<T>; at: number } | null = null
     const fetchOne = () => {
       const token = fetchToken()
@@ -368,6 +370,7 @@ export function startSpeakerCapture({
     turnCheck: Promise<TurnCheck | null> = Promise.resolve(null)
   ) => {
     const captureGeneration = generation
+    const capture = { clipId: ++clipSequence, captureEnd: Date.now() }
     // Ignore clips too short to hold a word.
     if (samples.length < TARGET_SAMPLE_RATE * 0.4) {
       live?.abort()
@@ -484,7 +487,7 @@ export function startSpeakerCapture({
         const turn = await turnCheck
         const text =
           !stopped && captureGeneration === generation && heard.length
-            ? await accept(heard, timings, words, turn)
+            ? await accept(heard, timings, words, turn, capture)
             : null
         if (!stopped && captureGeneration === generation && text) onText(text)
         if (captureGeneration === generation) pending--

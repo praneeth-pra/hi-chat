@@ -202,6 +202,24 @@ export function handleSpeakerKey(key: string): boolean {
   }
   const state = useSpeakerTranscription.getState()
   if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
+    if (state.enabled && state.pendingQuestion) {
+      if (
+        !state.pendingQuestion.complete &&
+        state.pendingQuestion.reviewUntil !== undefined &&
+        Date.now() >= state.pendingQuestion.reviewUntil
+      ) {
+        toast('No speaker card to review')
+        return true
+      }
+      if (key === RECOMMENDATION_SEND_KEY) {
+        state.sendPendingQuestion()
+        toast('Sending assembled question')
+      } else {
+        state.discardPendingQuestion()
+        toast('Question discarded')
+      }
+      return true
+    }
     const [newest] = state.suggestions
     if (!state.enabled || !newest) {
       toast('No speaker recommendation')

@@ -33,6 +33,7 @@ type QuestionControls = {
   sendNow: () => void
   keepListening: () => void
   discard: () => void
+  expireReview?: (id: string, text: string) => void
 }
 let questionControls: QuestionControls | null = null
 export function setQuestionControls(controls: QuestionControls) {
@@ -48,6 +49,7 @@ type SpeakerTranscriptionState = {
   sendPendingQuestion: () => void
   keepListening: () => void
   discardPendingQuestion: () => void
+  expirePendingReview: (id: string, text: string) => void
   turnQueue: SpeakerTurnDelivery[]
   deliveryEpoch: number
   turnVersions: Record<string, number>
@@ -98,7 +100,7 @@ type SpeakerTranscriptionState = {
 }
 
 /** How many suggestion chips show at once. */
-export const MAX_SUGGESTIONS = 3
+export const MAX_SUGGESTIONS = 1
 
 /** The speaker listener sets how an accepted suggestion is sent. */
 let suggestionSender: ((text: string) => void) | null = null
@@ -127,6 +129,8 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
       sendPendingQuestion: () => questionControls?.sendNow(),
       keepListening: () => questionControls?.keepListening(),
       discardPendingQuestion: () => questionControls?.discard(),
+      expirePendingReview: (id, text) =>
+        questionControls?.expireReview?.(id, text),
       turnQueue: [],
       deliveryEpoch: 0,
       turnVersions: {},

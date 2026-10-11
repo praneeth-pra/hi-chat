@@ -191,7 +191,7 @@ describe('question-turn coordination', () => {
     await vi.advanceTimersByTimeAsync(10000)
     expect(onCommit).not.toHaveBeenCalled()
   })
-  it('an uncertain continuation blocks automatic delivery of the earlier draft', async () => {
+  it('uncertain later speech cannot erase an already complete question', async () => {
     const { turns, judge, onCommit, onSuggest } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
@@ -199,13 +199,14 @@ describe('question-turn coordination', () => {
     await turns.accept(['How does DNS work?'])
     await turns.accept(['Unclear follow-up.'])
     await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).not.toHaveBeenCalled()
-    expect(onSuggest).toHaveBeenCalledWith('Unclear follow-up.', 'test')
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit.mock.calls[0][0].text).toBe('How does DNS work?')
+    expect(onSuggest).not.toHaveBeenCalled()
     turns.confirm('What about caching?')
-    expect(onCommit.mock.calls[0][0].text).toBe('What about caching?')
-    expect(onCommit.mock.calls[0][0].origin).toBe('suggestion')
+    expect(onCommit.mock.calls[1][0].text).toBe('What about caching?')
+    expect(onCommit.mock.calls[1][0].origin).toBe('suggestion')
   })
-  it('retains an incomplete scenario as a suggestion when a new topic begins', async () => {
+  it('does not recommend abandoned background without a question when a new topic begins', async () => {
     const { turns, judge, onCommit, onSuggest } = setup()
     judge
       .mockResolvedValueOnce(
@@ -217,10 +218,7 @@ describe('question-turn coordination', () => {
     await turns.accept(['Suppose three services fail.'])
     await turns.accept(['Explain garbage collection.'])
     await vi.advanceTimersByTimeAsync(500)
-    expect(onSuggest).toHaveBeenCalledWith(
-      'Suppose three services fail.',
-      'test'
-    )
+    expect(onSuggest).not.toHaveBeenCalled()
     expect(onCommit.mock.calls[0][0].text).toBe('Explain garbage collection.')
   })
   it('automatically recovers from temporary uncertainty when later speech completes the question', async () => {
@@ -313,6 +311,102 @@ describe('question-turn coordination', () => {
     expect(onCommit).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('expiring an addition preserves in-flight speech and excludes the expired fragment', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge
+      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
+      .mockResolvedValueOnce(decision('followup', 'With caching.'))
+    await turns.accept(['How does DNS work?'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept(['With caching.'])
+    const draft = onDraft.mock.calls.at(-1)![0]!
+    expect(draft.relation).toBe('update')
+    expect(draft.addition).toBe('With caching.')
+    let resolve!: (decision: TurnDecision) => void
+    judge.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const next = turns.accept(['What about TTL?'])
+    await Promise.resolve()
+    turns.expireReview(draft.id, draft.text)
+    resolve(decision('followup', 'What about TTL?', true))
+    await next
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit.mock.calls.at(-1)![0].text).toBe(
+      'How does DNS work? What about TTL?'
+    )
+    expect(onCommit).toHaveBeenCalledTimes(2)
+  })
+  it('does not downgrade the completed Vault question when a held follow-up arrives', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge
+      .mockResolvedValueOnce(
+        decision('question', 'How did you integrate Vault?', true)
+      )
+      .mockResolvedValueOnce(
+        decision('followup', 'Do you have it running in a container or on EC2?')
+      )
+      .mockResolvedValueOnce(
+        decision('skip', 'That is actually maintained by another team.')
+      )
+    await turns.accept(['How did you integrate Vault?'])
+    await turns.accept(['Do you have it running in a container or on EC2?'])
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit.mock.calls[0][0].text).toBe('How did you integrate Vault?')
+    expect(onDraft.mock.calls.at(-1)![0]?.relation).toBe('update')
+    await turns.accept(['That is actually maintained by another team.'])
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onDraft.mock.calls.at(-1)![0]?.text).not.toContain('another team')
+  })
+  it('accumulates held scenario pieces despite repeated new clip labels', async () => {
+    const { turns, judge, onCommit, onSuggest } = setup()
+    judge
+      .mockResolvedValueOnce(
+        decision('new-question', 'Suppose three services share a queue.')
+      )
+      .mockResolvedValueOnce(
+        decision('new-question', 'One service fails during delivery.')
+      )
+      .mockResolvedValueOnce(
+        decision('question', 'How should we recover?', true)
+      )
+    await turns.accept(['Suppose three services share a queue.'])
+    await turns.accept(['One service fails during delivery.'])
+    await turns.accept(['How should we recover?'])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onSuggest).not.toHaveBeenCalled()
+    expect(onCommit.mock.calls[0][0].text).toBe(
+      'Suppose three services share a queue. One service fails during delivery. How should we recover?'
+    )
+  })
+  it('keeps the committing clip timestamp immutable while later audio changes the quiet state', async () => {
+    const trace = vi.fn(),
+      onCommit = vi.fn()
+    const turns = createQuestionTurns({
+      judge: async () => decision('question', 'How does DNS work?', true),
+      onCommit,
+      onDraft: () => {},
+      onSuggest: () => {},
+      onTrace: trace,
+    })
+    listeners.push(turns)
+    await turns.accept(['How does DNS work?'], false, {
+      clipId: 42,
+      captureEnd: Date.now() - 100,
+    })
+    const captured = Date.now() - 100
+    turns.audioActivity(true)
+    await vi.advanceTimersByTimeAsync(50)
+    turns.audioActivity(false)
+    await vi.advanceTimersByTimeAsync(500)
+    const commit = trace.mock.calls.find(([event]) => event === 'commit')![1]
+    expect(commit.captureEnd).toBe(captured)
+    expect(commit.clip).toBe(42)
+    expect(onCommit.mock.calls[0][0].captureEnd).toBe(captured)
   })
   it('never appends an older recommendation or candidate answer to the active question', async () => {
     const { turns, judge, onCommit } = setup()

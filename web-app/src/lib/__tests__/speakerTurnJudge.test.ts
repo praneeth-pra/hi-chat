@@ -30,7 +30,7 @@ afterEach(() => {
 describe('speaker intent protocol', () => {
   it('asks for three intents with no model-generated explanation or completeness field', async () => {
     vi.mocked(requestSpeakerJudge).mockResolvedValue(
-      reply('answer', 'current', 1)
+      reply('question', 'current', 1)
     )
     const d = await judgeSpeakerTurn(
       ['How would we recover?', 'How do we recover?'],
@@ -56,7 +56,7 @@ describe('speaker intent protocol', () => {
   })
   it('maps a clear standalone question to automatic readiness', () => {
     const words = 'Out of all of these things, what do you work regularly on?'
-    expect(parseTurnDecision(reply('answer').reply, [words])).toMatchObject({
+    expect(parseTurnDecision(reply('question').reply, [words])).toMatchObject({
       action: 'new-question',
       complete: true,
       text: words,
@@ -78,7 +78,7 @@ describe('speaker intent protocol', () => {
     ).toMatchObject({ action: 'followup', complete: false })
     expect(
       parseTurnDecision(
-        reply('answer', 'current').reply,
+        reply('question', 'current').reply,
         ['And what about caching?'],
         context
       )
@@ -93,12 +93,12 @@ describe('speaker intent protocol', () => {
   })
   it('retains only a verified question span from mixed speech', () => {
     expect(
-      parseTurnDecision(reply('answer', 'new', 0, 'How do we recover?').reply, [
+      parseTurnDecision(reply('question', 'new', 0, 'How do we recover?').reply, [
         'How do we recover? We restart the service.',
       ]).text
     ).toBe('How do we recover?')
     expect(
-      parseTurnDecision(reply('answer', 'new', 0, 'Invented question').reply, [
+      parseTurnDecision(reply('question', 'new', 0, 'Invented question').reply, [
         'How do we recover?',
       ]).action
     ).toBe('suggest')
@@ -106,9 +106,9 @@ describe('speaker intent protocol', () => {
   it('rejects unknown intents, relations, wrong index types and unavailable transcripts with field diagnostics', () => {
     for (const data of [
       { intent: 'answer|hold|ignore', relation: 'new', transcript: 0 },
-      { intent: 'answer', relation: 'maybe', transcript: 0 },
-      { intent: 'answer', relation: 'new', transcript: '0' },
-      { intent: 'answer', relation: 'new', transcript: 4 },
+      { intent: 'question', relation: 'maybe', transcript: 0 },
+      { intent: 'question', relation: 'new', transcript: '0' },
+      { intent: 'question', relation: 'new', transcript: 4 },
     ]) {
       const d = parseTurnDecision(JSON.stringify(data), [
         'What is your strong zone?',
@@ -129,7 +129,7 @@ describe('speaker intent protocol', () => {
       ).toBe('suggest')
   })
   it('does not wait for a second judge after a valid primary intent', async () => {
-    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('answer'))
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('question'))
     expect(
       (
         await judgeSpeakerTurn(['What is your strong zone?'], empty, {
@@ -149,7 +149,7 @@ describe('speaker intent protocol', () => {
         ms: 10,
         finishReason: 'length',
       })
-      .mockResolvedValueOnce(reply('answer'))
+      .mockResolvedValueOnce(reply('question'))
     const check = vi.fn()
     expect(
       (
@@ -197,7 +197,7 @@ describe('speaker intent protocol', () => {
     expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
   })
   it('uses an available provider when the saved selection has no key', async () => {
-    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('answer'))
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('question'))
     await judgeSpeakerTurn(['What is your strong zone?'], empty, {
       anthropic: { apiKey: 'test' },
     })
@@ -219,11 +219,99 @@ describe('speaker intent protocol', () => {
       ).action
     ).toBe('suggest')
   })
+  it('ignores candidate statements before calling the judge', async () => {
+    for (const text of [
+      'I work on tasks and automation.',
+      'We build scalable services.',
+      'My responsibilities include testing.',
+    ]) {
+      expect(
+        (await judgeSpeakerTurn([text], empty, { apiKey: 'test' })).action
+      ).toBe('skip')
+    }
+    expect(requestSpeakerJudge).not.toHaveBeenCalled()
+  })
+  it('does not turn missing providers or invalid judgements into recommendations for background speech', async () => {
+    expect(
+      (
+        await judgeSpeakerTurn(
+          ['Suppose three services share a queue.'],
+          empty,
+          {}
+        )
+      ).action
+    ).toBe('skip')
+    vi.mocked(requestSpeakerJudge).mockResolvedValue({
+      reply: '{}',
+      model: 'test',
+      ms: 10,
+    })
+    expect(
+      (
+        await judgeSpeakerTurn(['The database has two replicas.'], empty, {
+          apiKey: 'test',
+        })
+      ).action
+    ).toBe('skip')
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
+  it('retains first-person scenario setup rather than rejecting it as a candidate answer', async () => {
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('hold'))
+    expect(await judgeSpeakerTurn(['I have a list of integers with duplicates.'], empty, { apiKey: 'test' })).toMatchObject({ action: 'new-question', complete: false, text: 'I have a list of integers with duplicates.' })
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
+  it('does not interpret the old ambiguous answer label as an automatic question', () => {
+    expect(parseTurnDecision(reply('answer').reply, ['How does DNS work?'], empty).action).toBe('suggest')
+  })
+  it('rejects the exact live candidate passages even when the model calls them answerable', () => {
+    for (const text of [
+      'So I generally do have mostly like CI/CD tasks. We do get tasks.',
+      'That is actually … maintained by another team…',
+    ]) {
+      expect(
+        parseTurnDecision(reply('question').reply, [text], empty).action
+      ).toBe('skip')
+    }
+  })
+  it('keeps dependent live follow-ups on the current question despite a new label', () => {
+    expect(
+      parseTurnDecision(
+        reply('question').reply,
+        ['Out of all of these things, what do you work regularly on?'],
+        { ...empty, active: 'What is your strong zone?' }
+      ).action
+    ).toBe('followup')
+    expect(
+      parseTurnDecision(
+        reply('question').reply,
+        ['Do you have it running in a container or on EC2?'],
+        { ...empty, active: 'How did you integrate Vault?' }
+      )
+    ).toMatchObject({ action: 'followup', complete: true })
+  })
+  it('requires extraction of the question from a mixed candidate/question clip', () => {
+    const text =
+      'I maintain the pipelines. How do you rotate their credentials?'
+    expect(parseTurnDecision(reply('question').reply, [text], empty).action).toBe(
+      'suggest'
+    )
+    expect(
+      parseTurnDecision(
+        reply('question', 'new', 0, 'How do you rotate their credentials?').reply,
+        [text],
+        empty
+      )
+    ).toMatchObject({
+      action: 'new-question',
+      complete: true,
+      text: 'How do you rotate their credentials?',
+    })
+  })
   it('automatically sends the reported question, updates its real follow-up and excludes the candidate answer', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)
-      .mockResolvedValueOnce(reply('answer'))
-      .mockResolvedValueOnce(reply('answer', 'current'))
+      .mockResolvedValueOnce(reply('question'))
+      .mockResolvedValueOnce(reply('question', 'current'))
       .mockResolvedValueOnce(reply('ignore'))
     const onCommit = vi.fn()
     const turns = createQuestionTurns({

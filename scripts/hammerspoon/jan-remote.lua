@@ -12,8 +12,8 @@
 --                           seen off Jan, and the window there gets focus
 --                           (Z and X work independently)
 --   tap Left Option         turn the speaker (listening) on / off
---   fn + Right              send the newest speaker recommendation as a new question
---   fn + Left               discard the newest speaker recommendation
+--   fn + Right              accept the visible speaker card as a new question
+--   fn + Left               discard the visible speaker card
 --   fn + Return             send in Jan without leaving the app you're in:
 --                           what's typed in the prompt box, or when it's empty
 --                           the newest suggestion chip (the judges disagreed)
