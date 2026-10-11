@@ -245,10 +245,16 @@ test('live token: 503 without an ElevenLabs key', async () => {
 test('speech log: one capped line per clip', () => {
   const body = (o) => Buffer.from(JSON.stringify(o))
   assert.equal(
-    speechLogLine(body({ line: 'sent "What is a pod?"\n| ElevenLabs 0.3 s' })),
+    speechLogLine(
+      body({ line: 'sent "What is a pod?"\n| ElevenLabs 0.3 s' }),
+      true
+    ),
     'speech sent "What is a pod?" | ElevenLabs 0.3 s'
   )
-  assert.equal(speechLogLine(body({ line: 'x'.repeat(9000) })).length, 6007)
+  assert.equal(
+    speechLogLine(body({ line: 'x'.repeat(9000) }), true).length,
+    6007
+  )
   assert.equal(speechLogLine(body({})), null)
   assert.equal(speechLogLine(Buffer.from('not json')), null)
 })
@@ -319,11 +325,15 @@ test('race: returns as soon as two engines answer', async () => {
 
 test('the clip log line carries each engine’s words', () => {
   assert.equal(
-    clipLogLine(1200, [
-      { name: 'elevenlabs', ok: true, ms: 400, text: 'What is a "VPC"?' },
-      { name: 'grok', ok: false, ms: 0, off: true, error: 'x' },
-      { name: 'soniox', ok: false, ms: 410, error: 'Too slow' },
-    ]),
+    clipLogLine(
+      1200,
+      [
+        { name: 'elevenlabs', ok: true, ms: 400, text: 'What is a "VPC"?' },
+        { name: 'grok', ok: false, ms: 0, off: true, error: 'x' },
+        { name: 'soniox', ok: false, ms: 410, error: 'Too slow' },
+      ],
+      true
+    ),
     'clip 1200 B: elevenlabs 400 ms "What is a \\"VPC\\"?", grok off, ' +
       'soniox failed after 410 ms (Too slow)'
   )
@@ -436,13 +446,17 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
 test('soniox live: a temporary key plus the dictionary as terms', async () => {
   const calls = []
   const fetchImpl = async (url, init) => {
-    calls.push({ url, auth: init.headers.Authorization, body: JSON.parse(init.body) })
+    calls.push({
+      url,
+      auth: init.headers.Authorization,
+      body: JSON.parse(init.body),
+    })
     return new Response(JSON.stringify({ api_key: 'temp:1', expires_at: 'x' }))
   }
-  const server = createRelay({ env: { SONIOX_API_KEY: 's' }, fetchImpl }).listen(
-    0,
-    '127.0.0.1'
-  )
+  const server = createRelay({
+    env: { SONIOX_API_KEY: 's' },
+    fetchImpl,
+  }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   try {
     const res = await fetch(
@@ -479,7 +493,8 @@ test('dictionary: one term per line, split at commas outside brackets', () => {
   assert.equal(new Set(terms.map((t) => t.toLowerCase())).size, terms.length)
   assert.ok(!terms.includes('Kustomize.'))
   // Wispr Flow's words are merged in, and its correction targets added
-  for (const t of ['Liquibase', 'LiteLLM', 'Zscaler']) assert.ok(terms.includes(t), t)
+  for (const t of ['Liquibase', 'LiteLLM', 'Zscaler'])
+    assert.ok(terms.includes(t), t)
 })
 
 test('cartesia live: an STT-only access token plus the dictionary', async () => {
@@ -493,10 +508,10 @@ test('cartesia live: an STT-only access token plus the dictionary', async () => 
     })
     return new Response(JSON.stringify({ token: 'cart_tok' }))
   }
-  const server = createRelay({ env: { CARTESIA_API_KEY: 'c' }, fetchImpl }).listen(
-    0,
-    '127.0.0.1'
-  )
+  const server = createRelay({
+    env: { CARTESIA_API_KEY: 'c' },
+    fetchImpl,
+  }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   try {
     const res = await fetch(
@@ -521,5 +536,74 @@ test('cartesia live: an STT-only access token plus the dictionary', async () => 
   await assert.rejects(
     liveToken({ env: {}, engine: 'cartesia' }),
     (err) => err.status === 503
+  )
+})
+
+test('absolute deadline resolves even if no engine honors cancellation', async () => {
+  const started = Date.now()
+  const out = await transcribeAll(file, {
+    env,
+    timeoutMs: 15,
+    engines: [
+      {
+        name: 'stuck',
+        keyVar: 'XAI_API_KEY',
+        run: () => new Promise(() => {}),
+      },
+    ],
+  })
+  assert.ok(Date.now() - started < 500)
+  assert.equal(out[0].error, 'Too slow')
+})
+
+test('client cancellation releases the transcription race and aborts engines', async () => {
+  const controller = new AbortController()
+  let engineSignal
+  const pending = transcribeAll(file, {
+    env,
+    signal: controller.signal,
+    engines: [
+      {
+        name: 'stuck',
+        keyVar: 'XAI_API_KEY',
+        run: (_file, _key, signal) => {
+          engineSignal = signal
+          return new Promise(() => {})
+        },
+      },
+    ],
+  })
+  await Promise.resolve()
+  controller.abort()
+  await pending
+  assert.equal(engineSignal.aborted, true)
+})
+
+test('default diagnostics keep timings while withholding transcript text', () => {
+  assert.equal(
+    clipLogLine(8, [{ name: 'grok', ok: true, ms: 20, text: 'secret' }]),
+    'clip 8 B: grok 20 ms 6 chars'
+  )
+  assert.equal(
+    speechLogLine(
+      Buffer.from(
+        JSON.stringify({
+          line: 'dictation auto: sent=grok total=25ms grok=20ms | grok: "secret"',
+        })
+      )
+    ),
+    'speech dictation auto: sent=grok total=25ms grok=20ms'
+  )
+  assert.equal(
+    speechLogLine(
+      Buffer.from(
+        JSON.stringify({ line: 'dictation grok: 25 ms after stop, 6 chars' })
+      )
+    ),
+    'speech dictation grok: 25 ms after stop, 6 chars'
+  )
+  assert.equal(
+    speechLogLine(Buffer.from(JSON.stringify({ line: 'secret' }))),
+    'speech diagnostic text omitted'
   )
 })

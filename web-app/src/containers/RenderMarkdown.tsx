@@ -13,6 +13,8 @@ import { useCodeblock } from '@/hooks/useCodeblock'
 import 'katex/dist/katex.min.css'
 import { IconCopy, IconCopyCheck } from '@tabler/icons-react'
 import rehypeRaw from 'rehype-raw'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import type { PluggableList } from 'unified'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
 interface MarkdownProps {
@@ -24,19 +26,19 @@ interface MarkdownProps {
   isWrapping?: boolean
 }
 
-// Cache for normalized LaTeX content
-const latexCache = new Map<string, string>()
+const markdownSchema: typeof defaultSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [['className', /^language-./, 'math-inline', 'math-display']],
+  },
+}
 
 /**
  * Optimized preprocessor: normalize LaTeX fragments into $ / $$.
- * Uses caching to avoid reprocessing the same content.
+ * The component memoizes the current content instead of retaining stream prefixes.
  */
 const normalizeLatex = (input: string): string => {
-  // Check cache first
-  if (latexCache.has(input)) {
-    return latexCache.get(input)!
-  }
-
   const segments = input.split(/(```[\s\S]*?```|`[^`]*`|<[^>]+>)/g)
 
   const result = segments
@@ -69,13 +71,6 @@ const normalizeLatex = (input: string): string => {
       return s
     })
     .join('')
-
-  // Cache the result (with size limit to prevent memory leaks)
-  if (latexCache.size > 100) {
-    const firstKey = latexCache.keys().next().value || ''
-    latexCache.delete(firstKey)
-  }
-  latexCache.set(input, result)
 
   return result
 }
@@ -242,8 +237,11 @@ function RenderMarkdownComponent({
   }, [])
 
   // Stable rehypePlugins reference
-  const rehypePlugins = useMemo(() => {
-    return enableRawHtml ? [rehypeKatex, rehypeRaw] : [rehypeKatex]
+  const rehypePlugins = useMemo<PluggableList>(() => {
+    // Sanitize external HTML before KaTeX generates its trusted markup.
+    return enableRawHtml
+      ? [rehypeRaw, [rehypeSanitize, markdownSchema], rehypeKatex]
+      : [rehypeKatex]
   }, [enableRawHtml])
 
   // Memoized components with stable references
@@ -293,7 +291,4 @@ function RenderMarkdownComponent({
     </div>
   )
 }
-export const RenderMarkdown = memo(
-  RenderMarkdownComponent,
-  (prevProps, nextProps) => prevProps.content === nextProps.content
-)
+export const RenderMarkdown = memo(RenderMarkdownComponent)

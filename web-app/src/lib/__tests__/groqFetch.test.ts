@@ -29,6 +29,55 @@ function fakeFetch(plan: Record<string, { after: number; fail?: boolean }>) {
 }
 
 describe('groqFetch', () => {
+  it('rejects a pre-aborted request without starting either route', async () => {
+    const stop = new AbortController()
+    stop.abort()
+    const base = vi.fn()
+    await expect(
+      groqFetch(proxied, { signal: stop.signal }, base)
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(base).not.toHaveBeenCalled()
+  })
+  it('stops promptly even when a fetch implementation ignores abort', async () => {
+    const stop = new AbortController()
+    const base = vi.fn(() => new Promise<Response>(() => {}))
+    const pending = groqFetch(proxied, { signal: stop.signal }, base, 1000)
+    await Promise.resolve()
+    stop.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(base).toHaveBeenCalledTimes(1)
+  })
+  it('does not let an HTTP error cancel a healthy route', async () => {
+    const base = vi.fn(async (url) =>
+      String(url) === direct
+        ? new Response('upstream failed', { status: 503 })
+        : new Response('answer')
+    )
+    const res = await groqFetch(proxied, {}, base)
+    expect(res.ok).toBe(true)
+    expect(await res.text()).toBe('answer')
+    expect(groqRoute(res)).toBe('server')
+  })
+  it('preserves a provider HTTP error when neither route succeeds', async () => {
+    const res = await groqFetch(
+      proxied,
+      {},
+      vi.fn(async () => new Response('bad key', { status: 401 }))
+    )
+    expect(res.status).toBe(401)
+    expect(await res.text()).toBe('bad key')
+  })
+  it('still aborts the winning stream after headers have arrived', async () => {
+    const stop = new AbortController()
+    let streamSignal!: AbortSignal
+    const base = vi.fn(async (_, init) => {
+      streamSignal = init!.signal!
+      return new Response('answer')
+    })
+    await groqFetch(proxied, { signal: stop.signal }, base)
+    stop.abort()
+    expect(streamSignal.aborted).toBe(true)
+  })
   it('uses the direct route when Groq answers quickly', async () => {
     const f = fakeFetch({ [direct]: { after: 5 }, [proxied]: { after: 5 } })
     const res = await groqFetch(proxied, { method: 'POST' }, f.impl, 50)

@@ -34,7 +34,7 @@ RUN yarn install && yarn build:core && make build-web-app
 FROM nginx:alpine
 
 # Node runs the transcription relay (relay/server.mjs) next to nginx
-RUN apk add --no-cache nodejs
+RUN apk add --no-cache nodejs ca-certificates
 
 # Copy static files from build stage
 COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
@@ -43,7 +43,7 @@ COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
 # envsubst, so the server listens on $PORT (Railway sets it; defaults to 80).
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 ENV PORT=80
-# Speaker transcription keys; set them as Railway variables. ElevenLabs is the
+# Dictation transcription keys; set them as Railway variables. ElevenLabs is the
 # main engine; Grok (xAI) is an optional second engine.
 ENV ELEVENLABS_API_KEY=""
 ENV XAI_API_KEY=""
@@ -53,7 +53,7 @@ ENV LOGIN_EMAIL=""
 ENV RESEND_API_KEY=""
 
 # The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
-COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/logo.png relay/dictionary.txt /relay/
+COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/logo.png relay/dictionary.txt /relay/
 COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
 
 EXPOSE 80

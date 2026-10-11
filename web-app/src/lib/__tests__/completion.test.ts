@@ -12,6 +12,8 @@ import {
   captureProactiveScreenshots
 } from '../completion'
 
+const completionCreate = vi.hoisted(() => vi.fn())
+
 // Mock dependencies
 vi.mock('@janhq/core', () => ({
   ContentType: {
@@ -45,8 +47,8 @@ vi.mock('@tauri-apps/plugin-http', () => ({
 }))
 
 vi.mock('token.js', () => ({
-  models: {},
-  TokenJS: class MockTokenJS {},
+  models: { 'openai-compatible': { models: true } },
+  TokenJS: class MockTokenJS { chat = { completions: { create: completionCreate } } },
 }))
 
 vi.mock('ulidx', () => ({
@@ -70,7 +72,7 @@ vi.mock('@/services/mcp', () => ({
 }))
 
 vi.mock('../extension', () => ({
-  ExtensionManager: {},
+  ExtensionManager: { getInstance: () => ({ getEngine: () => undefined }) },
 }))
 
 vi.mock('@/hooks/useServiceHub', () => ({
@@ -273,7 +275,7 @@ describe('completion.ts', () => {
         abortController,
         {},
         undefined,
-        false,
+        true,
         true // isProactiveMode = true
       )
 
@@ -307,7 +309,7 @@ describe('completion.ts', () => {
       const message = { thread_id: 'test-thread', metadata: {} } as any
       const abortController = new AbortController()
 
-      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, false, true)
+      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, true, true)
 
       expect(mockCallTool).toHaveBeenCalled()
     })
@@ -338,7 +340,7 @@ describe('completion.ts', () => {
       const message = { thread_id: 'test-thread', metadata: {} } as any
       const abortController = new AbortController()
 
-      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, false, true)
+      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, true, true)
 
       expect(mockCallTool).toHaveBeenCalled()
     })
@@ -372,7 +374,7 @@ describe('completion.ts', () => {
       const message = { thread_id: 'test-thread', metadata: {} } as any
       const abortController = new AbortController()
 
-      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, false, true)
+      await postMessageProcessing(calls, builder, message, abortController, {}, undefined, true, true)
 
       // getTools should be called once for server lookup
       expect(mockGetTools).toHaveBeenCalledTimes(1)
@@ -585,7 +587,7 @@ describe('completion.ts', () => {
         abortController,
         {},
         undefined,
-        false,
+        true,
         true
       )
 
@@ -638,7 +640,7 @@ describe('completion.ts', () => {
         abortController,
         {},
         undefined,
-        false,
+        true,
         false  // isProactiveMode = false
       )
 
@@ -694,7 +696,7 @@ describe('completion.ts', () => {
         abortController,
         {},
         undefined,
-        false,
+        true,
         true  // isProactiveMode = true
       )
 
@@ -708,5 +710,72 @@ describe('completion.ts', () => {
         arguments: { url: 'test.com' }
       })
     })
+  })
+})
+
+describe('tool execution permission boundary', () => {
+  it.each(['denied', 'missing-handler', 'aborted'])(
+    'does not execute an MCP tool when %s',
+    async (reason) => {
+      const { getServiceHub } = await import('@/hooks/useServiceHub')
+      const callTool = vi.fn()
+      const getTools = vi.fn()
+      vi.mocked(getServiceHub).mockReturnValue({
+        mcp: () => ({ getTools, callToolWithCancellation: callTool }),
+        rag: () => ({ getToolNames: async () => [] }),
+      } as any)
+      const controller = new AbortController()
+      const showModal =
+        reason === 'missing-handler'
+          ? undefined
+          : vi.fn(async () => {
+              if (reason === 'aborted') controller.abort()
+              return reason === 'aborted'
+            })
+      const builder = { addToolMessage: vi.fn(), getMessages: () => [] } as any
+      await postMessageProcessing(
+        [
+          {
+            id: 'blocked',
+            type: 'function',
+            function: { name: 'browserbase_navigate', arguments: '{}' },
+          },
+        ],
+        builder,
+        { thread_id: 'thread', metadata: {} } as any,
+        controller,
+        {},
+        showModal,
+        false,
+        true
+      )
+      expect(callTool).not.toHaveBeenCalled()
+      expect(getTools).not.toHaveBeenCalled()
+      expect(builder.addToolMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'disallowed' }),
+        'blocked'
+      )
+    }
+  )
+})
+
+
+describe('completion transport cancellation', () => {
+  it('passes Stop to nonstreaming provider requests too', async () => {
+    vi.stubGlobal('IS_DEV', false)
+    const { getServiceHub } = await import('@/hooks/useServiceHub')
+    vi.mocked(getServiceHub).mockReturnValue({ providers: () => ({ fetch: () => fetch }) } as any)
+    completionCreate.mockResolvedValue({ choices: [] })
+    const controller = new AbortController()
+    await sendCompletion(
+      { id: 'thread', model: { id: 'test-model' } } as any,
+      { provider: 'openai-compatible', api_key: 'test', base_url: 'https://provider.example' } as any,
+      [], controller, [], false
+    )
+    expect(completionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'test-model', stream: false }),
+      { signal: controller.signal }
+    )
+    vi.unstubAllGlobals()
   })
 })

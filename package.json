@@ -36,7 +36,10 @@
   "resolutions": {
     "yallist": "4.0.0",
     "@types/react": "19.1.2",
-    "@types/react-dom": "19.1.2"
+    "@types/react-dom": "19.1.2",
+    "prismjs": "1.30.0",
+    "seroval": "1.6.9",
+    "katex": "0.18.2"
   },
   "packageManager": "yarn@4.5.3"
 }

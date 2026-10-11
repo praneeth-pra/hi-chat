@@ -9,6 +9,12 @@ describe('viaGroqProxy', () => {
   })
 
   it('leaves other providers and the desktop app alone', () => {
+    expect(viaGroqProxy('https://api.groq.com.evil.test/v1', true)).toBe(
+      'https://api.groq.com.evil.test/v1'
+    )
+    expect(viaGroqProxy('https://api.groq.com@evil.test/v1', true)).toBe(
+      'https://api.groq.com@evil.test/v1'
+    )
     expect(viaGroqProxy('https://api.cerebras.ai/v1', true)).toBe(
       'https://api.cerebras.ai/v1'
     )

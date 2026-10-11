@@ -27,7 +27,11 @@ import {
 } from 'token.js'
 
 import { getModelCapabilities } from '@/lib/models'
-import { hasImages, prepareVisionRequest, routesImages } from '@/lib/visionModels'
+import {
+  hasImages,
+  prepareVisionRequest,
+  routesImages,
+} from '@/lib/visionModels'
 
 // Extended config options to include custom fetch function
 type ExtendedConfigOptions = ConfigOptions & {
@@ -74,18 +78,19 @@ export const newUserThreadContent = (
   )
 
   // Inject document metadata into the text content (id, name, fileType only - no path)
-  const docMetadata = documents
-    .map((doc) => ({
-      id: doc.id ?? doc.name,
-      name: doc.name,
-      type: doc.fileType,
-      size: typeof doc.size === 'number' ? doc.size : undefined,
-      chunkCount: typeof doc.chunkCount === 'number' ? doc.chunkCount : undefined,
-      injectionMode: doc.injectionMode,
-    }))
+  const docMetadata = documents.map((doc) => ({
+    id: doc.id ?? doc.name,
+    name: doc.name,
+    type: doc.fileType,
+    size: typeof doc.size === 'number' ? doc.size : undefined,
+    chunkCount: typeof doc.chunkCount === 'number' ? doc.chunkCount : undefined,
+    injectionMode: doc.injectionMode,
+  }))
 
   const textWithFiles =
-    docMetadata.length > 0 ? injectFilesIntoPrompt(content, docMetadata) : content
+    docMetadata.length > 0
+      ? injectFilesIntoPrompt(content, docMetadata)
+      : content
 
   const contentParts = [
     {
@@ -204,17 +209,15 @@ export const sendCompletion = async (
 ): Promise<ChatCompletionResponse | undefined> => {
   if (!thread?.model?.id || !provider) return undefined
 
+  let modelId = thread.model.id
+
   // Send image questions to the provider's vision model
   if (routesImages(provider.provider) && hasImages(messages)) {
-    const prepared = prepareVisionRequest(
-      provider.provider,
-      thread.model.id,
-      messages
-    )
-    thread = { ...thread, model: { ...thread.model, id: prepared.model } }
+    const prepared = prepareVisionRequest(provider.provider, modelId, messages)
+    modelId = prepared.model
     messages = prepared.messages
   }
-  if (track) track.sent = { model: thread.model.id, messages }
+  if (track) track.sent = { model: modelId, messages }
 
   let providerName = provider.provider as unknown as keyof typeof models
 
@@ -260,34 +263,34 @@ export const sendCompletion = async (
   } as ExtendedConfigOptions)
 
   if (
-    thread.model.id &&
+    modelId &&
     models[providerName]?.models !== true && // Skip if provider accepts any model (models: true)
-    !Object.values(models[providerName]).flat().includes(thread.model.id) &&
-    !tokenJS.extendedModelExist(providerName as any, thread.model.id) &&
+    !Object.values(models[providerName]).flat().includes(modelId) &&
+    !tokenJS.extendedModelExist(providerName as any, modelId) &&
     provider.provider !== 'llamacpp'
   ) {
     try {
       tokenJS.extendModelList(
         providerName as any,
-        thread.model.id,
+        modelId,
         // This is to inherit the model capabilities from another built-in model
         // Can be anything that support all model capabilities
         models.anthropic.models[0]
       )
     } catch (error) {
       console.error(
-        `Failed to extend model list for ${providerName} with model ${thread.model.id}:`,
+        `Failed to extend model list for ${providerName} with model ${modelId}:`,
         error
       )
     }
   }
 
   const providerModelConfig = provider.models?.find(
-    (model) => model.id === thread.model?.id || model.model === thread.model?.id
+    (model) => model.id === modelId || model.model === modelId
   )
   const effectiveCapabilities = Array.isArray(providerModelConfig?.capabilities)
     ? (providerModelConfig?.capabilities ?? [])
-    : getModelCapabilities(provider.provider, thread.model.id)
+    : getModelCapabilities(provider.provider, modelId)
   const modelSupportsTools = effectiveCapabilities.includes(
     ModelCapabilities.TOOLS
   )
@@ -301,7 +304,7 @@ export const sendCompletion = async (
     ? await engine.chat(
         {
           messages: messages as chatCompletionRequestMessage[],
-          model: thread.model?.id,
+          model: modelId,
           thread_id: thread.id,
           tools: normalizeTools(usableTools),
           tool_choice: usableTools.length ? 'auto' : undefined,
@@ -316,27 +319,30 @@ export const sendCompletion = async (
             stream: true,
 
             provider: providerName as any,
-            model: thread.model?.id,
+            model: modelId,
             messages,
             tools: normalizeTools(usableTools),
             tool_choice: usableTools.length ? 'auto' : undefined,
-            ...chatThinkingParams(provider.provider, thread.model?.id),
+            ...chatThinkingParams(provider.provider, modelId),
             ...params,
           },
           {
             signal: abortController.signal,
           }
         )
-      : await tokenJS.chat.completions.create({
-          stream: false,
-          provider: providerName,
-          model: thread.model?.id,
-          messages,
-          tools: normalizeTools(usableTools),
-          tool_choice: usableTools.length ? 'auto' : undefined,
-          ...chatThinkingParams(provider.provider, thread.model?.id),
-          ...params,
-        })
+      : await tokenJS.chat.completions.create(
+          {
+            stream: false,
+            provider: providerName,
+            model: modelId,
+            messages,
+            tools: normalizeTools(usableTools),
+            tool_choice: usableTools.length ? 'auto' : undefined,
+            ...chatThinkingParams(provider.provider, modelId),
+            ...params,
+          },
+          { signal: abortController.signal }
+        )
   return completion
 }
 
@@ -610,15 +616,9 @@ export const postMessageProcessing = async (
       let toolParameters = {}
       if (toolCall.function.arguments.length) {
         try {
-          console.log('Raw tool arguments:', toolCall.function.arguments)
           toolParameters = JSON.parse(toolCall.function.arguments)
-          console.log('Parsed tool parameters:', toolParameters)
-        } catch (error) {
-          console.error('Failed to parse tool arguments:', error)
-          console.error(
-            'Raw arguments that failed:',
-            toolCall.function.arguments
-          )
+        } catch {
+          console.error('Invalid tool arguments for', toolCall.function.name)
         }
       }
 
@@ -628,7 +628,7 @@ export const postMessageProcessing = async (
       const isBrowserTool = isBrowserMCPTool(toolName)
 
       // Auto-approve RAG tools (local/safe operations), require permission for MCP tools
-      const approved = isRagTool
+      let approved = isRagTool
         ? true
         : allowAllMCPPermissions ||
           approvedTools[message.thread_id]?.includes(toolCall.function.name) ||
@@ -638,43 +638,62 @@ export const postMessageProcessing = async (
                 message.thread_id,
                 toolParameters
               )
-            : true)
+            : false)
 
-      const { promise, cancel } = isRagTool
-        ? ragFeatureAvailable
-          ? {
-              promise: getServiceHub().rag().callTool({ toolName, arguments: toolArgs, threadId: message.thread_id }),
-              cancel: async () => {},
-            }
-          : {
-              promise: Promise.resolve({
-                error: 'attachments_unavailable',
-                content: [
-                  {
-                    type: 'text',
-                    text: 'Attachments feature is disabled or unavailable on this platform.',
-                  },
-                ],
-              }),
-              cancel: async () => {},
-            }
-        : await (async () => {
-            // Find server name for this MCP tool from available tools
-            let serverName: string | undefined
-            try {
-              const availableTools = await getServiceHub().mcp().getTools()
-              const matchingTool = availableTools.find(t => t.name === toolName)
-              serverName = matchingTool?.server
-            } catch (e) {
-              console.warn('Failed to lookup server for tool:', toolName, e)
-            }
+      approved = !!approved && !abortController.signal.aborted
 
-            return getServiceHub().mcp().callToolWithCancellation({
-              toolName,
-              serverName,
-              arguments: toolArgs,
-            })
-          })()
+      // Denial must prevent invocation, not just prevent awaiting the result.
+      const { promise, cancel } =
+        !approved || abortController.signal.aborted
+          ? { promise: Promise.resolve(undefined), cancel: async () => {} }
+          : isRagTool
+            ? ragFeatureAvailable
+              ? {
+                  promise: getServiceHub().rag().callTool({
+                    toolName,
+                    arguments: toolArgs,
+                    threadId: message.thread_id,
+                  }),
+                  cancel: async () => {},
+                }
+              : {
+                  promise: Promise.resolve({
+                    error: 'attachments_unavailable',
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'Attachments feature is disabled or unavailable on this platform.',
+                      },
+                    ],
+                  }),
+                  cancel: async () => {},
+                }
+            : await (async () => {
+                // Find server name for this MCP tool from available tools
+                let serverName: string | undefined
+                try {
+                  const availableTools = await getServiceHub().mcp().getTools()
+                  const matchingTool = availableTools.find(
+                    (t) => t.name === toolName
+                  )
+                  serverName = matchingTool?.server
+                } catch (e) {
+                  console.warn('Failed to lookup server for tool:', toolName, e)
+                }
+
+                if (abortController.signal.aborted) {
+                  approved = false
+                  return {
+                    promise: Promise.resolve(undefined),
+                    cancel: async () => {},
+                  }
+                }
+                return getServiceHub().mcp().callToolWithCancellation({
+                  toolName,
+                  serverName,
+                  arguments: toolArgs,
+                })
+              })()
 
       useAppState.getState().setCancelToolCall(cancel)
 
@@ -730,14 +749,22 @@ export const postMessageProcessing = async (
       builder.addToolMessage(result as ToolResult, toolCall.id)
 
       // Proactive mode: Capture screenshot/snapshot after browser tool execution
-      if (isProactiveMode && isBrowserTool && !abortController.signal.aborted) {
-        console.log('Proactive mode: Capturing screenshots after browser tool call')
+      if (
+        approved &&
+        isProactiveMode &&
+        isBrowserTool &&
+        !abortController.signal.aborted
+      ) {
+        console.log(
+          'Proactive mode: Capturing screenshots after browser tool call'
+        )
 
         // Filter out old screenshots before adding new ones
         filterOldProactiveScreenshots(builder)
 
         // Capture new screenshots
-        const proactiveScreenshots = await captureProactiveScreenshots(abortController)
+        const proactiveScreenshots =
+          await captureProactiveScreenshots(abortController)
 
         // Add proactive screenshots to builder
         for (const screenshot of proactiveScreenshots) {

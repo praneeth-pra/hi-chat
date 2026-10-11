@@ -200,6 +200,7 @@ for i = 1, 20 do
 end
 
 local function typingWindow()
+  if hs.eventtap.isSecureInputEnabled and hs.eventtap.isSecureInputEnabled() then return nil end
   for _, name in ipairs(APPS) do
     local app = hs.application.get(name)
     local win = app and (app:focusedWindow() or app:mainWindow())
@@ -212,6 +213,7 @@ local function typingWindow()
 end
 
 local function typingValid(target)
+  if hs.eventtap.isSecureInputEnabled and hs.eventtap.isSecureInputEnabled() then return false end
   local ok, valid = pcall(function()
     local win = target.app:focusedWindow() or target.app:mainWindow()
     local title = win and (win:title() or ""):lower() or ""

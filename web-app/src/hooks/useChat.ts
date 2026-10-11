@@ -23,6 +23,7 @@ import { CompletionMessagesBuilder } from '@/lib/messages'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
+import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
   ChatCompletionMessageToolCall,
@@ -84,16 +85,6 @@ const createThreadContent = (
   return content
 }
 
-// Helper to cancel animation frame cross-platform
-const cancelFrame = (handle: number | undefined) => {
-  if (handle === undefined) return
-  if (typeof cancelAnimationFrame !== 'undefined') {
-    cancelAnimationFrame(handle)
-  } else {
-    clearTimeout(handle)
-  }
-}
-
 const ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES = 512 * 1024
 
 // Helper to finalize and save a message
@@ -141,9 +132,7 @@ const processStreamingCompletion = async (
   continueFromMessage?: ThreadMessage,
   timing?: StreamTiming
 ) => {
-  // High-throughput scheduler: batch UI updates on rAF (requestAnimationFrame)
-  let rafScheduled = false
-  let rafHandle: number | undefined
+  let firstAnswerFlushed = false
   let pendingDeltaCount = 0
   const reasoningProcessor = new ReasoningProcessor()
 
@@ -177,30 +166,13 @@ const processStreamingCompletion = async (
       updateTokenSpeed(currentContent, pendingDeltaCount)
     }
     pendingDeltaCount = 0
-    rafScheduled = false
   }
 
-  const scheduleFlush = () => {
-    if (rafScheduled || abortController.signal.aborted) return
-    rafScheduled = true
-    const doSchedule = (cb: () => void) => {
-      if (typeof requestAnimationFrame !== 'undefined') {
-        rafHandle = requestAnimationFrame(() => cb())
-      } else {
-        // Fallback for non-browser test environments
-        const t = setTimeout(() => cb(), 0) as unknown as number
-        rafHandle = t
-      }
-    }
-    doSchedule(() => {
-      // Check abort status before executing the scheduled callback
-      if (abortController.signal.aborted) {
-        rafScheduled = false
-        return
-      }
-      flushStreamingContent()
-    })
-  }
+  const scheduler = createStreamFlushScheduler(
+    flushStreamingContent,
+    abortController.signal
+  )
+  const scheduleFlush = (immediate = false) => scheduler.schedule(immediate)
 
   try {
     for await (const part of completion) {
@@ -226,8 +198,6 @@ const processStreamingCompletion = async (
         flushSync(() => {
           updatePromptProgress(part.prompt_progress)
         })
-        // Add a small delay to make progress visible
-        await new Promise((resolve) => setTimeout(resolve, 100))
       }
 
       // Error message
@@ -253,18 +223,17 @@ const processStreamingCompletion = async (
       }
       const deltaContent = part.choices[0]?.delta?.content || ''
       if (deltaContent) {
-        if (timing) timing.firstAnswerAt ??= Date.now()
+        const useful = !!deltaContent.trim()
+        if (timing && useful) timing.firstAnswerAt ??= Date.now()
         accumulatedTextRef.value += deltaContent
         pendingDeltaCount += 1
-        // Batch UI update on next animation frame
-        scheduleFlush()
+        // Show the first useful text immediately; batch later tokens.
+        scheduleFlush(useful && !firstAnswerFlushed)
+        if (useful) firstAnswerFlushed = true
       }
     }
   } finally {
-    // Always clean up scheduled RAF when stream ends (either normally or via abort)
-    cancelFrame(rafHandle)
-    rafHandle = undefined
-    rafScheduled = false
+    scheduler.dispose()
 
     // Finalize reasoning (close any open think tags)
     accumulatedTextRef.value += reasoningProcessor.finalize()
