@@ -240,7 +240,7 @@ vi.mock('lucide-react', () => ({
 }))
 
 vi.mock('@tabler/icons-react', () => ({
-  IconCode: () => <svg>Code</svg>,
+  IconKeyboard: () => <svg>Keyboard</svg>,
   IconMicrophone: () => <svg>Mic</svg>,
   IconRefresh: () => <svg>Retry</svg>,
   IconPhoto: () => <svg data-testid="photo-icon">Photo</svg>,
@@ -384,7 +384,7 @@ describe('ChatInput', () => {
     vi.mocked(useChat).mockImplementation(() => vi.fn())
   })
 
-  it('has no Speaker controls even with legacy enablement saved, and retains dictation/coding', async () => {
+  it('has no Speaker/coding controls and displays background typing status', async () => {
     vi.stubGlobal('IS_WEB_APP', true)
     localStorage.setItem(
       'jan-web-speaker-transcription',
@@ -404,6 +404,22 @@ describe('ChatInput', () => {
       screen.queryByRole('button', { name: 'Coding mode' })
     ).not.toBeInTheDocument()
     expect(screen.getByTestId('composer-model-selector')).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Background typing off' })
+    ).toBeInTheDocument()
+    const { handleRemoteKey } = await import('@/lib/remoteKeys')
+    await act(async () => {
+      handleRemoteKey('F18')
+    })
+    expect(
+      screen.getByRole('img', { name: 'Background typing on' })
+    ).toBeInTheDocument()
+    await act(async () => {
+      handleRemoteKey('F19')
+    })
+    expect(
+      screen.getByRole('img', { name: 'Background typing off' })
+    ).toBeInTheDocument()
     localStorage.removeItem('jan-web-speaker-transcription')
     vi.unstubAllGlobals()
   })
