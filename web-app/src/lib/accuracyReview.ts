@@ -122,7 +122,8 @@ export async function verifyAccuracyCompletion(
   draftedBy: string,
   signal: AbortSignal,
   evidence: Promise<WebEvidence>,
-  onPhase?: (phase: 'drafting' | 'verifying') => void
+  onPhase?: (phase: 'drafting' | 'verifying') => void,
+  answerPrefix = ''
 ): Promise<{ completion: ChatCompletionResponse; review?: AccuracyReview }> {
   const draftStarted = Date.now()
   onPhase?.('drafting')
@@ -181,6 +182,7 @@ export async function verifyAccuracyCompletion(
     }
   }
   if (!draft.trim()) throw new Error('Accuracy received no answer to review.')
+  draft = answerPrefix + draft
   if (draft.length > 64_000)
     throw new Error('Accuracy draft exceeded the review limit.')
   const draftMs = Date.now() - draftStarted

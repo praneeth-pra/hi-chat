@@ -1062,10 +1062,12 @@ export const useChat = () => {
               (phase) =>
                 useAppState
                   .getState()
-                  .setAccuracyStatus({ threadId: activeThread.id, phase })
+                  .setAccuracyStatus({ threadId: activeThread.id, phase }),
+              accumulatedTextRef.value
             )
             completion = checked.completion
             accuracyReview = checked.review
+            if (accuracyReview) accumulatedTextRef.value = ''
             // Draft readiness is not the time the verified answer becomes visible.
             if (accuracyReview) {
               streamTiming.firstChunkAt = undefined

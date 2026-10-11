@@ -103,6 +103,28 @@ describe('Accuracy review gate', () => {
     expect(await text(checked.completion)).toBe('Unverified draft')
     expect(checked.review?.verifier).toBe('groq 120B')
   })
+  it('reviews a continued answer with its existing prefix exactly once', async () => {
+    vi.mocked(sendCompletion).mockResolvedValue(
+      response({ verdict: 'approved' })
+    )
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      providers,
+      'groq',
+      new AbortController().signal,
+      evidence,
+      undefined,
+      'Existing answer. '
+    )
+    expect(
+      JSON.stringify(vi.mocked(sendCompletion).mock.calls[0][2])
+    ).toContain('Existing answer. Unverified draft')
+    expect(await text(checked.completion)).toBe(
+      'Existing answer. Unverified draft'
+    )
+  })
   it('shows only the corrected answer and supplies web evidence to the reviewer', async () => {
     vi.mocked(sendCompletion).mockResolvedValue(
       response({ verdict: 'revised', answer: '- Corrected answer' })
