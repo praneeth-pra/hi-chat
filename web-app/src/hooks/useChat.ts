@@ -23,7 +23,6 @@ import { CompletionMessagesBuilder } from '@/lib/messages'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
-import { useCodingMode } from '@/hooks/useCodingMode'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
   ChatCompletionMessageToolCall,
@@ -759,8 +758,7 @@ export const useChat = () => {
                   currentAssistant.documents
                 )
               : undefined,
-            message,
-            useCodingMode.getState().coding
+            message
           )
         )
         // Using addUserMessage to respect legacy code. Should be using the userContent above.

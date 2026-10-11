@@ -20,7 +20,7 @@ describe('codingAnswer', () => {
     expect(withCodingRule('Answer as P.', 'Write a bash script')).toBe(
       `Answer as P.\n\n${CODING_ANSWER_RULE}`
     )
-    expect(withCodingRule(undefined, 'Reverse a string', true)).toBe(
+    expect(withCodingRule(undefined, 'Write code to reverse a string')).toBe(
       CODING_ANSWER_RULE
     )
   })

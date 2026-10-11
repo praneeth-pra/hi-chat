@@ -401,8 +401,8 @@ describe('ChatInput', () => {
     ).toBeNull()
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Coding mode' })
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: 'Coding mode' })
+    ).not.toBeInTheDocument()
     expect(screen.getByTestId('composer-model-selector')).toBeInTheDocument()
     localStorage.removeItem('jan-web-speaker-transcription')
     vi.unstubAllGlobals()
