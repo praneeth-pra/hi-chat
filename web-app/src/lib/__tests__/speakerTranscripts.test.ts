@@ -19,6 +19,25 @@ describe('speaker transcript readiness', () => {
     await vi.advanceTimersByTimeAsync(10000)
     expect(upload).not.toHaveBeenCalled()
   })
+  it('does not upload when a live result arrives just before the fallback deadline', async () => {
+    vi.useFakeTimers()
+    let resolve!: (r: ReturnType<typeof result>) => void
+    const upload = vi.fn()
+    const gathered = collectSpeakerTranscripts(
+      [
+        new Promise((r) => {
+          resolve = r
+        }),
+        new Promise(() => {}),
+      ],
+      upload
+    )
+    await vi.advanceTimersByTimeAsync(1400)
+    resolve(result('grok'))
+    await vi.advanceTimersByTimeAsync(300)
+    expect(await gathered).toEqual(result('grok'))
+    expect(upload).not.toHaveBeenCalled()
+  })
   it('starts fallback at 1.5 seconds rather than waiting for the live timeout', async () => {
     vi.useFakeTimers()
     const upload = vi.fn(async () => result('batch'))

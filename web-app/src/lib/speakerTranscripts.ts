@@ -36,7 +36,7 @@ export function collectSpeakerTranscripts(
       })
     }
     const fallbackUpload = () => {
-      if (finished || fallbackStarted) return
+      if (finished || fallbackStarted || heard.size) return
       fallbackStarted = true
       remaining++
       trace('fallback-start')
