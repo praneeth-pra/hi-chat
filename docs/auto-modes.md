@@ -8,7 +8,7 @@ provider and normal streaming/reasoning settings.
   reasoning. The first useful answer or actionable tool request wins, unused
   requests are cancelled, and the winner streams immediately.
 - **Accuracy:** the two 120B models race to prepare a Medium-reasoning draft;
-  20B is draft recovery. Exa search is mandatory and overlaps drafting. The
+  20B is draft recovery. Exa Fast search is mandatory and overlaps drafting. The
   complete draft is held while a 120B reviewer, preferably the other provider,
   checks it against the question, conversation and retrieved sources. Only an
   approved, corrected or uncertainty-qualified answer is shown. Missing evidence
