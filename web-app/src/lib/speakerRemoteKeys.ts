@@ -1,3 +1,4 @@
+import { hasQuestionCue } from './speakerTurnJudge'
 import { toast } from 'sonner'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import { stopDictation, toggleDictation } from '@/lib/dictation'
@@ -204,9 +205,14 @@ export function handleSpeakerKey(key: string): boolean {
   if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
     if (state.enabled && state.pendingQuestion) {
       if (
-        !state.pendingQuestion.complete &&
-        state.pendingQuestion.reviewUntil !== undefined &&
-        Date.now() >= state.pendingQuestion.reviewUntil
+        (!state.pendingQuestion.complete &&
+          state.pendingQuestion.reviewUntil !== undefined &&
+          Date.now() >= state.pendingQuestion.reviewUntil) ||
+        (!state.pendingQuestion.complete &&
+          !state.pendingQuestion.manual &&
+          !state.pendingQuestion.uncertain &&
+          state.pendingQuestion.relation !== 'update' &&
+          !hasQuestionCue(state.pendingQuestion.text))
       ) {
         toast('No speaker card to review')
         return true

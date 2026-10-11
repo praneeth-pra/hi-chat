@@ -86,15 +86,13 @@ describe('speaker remote keys', () => {
   it('fn arrow commands act on the pending question before older recommendations', () => {
     useSpeakerTranscription.getState().resetTurns()
     useSpeakerTranscription.getState().suggest('What is DNS?')
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'building',
-        text: 'Suppose three services fail.',
-        complete: false,
-        manual: false,
-        reason: 'scenario',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'building',
+      text: 'How would you recover if',
+      complete: false,
+      manual: false,
+      reason: 'scenario',
+    })
     const sendNow = vi.fn(),
       discard = vi.fn()
     const unregister = setQuestionControls({
@@ -117,6 +115,22 @@ describe('speaker remote keys', () => {
     expect(useSpeakerTranscription.getState().queue).toEqual([])
     stop()
     unregister()
+    useSpeakerTranscription.getState().resetTurns()
+  })
+  it('plain side arrows never control the speaker or prevent normal navigation', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().suggest('What is DNS?')
+    const stop = listenForSpeakerKeys()
+    for (const key of ['ArrowLeft', 'ArrowRight']) {
+      const event = new KeyboardEvent('keydown', { key, cancelable: true })
+      window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'What is DNS?',
+    ])
+    expect(useSpeakerTranscription.getState().queue).toEqual([])
+    stop()
     useSpeakerTranscription.getState().resetTurns()
   })
   it('F15 sends the newest suggestion chip', () => {

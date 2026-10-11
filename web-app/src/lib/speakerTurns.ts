@@ -101,22 +101,28 @@ export function createQuestionTurns(options: Options) {
     options.onCommit({ ...active })
   }
   const commit = () => {
-    if (!draft || stopped || processing || busy) return
+    if (!draft || stopped) return
     emitDraft()
   }
   const schedule = () => {
-    cancelTimer()
-    if (!draft || stopped || processing || busy) return
-    if (manualRequested) return commit()
-    if (draft.complete && !draft.manual && !draft.uncertain) {
-      // Count the quiet interval while transcription/judgement are running.
-      const elapsed = quietSince === null ? 0 : Date.now() - quietSince
+    if (!draft || stopped) return
+    if (manualRequested) {
+      cancelTimer()
+      commit()
+      return
+    }
+    if (draft.complete && !draft.manual && !draft.uncertain && !timer) {
+      // The endpoint belongs to this contribution. Later speech and queued clips
+      // cannot postpone a question already judged answerable.
+      const elapsed = Date.now() - (draft.captureEnd ?? Date.now())
       const waitMs = Math.max(0, delay - elapsed)
       options.onTrace?.('settling', {
         at: Date.now(),
         waitMs,
         clip: draft.clip,
         captureEnd: draft.captureEnd,
+        processing,
+        busy,
       })
       timer = setTimeout(commit, waitMs)
     }
@@ -135,6 +141,7 @@ export function createQuestionTurns(options: Options) {
     const { text, complete, reason } = decision
     let action = decision.action
     if (action === 'skip' || !text.trim()) return
+    cancelTimer()
     if (action === 'suggest') {
       if (draft?.complete && !draft.manual) emitDraft()
       // An uncertain continuation must not let an earlier partial question escape.
@@ -200,24 +207,33 @@ export function createQuestionTurns(options: Options) {
       capture?: { clipId: number; captureEnd: number }
     ): Promise<void> {
       const clip = capture?.clipId ?? ++clipSequence
-      const captureEnd = capture?.captureEnd ?? quietSince
+      const captureEnd = capture?.captureEnd ?? quietSince ?? Date.now()
+      const transcriptReady = Date.now()
       options.onTrace?.('transcript-ready', {
         clip,
-        at: Date.now(),
+        at: transcriptReady,
         captureEnd,
         captureEndKind: capture ? 'clip-finalized' : 'quiet-state-snapshot',
       })
       const acceptedEpoch = epoch
       processing++
-      cancelTimer()
       const run = queue
         .then(async () => {
           if (stopped || acceptedEpoch !== epoch) return
+          const pendingId = draft?.id
           const context = {
             pending: draft?.text ?? '',
             active: active?.text ?? '',
             recent: recent.slice(-6),
           }
+          const judgeStarted = Date.now()
+          options.onTrace?.('judge-start', {
+            clip,
+            at: judgeStarted,
+            queuedMs: judgeStarted - transcriptReady,
+            pendingChars: context.pending.length,
+            activeChars: context.active.length,
+          })
           const decision = await options.judge(texts, context)
           if (stopped || acceptedEpoch !== epoch) return
           delay = unfinishedTurn
@@ -226,19 +242,30 @@ export function createQuestionTurns(options: Options) {
           options.onTrace?.('decision-ready', {
             clip,
             at: Date.now(),
+            judgeMs: Date.now() - judgeStarted,
             action: decision.action,
             complete: decision.complete,
             reason: decision.reason,
             hadPending: !!context.pending,
             hadActive: !!context.active,
           })
+          // A ready draft may have committed while this judge was running.
+          // Its continuation still targets the same stable question ID.
+          if (
+            !draft &&
+            pendingId &&
+            active?.id === pendingId &&
+            (decision.action === 'question' || decision.action === 'context')
+          )
+            decision.action = 'followup'
           apply(decision)
           if (draft && decision.action !== 'skip') {
             draft.captureEnd = captureEnd
             draft.clip = clip
             publish()
           }
-          recent = [...recent, texts[0] ?? ''].slice(-6)
+          if (decision.action !== 'skip' && decision.action !== 'suggest')
+            recent = [...recent, decision.text].slice(-6)
         })
         .finally(() => {
           processing--
@@ -255,6 +282,14 @@ export function createQuestionTurns(options: Options) {
       }
     },
     activity(isBusy: boolean) {
+      if (busy !== isBusy)
+        options.onTrace?.('capture-busy', {
+          at: Date.now(),
+          busy: isBusy,
+          processing,
+          turn: draft?.id,
+          clip: draft?.clip,
+        })
       busy = isBusy
       schedule()
     },
@@ -282,16 +317,13 @@ export function createQuestionTurns(options: Options) {
         draft.relation !== 'update'
       )
         return
-      options.onTrace?.('review-expired', {
+      options.onTrace?.('review-hidden', {
         at: Date.now(),
         turn: draft.id,
         clip: draft.clip,
         relation: draft.relation,
       })
-      cancelTimer()
-      manualRequested = false
-      draft = null
-      publish()
+      // Visibility expires; the held follow-up remains available to later speech.
     },
     discard() {
       epoch++

@@ -37,7 +37,7 @@ import {
   SMART_TURN_HOLD_BELOW,
 } from '@/lib/smartTurn'
 import { createQuestionTurns, SPEAKER_REVIEW_MS } from '@/lib/speakerTurns'
-import { judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
+import { hasQuestionCue, judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
 import { useThreads } from '@/hooks/useThreads'
 import { toast } from 'sonner'
 import { isPlatformTauri } from '@/lib/platform/utils'
@@ -69,21 +69,21 @@ const speakerKeyTerms = () =>
 setKeyTermsSource(speakerKeyTerms)
 
 const LABELS: Record<SpeakerStatus, string> = {
-  off: 'Speaker off',
-  starting: 'Starting…',
+  'off': 'Speaker off',
+  'starting': 'Starting…',
   'needs-click': 'Click to start listening',
-  listening: 'Listening to speaker',
-  hearing: 'Hearing…',
-  transcribing: 'Transcribing…',
+  'listening': 'Listening to speaker',
+  'hearing': 'Hearing…',
+  'transcribing': 'Transcribing…',
   'no-device': 'BlackHole not found',
-  blocked: 'Allow audio access',
-  unsupported: 'Not supported here',
-  error: 'Speaker error',
+  'blocked': 'Allow audio access',
+  'unsupported': 'Not supported here',
+  'error': 'Speaker error',
 }
 
 const ENGINE_NAMES: Record<string, string> = {
-  elevenlabs: 'ElevenLabs',
-  grok: 'Grok',
+  'elevenlabs': 'ElevenLabs',
+  'grok': 'Grok',
   'elevenlabs live': 'ElevenLabs live',
   'grok live': 'Grok live',
 }
@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=intent-v3',
+        'protocol=conversation-v1',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
@@ -310,7 +310,7 @@ export function SpeakerPendingQuestion() {
       () => {
         setExpired(reviewKey)
         const current = useSpeakerTranscription.getState()
-        // Expired additions are never attached to an already answered question.
+        // Hide the card only; later speech can complete this retained follow-up.
         if (
           snapshot.relation === 'update' &&
           current.pendingQuestion?.id === snapshot.id &&
@@ -342,6 +342,15 @@ export function SpeakerPendingQuestion() {
       </div>
     ) : null
   if (expired === reviewKey && !pendingQuestion.complete) return null
+  // Scenario background accumulates without repeatedly asking for approval.
+  if (
+    !pendingQuestion.complete &&
+    !pendingQuestion.manual &&
+    !pendingQuestion.uncertain &&
+    pendingQuestion.relation !== 'update' &&
+    !hasQuestionCue(pendingQuestion.text)
+  )
+    return null
   return (
     <div
       className="m-2 rounded-md border border-main-view-fg/15 p-3 text-sm"
@@ -358,7 +367,7 @@ export function SpeakerPendingQuestion() {
                 : 'Sending automatically…'
               : pendingQuestion.relation === 'update'
                 ? 'Add to this question?'
-                : 'Building question…'}
+                : 'New question?'}
       </div>
       {!pendingQuestion.complete && (
         <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">

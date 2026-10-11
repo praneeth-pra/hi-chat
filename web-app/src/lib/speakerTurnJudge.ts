@@ -32,9 +32,13 @@ function candidateStatement(text: string): boolean {
   return (
     !hasQuestionCue(text) &&
     !text.includes('?') &&
-    /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:(?:i|we)\s+(?:(?:generally|usually|typically|mostly|currently|regularly|actually)\s+)*(?:work|worked|do|did|use|used|maintain|maintained|handle|handled|manage|managed|build|built|get|got)\b|(?:my|our)\s+(?:responsibilities|tasks|work|experience|background)\b)/i.test(
-      text.trim()
-    )
+    !/\b(?:suppose|imagine|assume|given|let['’]s say)\b/i.test(text) &&
+    (/\b(?:maintained|managed|handled|owned) by (?:another|the other|our|the) team\b/i.test(
+      text
+    ) ||
+      /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:(?:i|we)\s+(?:(?:generally|usually|typically|mostly|currently|regularly|actually)\s+)*(?:work|worked|do|did|use|used|maintain|maintained|handle|handled|manage|managed|build|built|get|got)\b|(?:my|our)\s+(?:responsibilities|tasks|work|experience|background)\b)/i.test(
+        text.trim()
+      ))
   )
 }
 
@@ -56,19 +60,21 @@ Return only one JSON object, for example:
 intent has exactly three values:
 ignore: candidate answers, confirmations, filler, repetitions, greetings, rhetorical questions and screen/call logistics. First-person descriptions of the candidate's tasks/experience are answers, not questions. Never append them to the interviewer's question.
 hold: scenario/background, a lead-in, unfinished wording, missing essential constraints or unclear relevant speech. Keep building across any length of pause. Silence does not complete a scenario.
-question: a complete, answerable interviewer question or technical request. Do not wait for hypothetical extra parts or user approval. This label describes a question in the speech, never a candidate answer.
+question: a complete, answerable interviewer question or technical request. Do not wait for hypothetical extra parts or user approval. Judge answerability of the accumulated interviewer turn (pending plus this contribution), not the isolated clip. A final fragment such as "with zero downtime" can complete "How would you migrate it". Never use the active question alone to turn a candidate answer into a question.
 relation is current or new. current means it belongs to the pending scenario or is a genuine same-topic follow-up/constraint to the active question. new means a separate topic/task. The first standalone question is new. Another question mark alone does not make a new topic.
-transcript is a zero-based index of one supplied transcript. span is null to select its whole text; for a mixed question/answer clip, span must copy only an EXACT contiguous questioner passage from that transcript. No rewriting, answering, invented words, or copying pending/active text. If you cannot safely separate mixed speech, hold. Compare the available transcripts; choose the clearest faithful one.
+transcript is a zero-based index of one supplied transcript. span is null to select the whole transcript. For mixed question/answer speech, span is {"start":4,"end":10}: zero-based word indices, start inclusive and end exclusive, taken from indexedWords for that transcript. Never copy or rewrite text into span. Select only the contiguous questioner words. No rewriting, answering, invented words, or copying pending/active text. If you cannot safely separate mixed speech, hold. Compare the available transcripts; choose the clearest faithful one.
 Examples: "Suppose payment succeeds but delivery fails" => hold. "How do we keep those services consistent?" => question/current. "And what if we retry?" => question/current. "What is your strong zone?" => question/new. "Out of all of these things, what do you work regularly on?" => question/current if following a skills question. "I work on tasks and automation" => ignore.
 The default for a candidate's declarative explanation is ignore, NOT question or hold. Do not treat the presence of technical words (CI/CD, tasks, containers, Vault) as evidence of a question.
 A question with alternative choices is answerable; an absent spoken "on" or filler between alternatives does not make it unfinished.
-relation=new requires a genuinely different topic, not a new audio clip. With a pending scenario, continuation is current. With an active question, pronouns such as "it", "these things", "that integration" refer to that question and are current.
+relation=new requires a genuinely different topic, not a new audio clip. With a pending scenario or unfinished question, continuation is current. Evaluate conversation.pending plus the selected contribution when current. Conversation context is not selectable source words. With an active question, pronouns such as "it", "these things", "that integration" refer to that question and are current.
 Exact examples:
 "So I generally do have mostly like CI/CD tasks. We do get tasks." => ignore.
 "That is actually maintained by another team." => ignore.
 active="What is your strong zone?", clip="Out of all of these things, what do you work regularly on?" => question/current.
 active="How did you integrate Vault?", clip="Do you have it running in a container or on EC2?" => question/current.
-"I maintain the pipelines. How do you rotate their credentials?" => question, span="How do you rotate their credentials?"; never select the candidate sentence.
+"I maintain the pipelines. How do you rotate their credentials?" => question, span={"start":4,"end":10}; never select the candidate sentence.
+Comparisons such as "And what do you think which one is cheaper as compared to each other?" and "Don't you think that ECS also provides that kind of stuff which EKS does?" are complete questions, current when continuing the active comparison. Do not hold them merely because they refer to previous context.
+Bare "What do you think?" is current when pending/active context exists; without context it is hold.
 Return the four keys shown above. Do not return explanations or completeness booleans.`
 
 export const turnDecisionSchema = (count: number): Record<string, unknown> => ({
@@ -81,7 +87,20 @@ export const turnDecisionSchema = (count: number): Record<string, unknown> => ({
       type: 'integer',
       enum: Array.from({ length: count }, (_, i) => i),
     },
-    span: { type: ['string', 'null'] },
+    span: {
+      anyOf: [
+        { type: 'null' },
+        {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            start: { type: 'integer', minimum: 0 },
+            end: { type: 'integer', minimum: 1 },
+          },
+          required: ['start', 'end'],
+        },
+      ],
+    },
   },
   required: ['intent', 'relation', 'transcript', 'span'],
 })
@@ -129,26 +148,42 @@ export function parseTurnDecision(
       (d.transcript as number) >= texts.length
         ? [`transcript(${typeof d.transcript})`]
         : []),
-      ...(d.span !== undefined && d.span !== null && typeof d.span !== 'string'
+      ...(d.span !== undefined &&
+      d.span !== null &&
+      (typeof d.span !== 'object' || Array.isArray(d.span))
         ? [`span(${typeof d.span})`]
         : []),
     ]
     if (invalid.length)
       return uncertain(`Invalid judge fields: ${invalid.join(', ')}`)
     const selected = squash(texts[d.transcript as number])
-    const text = typeof d.span === 'string' ? squash(d.span) : selected
-    if (!text || !selected.includes(text))
+    const words = selected.split(/\s+/)
+    let text = selected
+    if (d.span && typeof d.span === 'object') {
+      const span = d.span as Record<string, unknown>
+      if (
+        !Number.isInteger(span.start) ||
+        !Number.isInteger(span.end) ||
+        (span.start as number) < 0 ||
+        (span.end as number) > words.length ||
+        (span.start as number) >= (span.end as number) ||
+        Object.keys(span).some((key) => key !== 'start' && key !== 'end')
+      )
+        return uncertain('Invalid judge word range')
+      text = words.slice(span.start as number, span.end as number).join(' ')
+    }
+    if (!text)
       return uncertain(
         'Judge wording was not present in the selected transcript'
       )
     if (
       d.intent === 'question' &&
-      typeof d.span !== 'string' &&
+      d.span == null &&
       text.split(/(?<=[.!?])\s+/).some(candidateStatement) &&
       hasQuestionCue(text)
     )
       return uncertain(
-        'Judge wording mixed a candidate answer with a question; select only the exact question span'
+        'Judge wording mixed a candidate answer with a question; select only the question word range'
       )
     if (candidateStatement(text))
       return {
@@ -158,20 +193,50 @@ export function parseTurnDecision(
         reason: 'Candidate statement',
       }
     // A valid schema is not evidence that declarative speech is answerable.
-    if (d.intent === 'question' && !hasQuestionCue(text))
+    if (
+      d.intent === 'question' &&
+      !hasQuestionCue(text) &&
+      !(d.relation === 'current' && hasQuestionCue(context.pending))
+    )
       return {
         action: 'skip',
         complete: false,
         text: '',
         reason: 'No explicit question or task in an automatic decision',
       }
-    const complete = d.intent === 'question'
+    const hasContext = !!(context.pending || context.active)
+    const shortQuestion =
+      /^(?:(?:and|so)[, ]+)?what do you think(?: about (?:it|that))?[?.!]*$/i.test(
+        text
+      )
+    const comparison =
+      /\?\s*$/.test(text) &&
+      !/\b(?:if|or|and|than|because|with|for|to)\s*\?$/i.test(text) &&
+      text.split(/\s+/).length >= 8 &&
+      (/\bwhich (?:one|of them) (?:is|would be|will be) (?:\w+ ){0,3}(?:cheaper|faster|slower|better|more expensive|easier|safer|more efficient)\b/i.test(
+        text
+      ) ||
+        /^(?:and )?(?:don['’]t|do not|do) you think (?:that )?.*\b(?:also|same|both|compared|than|versus|like)\b.*\b(?:provides?|supports?|offers?|does|has|have|can|is|are)\b/i.test(
+          text
+        ))
+    const complete =
+      (d.intent === 'question' || (hasContext && comparison)) &&
+      (!shortQuestion || hasContext)
     const connected =
       /^(?:out of all of (?:these|those)|(?:and )?what about|(?:and )?what if|(?:and )?(?:do|did|can|could|would|is|does) (?:you have it|it|that)|(?:and )?how (?:does|did|would) (?:that|it))\b/i.test(
         text
       )
+    const comparisonReferencesContext =
+      comparison &&
+      (/\bwhich (?:one|of them)\b/i.test(text) ||
+        (text.match(/\b[A-Z][A-Z0-9]{1,}\b/g) ?? []).some((name) =>
+          new RegExp(`\\b${name}\\b`, 'i').test(
+            `${context.pending} ${context.active}`
+          )
+        ))
     const related =
       d.relation === 'current' ||
+      (hasContext && (shortQuestion || comparisonReferencesContext)) ||
       (!!(context.pending || context.active) && connected)
     const action: TurnAction = related
       ? context.pending
@@ -188,7 +253,13 @@ export function parseTurnDecision(
       action,
       complete,
       text,
-      reason: complete ? 'Answerable request' : 'Building question',
+      reason: complete
+        ? d.intent === 'hold'
+          ? 'Complete comparison question'
+          : 'Answerable request'
+        : shortQuestion && !hasContext
+          ? 'Question needs surrounding context'
+          : 'Building question',
     }
   } catch {
     return uncertain('Could not understand the judge decision')
@@ -231,10 +302,24 @@ export async function judgeSpeakerTurn(
     return decision
   }
   const user = JSON.stringify({
-    pending: context.pending,
-    active: context.active,
-    recent: context.recent,
+    conversation: {
+      pending: context.pending,
+      active: context.active,
+      recent: context.recent
+        .filter(
+          (text) =>
+            !context.pending.includes(text) && !context.active.includes(text)
+        )
+        .slice(-4)
+        .map((text) => text.slice(-1200)),
+    },
     transcripts: distinct,
+    indexedWords: distinct.map((text) =>
+      squash(text)
+        .split(/\s+/)
+        .map((word, index) => `${index}:${word}`)
+        .join(' ')
+    ),
     coding: !!config.coding,
     keyterms: config.keyterms ?? [],
   })

@@ -12,7 +12,7 @@
 --                           seen off Jan, and the window there gets focus
 --                           (Z and X work independently)
 --   tap Left Option         turn the speaker (listening) on / off
---   fn + Right              accept the visible speaker card as a new question
+--   fn + Right              accept the visible speaker card (Add / Send)
 --   fn + Left               discard the visible speaker card
 --   fn + Return             send in Jan without leaving the app you're in:
 --                           what's typed in the prompt box, or when it's empty
@@ -159,9 +159,17 @@ enterTap:start()
 -- Macs may deliver fn + arrows as the arrows themselves or Home / End.
 local LEFT, RIGHT = hs.keycodes.map["left"], hs.keycodes.map["right"]
 local HOME, END = hs.keycodes.map["home"], hs.keycodes.map["end"]
-recommendationTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
+-- Arrow events can carry the macOS secondary-fn flag even without a physical
+-- fn press. Track only the fn key's own flagsChanged events.
+local FN = hs.keycodes.map["fn"] or 63
+local recommendationFnDown = false
+recommendationTap = hs.eventtap.new({ hs.eventtap.event.types.flagsChanged, hs.eventtap.event.types.keyDown }, function(e)
   local flags = e:getFlags()
-  if not flags.fn or flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
+  if e:getType() == hs.eventtap.event.types.flagsChanged then
+    if e:getKeyCode() == FN then recommendationFnDown = flags.fn == true end
+    return false
+  end
+  if not recommendationFnDown or flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
   local key = e:getKeyCode()
   local send = key == RIGHT or key == END
   local discard = key == LEFT or key == HOME
