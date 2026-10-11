@@ -54,7 +54,7 @@ function offerCodingMode(text: string) {
   if (state.coding || !isCodingCue(text)) return
   if (Date.now() - codingOfferedAt < CODING_OFFER_COOLDOWN_MS) return
   codingOfferedAt = Date.now()
-  toast('Coding mode? Press fn + Left', {
+  toast('Ready for coding mode?', {
     duration: 8000,
     action: {
       label: 'Turn on',
