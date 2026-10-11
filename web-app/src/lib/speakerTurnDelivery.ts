@@ -5,6 +5,7 @@ export type SpeakerChatRequest = {
   turn: SpeakerTurnDelivery
   isCurrent: () => boolean
   onThread: (threadId: string) => void
+  onAnswerStart?: () => void
 }
 
 /** Never replace a typed message or an older question after the chat moved on. */

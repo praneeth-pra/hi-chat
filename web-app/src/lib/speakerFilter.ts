@@ -29,6 +29,7 @@ export type GroqConfig = {
   baseUrl?: string
   /** Structured speaker-turn decisions; legacy clip checks remain plain text. */
   json?: boolean
+  jsonSchema?: Record<string, unknown>
   /** With a key, the check runs on Cerebras first and Groq is the fallback. */
   cerebras?: { apiKey?: string; baseUrl?: string }
   /** For the Claude judges; Settings > Model Providers > Anthropic. */
@@ -470,11 +471,14 @@ export const isUnsure = (v: Verdict): v is Unsure =>
 export const isMore = (v: Verdict): v is More =>
   typeof v === 'object' && v !== null && 'more' in v
 
+const schemaUnavailable = new Set<string>()
+
 /** Which model judged a clip, how long the check took, and why it was skipped. */
 export type CheckInfo = {
   model: string
   ms: number
   note?: string
+  finishReason?: string
   /** The clip type the judge named (see CLIP_TYPES). */
   type?: string
 }
@@ -517,7 +521,7 @@ export async function requestSpeakerJudge(
   const started = Date.now()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5000)
-  const post = (
+  const post = async (
     baseUrl: string,
     apiKey: string | undefined,
     model: string,
@@ -527,32 +531,67 @@ export async function requestSpeakerJudge(
     effort: 'low' | 'medium' = 'low',
     // Groq gets only the recent clips: its token limits are per minute.
     content: string = fullUser
-  ) =>
-    // Groq goes direct first, through this site's server if that is slow
-    groqFetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        ...(groq.json ? { response_format: { type: 'json_object' } } : {}),
-        max_tokens:
-          // Room for a joined question ("YES: ...") and the reasoning
-          outputTokens +
-          (isReasoningModel(model) ? (effort === 'medium' ? 1500 : 300) : 0),
-        ...(isReasoningModel(model)
-          ? { reasoning_effort: effort, ...extra }
+  ) => {
+    const capability = `${baseUrl}|${model}`
+    const body: Record<string, unknown> = {
+      model,
+      temperature: 0,
+      ...(groq.jsonSchema && !schemaUnavailable.has(capability)
+        ? {
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'speaker_turn',
+                strict: true,
+                schema: groq.jsonSchema,
+              },
+            },
+          }
+        : groq.json
+          ? { response_format: { type: 'json_object' } }
           : {}),
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content },
-        ],
-      }),
-    })
+      max_tokens:
+        outputTokens +
+        (isReasoningModel(model) ? (effort === 'medium' ? 1500 : 300) : 0),
+      ...(isReasoningModel(model)
+        ? { reasoning_effort: effort, ...extra }
+        : {}),
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content },
+      ],
+    }
+    const send = () =>
+      groqFetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      })
+    const res = await send()
+    if (
+      groq.jsonSchema &&
+      !schemaUnavailable.has(capability) &&
+      res.status === 400
+    ) {
+      const error = await res
+        .clone()
+        .text()
+        .catch(() => '')
+      if (
+        /(json_schema|response_format)/i.test(error) &&
+        /(unsupported|not support|does not support)/i.test(error)
+      ) {
+        schemaUnavailable.add(capability)
+        body.response_format = { type: 'json_object' }
+        return send()
+      }
+    }
+    return res
+  }
   const groqBase =
     viaGroqProxy(groq.baseUrl || 'https://api.groq.com/openai/v1') ??
     'https://api.groq.com/openai/v1'
@@ -567,7 +606,7 @@ export async function requestSpeakerJudge(
       user
     )
   /** A Groq or Cerebras response, or Claude's reply text. */
-  type Judged = { res: Response; model: string; text?: string }
+  type Judged = { res: Response; model: string; text?: string; finishReason?: string }
   const groqJudge = async (): Promise<Judged> => {
     // Groq 120b skips 20b; a model Groq stopped serving stays skipped.
     if (groq.judge === 'groq-120b') {
@@ -748,12 +787,13 @@ export async function requestSpeakerJudge(
       }
       const data = (await res.json()) as {
         content?: { type: string; text?: string }[]
+        stop_reason?: string
       }
       const text = (data.content ?? [])
         .filter((b) => b.type === 'text')
         .map((b) => b.text ?? '')
         .join('')
-      return { res, model: `anthropic/${claudeModel}`, text }
+      return { res, model: `anthropic/${claudeModel}`, text, finishReason: data.stop_reason }
     } catch {
       return {
         why: claudeOwn.signal.aborted
@@ -824,7 +864,7 @@ export async function requestSpeakerJudge(
     return winner
   }
   try {
-    const { res, model, note, text } = await judgeOnce()
+    const { res, model, note, text, finishReason: providerFinish } = await judgeOnce()
     if (!res.ok) {
       throw new RelevanceCheckError(
         res.status === 429
@@ -832,15 +872,11 @@ export async function requestSpeakerJudge(
           : `Groq check failed (${res.status}); questions are not being sent`
       )
     }
-    const reply =
-      text ??
-      (
-        (await res.json()) as {
-          choices?: { message?: { content?: string } }[]
-        }
-      ).choices?.[0]?.message?.content ??
-      ''
-    return { reply, model, note, ms: Date.now() - started }
+    const data = text === undefined ? await res.json() as {
+      choices?: { message?: { content?: string }; finish_reason?: string }[]
+    } : undefined
+    const reply = text ?? data?.choices?.[0]?.message?.content ?? ''
+    return { reply, model, note, finishReason: providerFinish ?? data?.choices?.[0]?.finish_reason, ms: Date.now() - started }
   } catch (err) {
     if (err instanceof RelevanceCheckError) throw err
     throw new RelevanceCheckError(

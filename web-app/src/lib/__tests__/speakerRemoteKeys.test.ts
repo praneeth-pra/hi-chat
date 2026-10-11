@@ -42,6 +42,48 @@ describe('speaker remote keys', () => {
     press('F18')
     expect(useSpeakerTranscription.getState().coding).toBe(false)
   })
+  it('Shift + F15 sends only the newest recommendation even when a typed draft can be sent', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().suggest('Older question')
+    useSpeakerTranscription.getState().suggest('Latest question')
+    const button = document.createElement('button')
+    button.setAttribute('data-test-id', 'send-message-button')
+    const click = vi.fn()
+    button.addEventListener('click', click)
+    document.body.appendChild(button)
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
+    )
+    expect(click).not.toHaveBeenCalled()
+    expect(useSpeakerTranscription.getState().queue).toEqual([
+      'Latest question',
+    ])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'Older question',
+    ])
+    stop()
+    button.remove()
+  })
+  it('Shift + F18 discards one recommendation without toggling coding/listening or repeating', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().suggest('Older question')
+    useSpeakerTranscription.getState().suggest('Latest question')
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F18', shiftKey: true })
+    )
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F18', shiftKey: true, repeat: true })
+    )
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'Older question',
+    ])
+    expect(useSpeakerTranscription.getState().coding).toBe(false)
+    expect(useSpeakerTranscription.getState().enabled).toBe(true)
+    expect(useSpeakerTranscription.getState().queue).toEqual([])
+    stop()
+  })
   it('F15 sends the newest suggestion chip', () => {
     useSpeakerTranscription.setState({ queue: [], suggestions: [] })
     const stop = listenForSpeakerKeys()

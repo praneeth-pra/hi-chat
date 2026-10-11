@@ -52,38 +52,70 @@ type Model = {
  */
 export function createTurnListener(
   load: () => Promise<Model> = loadSmartTurn,
-  timeoutMs = SMART_TURN_TIMEOUT_MS
+  timeoutMs = SMART_TURN_TIMEOUT_MS,
+  options: {
+    loadTimeoutMs?: number
+    onState?: (state: string, reason?: string) => void
+  } = {}
 ) {
   let model: Model | null = null
   let failed = false
-  const ready = load().then(
-    (m) => {
-      model = m
-    },
+  let disposed = false
+  const unavailable = (reason: string) => {
+    failed = true
+    options.onState?.('unavailable', reason.slice(0, 200))
+    console.warn(`[speaker] Smart Turn unavailable: ${reason}`)
+  }
+  options.onState?.('loading')
+  let loadingTimer: ReturnType<typeof setTimeout>
+  const cutoff = new Promise<null>((resolve) => {
+    loadingTimer = setTimeout(() => {
+      if (!disposed)
+        unavailable('Model loading exceeded the 30-second readiness budget')
+      resolve(null)
+    }, options.loadTimeoutMs ?? 30000)
+  })
+  const loaded = load().then(
+    (m) => m,
     (err: Error) => {
-      failed = true
-      console.warn(`[speaker] Smart Turn unavailable: ${err.message}`)
+      if (!disposed) unavailable(err.message)
+      return null
     }
   )
+  const ready = Promise.race([loaded, cutoff]).then((m) => {
+    clearTimeout(loadingTimer)
+    if (!m || disposed || failed) return
+    model = m
+    options.onState?.('on')
+  })
   return {
     ready,
-    /** 'on', 'loading' or 'unavailable', for the log. */
-    state: () => (model ? 'on' : failed ? 'unavailable' : 'loading'),
-    /** Every block of loopback audio, at 16 kHz. */
-    push(samples: Float32Array) {
-      model?.push(samples)
+    state: () => (failed ? 'unavailable' : model ? 'on' : 'loading'),
+    dispose() {
+      disposed = true
+      clearTimeout(loadingTimer)
     },
-    /** How finished the turn sounds right now, or null if unknown in time. */
+    push(samples: Float32Array) {
+      if (!failed && !disposed) model?.push(samples)
+    },
     async check(): Promise<TurnCheck | null> {
-      if (!model) return null
-      const late = new Promise<null>((r) =>
-        setTimeout(() => r(null), timeoutMs)
-      )
+      if (!model || failed || disposed) return null
+      let timer: ReturnType<typeof setTimeout>
+      const late = new Promise<null>((r) => {
+        timer = setTimeout(() => r(null), timeoutMs)
+      })
       const result = model.predict().then(
         (p) => ({ probability: p.probability, ms: p.duration }),
-        () => null
+        () => {
+          if (!disposed) unavailable('Prediction failed')
+          return null
+        }
       )
-      return Promise.race([result, late])
+      try {
+        return await Promise.race([result, late])
+      } finally {
+        clearTimeout(timer!)
+      }
     },
   }
 }
@@ -98,6 +130,7 @@ async function loadSmartTurn(): Promise<Model> {
   ])
   // The runtime's WebAssembly files must match the installed version
   web.setSmartTurnOptions({
+    executionProvider: 'wasm',
     wasmPath: 'https://unpkg.com/onnxruntime-web@1.23.2/dist/',
   })
   const model = new SmartTurn()

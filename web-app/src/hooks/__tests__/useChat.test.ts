@@ -778,6 +778,16 @@ describe('useChat', () => {
       ],
       metadata: { speakerTurnId: 'dns-turn' },
     }
+    it('reports the first actual speaker answer content, without changing normal delivery', async () => {
+      mockGetMessages.mockReturnValue([question, answer])
+      const onAnswerStart = vi.fn()
+      const { result } = renderHook(() => useChat())
+      await act(async () => {
+        await result.current(request().turn.text, true, undefined, undefined, undefined, undefined, { ...request(), onAnswerStart })
+      })
+      expect(onAnswerStart).toHaveBeenCalledTimes(1)
+      expect(mockUpdateMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
+    })
     it('updates the existing question and answer without another user prompt', async () => {
       mockGetMessages.mockReturnValue([question, answer])
       const { result } = renderHook(() => useChat())

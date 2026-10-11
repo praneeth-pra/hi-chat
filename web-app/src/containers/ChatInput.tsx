@@ -1,5 +1,7 @@
 'use client'
 
+import { reportClip } from '@/lib/speakerCaptureSession'
+
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
 import { cn } from '@/lib/utils'
@@ -371,10 +373,21 @@ const ChatInput = ({
     }
     const draft = usePrompt.getState().prompt
     speakerSendingRef.current = true
+    let answerStarted = false
+    reportClip(
+      `stage=send-start turn=${turn.id} version=${turn.version} at=${Date.now()}`
+    )
     Promise.resolve(
       sendMessage(turn.text, true, undefined, projectId, undefined, undefined, {
         turn,
         isCurrent,
+        onAnswerStart: () => {
+          if (answerStarted) return
+          answerStarted = true
+          reportClip(
+            `stage=answer-start turn=${turn.id} version=${turn.version} origin=${turn.origin ?? 'unknown'} at=${Date.now()}`
+          )
+        },
         onThread: (threadId) => {
           boundThread = threadId
           turn.threadId = threadId

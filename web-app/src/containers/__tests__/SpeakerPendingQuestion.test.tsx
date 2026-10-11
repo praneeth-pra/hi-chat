@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   setQuestionControls,
@@ -93,5 +93,35 @@ describe('pending question controls', () => {
     expect(
       screen.getByText('No judgement provider configured')
     ).toBeInTheDocument()
+  })
+  it('shows a readable latest recommendation with distinct actions and collapses earlier ones', () => {
+    useSpeakerTranscription
+      .getState()
+      .suggest('Older question', 'Earlier failure')
+    useSpeakerTranscription
+      .getState()
+      .suggest('What is your strong zone?', 'Provider response needs review')
+    render(<SpeakerSuggestions />)
+    expect(
+      screen.getByRole('region', { name: 'Speaker recommendations' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('What is your strong zone?')).toBeInTheDocument()
+    expect(
+      screen.getByText('Provider response needs review')
+    ).toBeInTheDocument()
+    const latest = within(
+      screen.getByRole('article', { name: 'Latest speaker recommendation' })
+    )
+    expect(
+      latest.getByRole('button', { name: /Send as new/ })
+    ).toBeInTheDocument()
+    expect(screen.getByText('fn + →')).toBeInTheDocument()
+    expect(screen.getByText('1 earlier recommendation')).toBeInTheDocument()
+    fireEvent.click(
+      latest.getByRole('button', { name: 'Discard recommendation' })
+    )
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'Older question',
+    ])
   })
 })

@@ -30,6 +30,19 @@ const groqReply = (content: string) =>
   }))
 
 describe('speakerFilter', () => {
+  it('falls back from an explicitly unsupported schema and records finish reason', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: 'response_format json_schema is not supported' }), { status: 400 }))
+      .mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"skip"}' }, finish_reason: 'stop' }] })))
+    vi.stubGlobal('fetch', fetchMock)
+    const config = { apiKey: 'test', baseUrl: 'https://test-schema.invalid', json: true, jsonSchema: { type: 'object' } }
+    const result = await requestSpeakerJudge('Return JSON', 'clip', 'clip', config)
+    expect(result.finishReason).toBe('stop')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).response_format.type).toBe('json_schema')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).response_format.type).toBe('json_object')
+    await requestSpeakerJudge('Return JSON', 'clip', 'clip', config)
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).response_format.type).toBe('json_object')
+  })
+
   it('requests JSON only for structured turns without changing legacy classifiers', async () => {
     const fetchMock = vi.fn(async (_url: string, _options: { body: string }) => ({
       ok: true,
