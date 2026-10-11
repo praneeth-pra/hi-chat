@@ -40,6 +40,7 @@ local MAX_SECONDS = 8    -- safety stop if a key release is missed
 -- Jan as a Safari web app ("Add to Dock") is its own app named "Jan";
 -- otherwise it is a Safari window.
 local APPS = { "Jan", "Safari" }
+local typingTarget = nil
 
 -- The Jan/Safari window that is not on the laptop's built-in screen
 local function chatWindow()
@@ -125,7 +126,7 @@ bind({ "shift" }, "pageup", 1, FAST_SPEED, FAST_TAP)
 -- Shift + F16 / F17 (code block above / below) and so on, keys a
 -- Mac laptop doesn't have.
 local function toggle(key, mods)
-  local win = chatWindow()
+  local win = typingTarget and typingTarget.win or chatWindow()
   if not win then
     hs.alert.show("Jan window not found")
     return
@@ -183,7 +184,6 @@ dictateTap:start()
 
 -- Background typing: post to the pinned app, never activate, focus or click
 -- a window. Safari must have Hi-chat selected in its last active window.
-local typingTarget = nil
 local heldTypingKeys = {}
 local optionDownAt = nil
 local LEFT_OPTION = hs.keycodes.map.alt

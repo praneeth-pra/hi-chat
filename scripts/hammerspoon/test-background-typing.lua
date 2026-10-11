@@ -5,7 +5,7 @@ if not source then
   source = file:read("*a")
   file:close()
 end
-local now, callback, posted, alerts = 1, nil, {}, {}
+local now, callback, posted, alerts, sentKeys = 1, nil, {}, {}, {}
 local keymap = { alt = 58, escape = 53, tab = 48, a = 0, c = 8, v = 9,
   x = 7, z = 6, pageup = 116, pagedown = 121, home = 115, ["end"] = 119,
   delete = 51, forwarddelete = 117, left = 123, right = 124, up = 126, down = 125 }
@@ -22,6 +22,7 @@ win.id = function() return 10 end
 win.title = function() return title end
 win.isStandard = function() return true end
 win.isVisible = function() return available end
+win.application = function() return app end
 win.focus = function() error("Must not focus the window") end
 local function flags(values)
   local result = values or {}
@@ -58,7 +59,11 @@ hs = {
   alert = { show = function(message) alerts[#alerts + 1] = message end },
   timer = { secondsSinceEpoch = function() return now end,
     doAfter = function(_, fn) fn() end },
-  eventtap = { event = { types = types, properties = { eventSourceUserData = 1 },
+  eventtap = { keyStroke = function(_, key, _, target)
+      assert(target == app, "Send must use the pinned typing app")
+      sentKeys[#sentKeys + 1] = key
+    end,
+    event = { types = types, properties = { eventSourceUserData = 1 },
     newKeyEvent = function(_, key, down)
       return event(down and types.keyDown or types.keyUp, keymap[key], {})
     end } },
@@ -67,20 +72,25 @@ local start = assert(source:find('-- Background typing:', 1, true))
 local finish = assert(source:find('-- fn + trackpad:', start, true))
 local jumpStart = assert(source:find('-- Global for the same reason as scrollTap\njumpTap', 1, true))
 local jumpEnd = assert(source:find('-- macOS switches a listener off', jumpStart, true))
+local toggleStart = assert(source:find('local function toggle(key, mods)', 1, true))
+local toggleEnd = assert(source:find('-- fn + Up / Down: the code block', toggleStart, true))
 local block = 'local APPS,TAP_SECONDS,types,RETURN,PAD_ENTER = ...\n'
+  .. 'local typingTarget = nil\n'
+  .. 'local function chatWindow() error("Must use the pinned typing window") end\n'
+  .. source:sub(toggleStart, toggleEnd - 1)
   .. source:sub(start, finish - 1)
   .. '\nlocal Z,X=6,7\nlocal props=hs.eventtap.event.properties\n'
   .. 'local function jumpToJan() error("Must not jump while typing") end\n'
   .. 'local function jumpBack() error("Must not jump while typing") end\n'
   .. source:sub(jumpStart, jumpEnd - 1)
-  .. '\nreturn function() return typingTarget end, toggleTyping, typingTap, jumpTap\n'
+  .. '\nreturn function() return typingTarget end, toggleTyping, typingTap, jumpTap, toggle\n'
 -- Keep both event tap callbacks so Z/X interception can be checked separately.
 local callbacks = {}
 hs.eventtap.new = function(_, fn)
   callbacks[#callbacks + 1] = fn
   return { start = function() end }
 end
-local state, toggle = assert(load(block))({ "Jan", "Safari" }, 0.35, types, 36, 76)
+local state, toggle, _, _, send = assert(load(block))({ "Jan", "Safari" }, 0.35, types, 36, 76)
 callback = callbacks[1]
 local jump = callbacks[2]
 local function tapOption()
@@ -93,6 +103,8 @@ tapOption()
 assert(state() and #posted == 4)
 assert(posted[1].key == keymap.f17 and posted[3].key == keymap.f18)
 assert(posted[1].marker ~= 0)
+send("f15")
+assert(sentKeys[1] == "f15")
 posted = {}
 local a = event(types.keyDown, 0, {}, "a")
 assert(callback(a) == true and #posted == 1)
