@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { stopDictation, toggleDictation } from '@/lib/dictation'
+import { useBackgroundTyping } from '@/hooks/useBackgroundTyping'
 
 /**
  * Keys a helper like Hammerspoon can send to this tab while another app is
@@ -9,6 +10,9 @@ import { stopDictation, toggleDictation } from '@/lib/dictation'
 export const FOCUS_CHAT_KEY = 'F20'
 /** Like F20, but the dictated text stays in the box for you to send. */
 export const FOCUS_CHAT_DRAFT_KEY = 'F17'
+/** Explicit status signals, not toggles: neither records nor sends anything. */
+export const BACKGROUND_TYPING_ON_KEY = 'F18'
+export const BACKGROUND_TYPING_OFF_KEY = 'F19'
 /**
  * F14 starts dictating your own voice and, pressed again, stops and
  * sends the text; F13 only stops. Hammerspoon sends F14 on a tap of Left
@@ -146,6 +150,14 @@ function keyName(e: KeyboardEvent): string {
 
 /** Dictation, explicit send and navigation shortcuts. */
 export function handleRemoteKey(key: string): boolean {
+  if (key === BACKGROUND_TYPING_ON_KEY) {
+    useBackgroundTyping.getState().heartbeat()
+    return true
+  }
+  if (key === BACKGROUND_TYPING_OFF_KEY) {
+    useBackgroundTyping.getState().disable()
+    return true
+  }
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === CODE_UP_KEY) return stepCode(-1)

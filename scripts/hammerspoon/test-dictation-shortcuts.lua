@@ -18,7 +18,7 @@ hs = {
 hs.eventtap.new = function(_, fn) callback = fn; return { start = function() end } end
 local function toggle(key) sent[#sent + 1] = key end
 local start = assert(source:find('-- Left Control on its own', 1, true))
-local finish = assert(source:find('-- fn + trackpad:', start, true))
+local finish = assert(source:find('-- Background typing:', start, true))
 assert(load('local toggle = ...\n' .. source:sub(start, finish - 1)))(toggle)
 local function event(kind, key, control)
   return { getType = function() return kind end, getKeyCode = function() return key end,
@@ -32,7 +32,7 @@ callback(event(1, 59, true))
 callback(event(2, 42, true))
 callback(event(1, 59, false))
 assert(#sent == 1)
--- Left Option is free and no longer sends F19.
+-- The dictation callback does not respond to Left Option.
 callback(event(1, 58, false))
 assert(#sent == 1)
 print('Dictation shortcuts passed; obsolete Speaker bindings are absent.')

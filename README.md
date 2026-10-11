@@ -57,10 +57,24 @@ The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy
 and reload Hammerspoon; a Railway deployment cannot update a script on your Mac.
 The script retains scrolling, fn + Up/Down code navigation, Left Control dictation,
 fn + Return sending, Z/X and the native-sized dummy cursor. The retired Speaker
-Option toggle and fn + Left/Right recommendation shortcuts are removed. Option,
-ordinary arrows and fn + Left/Right pass through to the app in front.
+Option toggle and fn + Left/Right recommendation shortcuts are removed.
+Tap **Left Option** to toggle background typing into Jan; tap it again or press
+Escape to stop. Jan's keyboard symbol lights up while enabled. Your main app
+stays active; ordinary typing goes to Jan, including Z/X. Enter adds a newline;
+fn + Return sends. Option used in a chord does not toggle the mode. The normal
+Z/X navigation resumes when typing is off. Fn navigation remains available.
 
-The coding-mode toolbar button and F18 toggle are also removed. Questions asking
+Before first use, select Hi-chat in Safari (or the Jan web app), then return to
+your main app and tap Option. Safari must retain Hi-chat in its last selected
+window/tab; the script stops routing if that changes. It posts to the application
+without activating a window. Background event handling needs testing on your Mac;
+Linux checks cannot verify Safari receiving input or macOS window appearance.
+Only typing/editing keys are routed; Tab and non-editing Command/Control chords
+exit the mode and go to the main app. Side arrows edit Jan's text while enabled
+and pass through normally when disabled. The icon resets if script heartbeats stop.
+
+The coding-mode toolbar button and toggle are also removed. F18/F19 now carry
+explicit typing-status signals, without recording or sending. Questions asking
 for code still receive the existing short-code instruction automatically.
 There is no Speaker capture, review UI, question judge, background microphone
 turn detector or Smart Turn model download.

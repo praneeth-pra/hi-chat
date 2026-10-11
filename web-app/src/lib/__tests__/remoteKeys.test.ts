@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { useBackgroundTyping } from '@/hooks/useBackgroundTyping'
 import {
   stepCode,
   handleRemoteKey,
@@ -18,11 +19,14 @@ describe('remote keys without Speaker', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     cancelDictation()
+    useBackgroundTyping.getState().disable()
   })
-  it('ignores retired coding and speaker keys', () => {
+  afterEach(() => {
+    useBackgroundTyping.getState().disable()
+    vi.useRealTimers()
+  })
+  it('ignores retired recommendation keys and ordinary Option/arrows', () => {
     for (const key of [
-      'F18',
-      'F19',
       'F16',
       'Shift+F15',
       'Shift+F18',
@@ -35,7 +39,7 @@ describe('remote keys without Speaker', () => {
       expect(handleRemoteKey(key)).toBe(false)
     expect(toggleDictation).not.toHaveBeenCalled()
   })
-  it('leaves Option, arrows and retired coding/speaker keys unconsumed', () => {
+  it('leaves Option, arrows and retired recommendation keys unconsumed', () => {
     const stop = listenForRemoteKeys()
     for (const key of [
       'ArrowLeft',
@@ -43,21 +47,9 @@ describe('remote keys without Speaker', () => {
       'Home',
       'End',
       'Alt',
-      'F18',
-      'F19',
       'F16',
     ]) {
       const event = new KeyboardEvent('keydown', { key, cancelable: true })
-      window.dispatchEvent(event)
-      expect(event.defaultPrevented).toBe(false)
-    }
-    // Safari can report the retired F18/F19 keys only by key code.
-    for (const keyCode of [129, 130]) {
-      const event = new KeyboardEvent('keydown', {
-        key: 'Unidentified',
-        keyCode,
-        cancelable: true,
-      })
       window.dispatchEvent(event)
       expect(event.defaultPrevented).toBe(false)
     }
@@ -71,6 +63,38 @@ describe('remote keys without Speaker', () => {
       expect(event.defaultPrevented).toBe(false)
     }
     stop()
+  })
+  it('F18/F19 set only the typing indicator, including Safari key codes', () => {
+    const stop = listenForRemoteKeys()
+    for (const key of ['F18', 'F18']) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key }))
+      expect(useBackgroundTyping.getState().enabled).toBe(true)
+    }
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F19' }))
+    expect(useBackgroundTyping.getState().enabled).toBe(false)
+    for (const keyCode of [129, 130]) {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Unidentified', keyCode })
+      )
+      expect(useBackgroundTyping.getState().enabled).toBe(keyCode === 129)
+    }
+    expect(toggleDictation).not.toHaveBeenCalled()
+    expect(stopDictation).not.toHaveBeenCalled()
+    stop()
+  })
+  it('expires stale typing status and renews it without toggling', () => {
+    vi.useFakeTimers()
+    handleRemoteKey('F18')
+    vi.advanceTimersByTime(4000)
+    handleRemoteKey('F18')
+    vi.advanceTimersByTime(4000)
+    expect(useBackgroundTyping.getState().enabled).toBe(true)
+    vi.advanceTimersByTime(2000)
+    expect(useBackgroundTyping.getState().enabled).toBe(false)
+    handleRemoteKey('F18')
+    handleRemoteKey('F19')
+    vi.advanceTimersByTime(6000)
+    expect(useBackgroundTyping.getState().enabled).toBe(false)
   })
   it('F15 sends typed text and never submits when the button is disabled', () => {
     const button = document.createElement('button')

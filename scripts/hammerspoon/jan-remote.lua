@@ -16,11 +16,14 @@
 --   tap Left Control        dictate in Jan: starts recording your mic; tap
 --                           again to stop, transcribe and send it. Control held with
 --                           another key or a click works as usual.
+--   tap Left Option         toggle background typing into Jan's prompt box;
+--                           the main app stays active. Escape also turns it off.
+--                           Enter adds a line; fn + Return sends the prompt.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
 -- arrows and fn + Left / Right remain available to the app in front.
--- Option is not bound; its normal Mac behavior remains available.
+-- Option held with another key retains its normal modifier behavior.
 --
 -- Settings you may want to change:
 local SPEED = 700        -- pixels per second while held
@@ -177,6 +180,135 @@ dictateTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMous
   return false
 end)
 dictateTap:start()
+
+-- Background typing: post to the pinned app, never activate, focus or click
+-- a window. Safari must have Hi-chat selected in its last active window.
+local typingTarget = nil
+local heldTypingKeys = {}
+local optionDownAt = nil
+local LEFT_OPTION = hs.keycodes.map.alt
+local TYPING_MARK = 0x4A545950
+local typingProps = hs.eventtap.event.properties
+local typingKeys = hs.keycodes.map
+local editCommands = { [typingKeys.a] = true, [typingKeys.c] = true,
+  [typingKeys.v] = true, [typingKeys.x] = true, [typingKeys.z] = true }
+local passKeys = { [typingKeys.pageup] = true, [typingKeys.pagedown] = true,
+  [typingKeys.home] = true, [typingKeys["end"]] = true }
+for i = 1, 20 do
+  local key = typingKeys["f" .. i]
+  if key then passKeys[key] = true end
+end
+
+local function typingWindow()
+  for _, name in ipairs(APPS) do
+    local app = hs.application.get(name)
+    local win = app and (app:focusedWindow() or app:mainWindow())
+    local title = win and (win:title() or ""):lower() or ""
+    if win and win:isStandard() and win:isVisible() and not title:find("sign in", 1, true)
+      and (name == "Jan" or title:find("hi-chat", 1, true)) then
+      return { app = app, win = win, id = win:id() }
+    end
+  end
+end
+
+local function typingValid(target)
+  local ok, valid = pcall(function()
+    local win = target.app:focusedWindow() or target.app:mainWindow()
+    local title = win and (win:title() or ""):lower() or ""
+    return win and win:id() == target.id and win:isVisible()
+      and not title:find("sign in", 1, true)
+      and (target.app:name() == "Jan" or title:find("hi-chat", 1, true))
+  end)
+  return ok and valid
+end
+
+local function typingSignal(target, key)
+  for _, down in ipairs({ true, false }) do
+    local event = hs.eventtap.event.newKeyEvent({}, key, down)
+    event:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+    event:post(target.app)
+  end
+end
+
+local function stopTyping(message)
+  local target = typingTarget
+  typingTarget = nil
+  if target then pcall(typingSignal, target, "f19") end
+  if message then hs.alert.show(message) end
+end
+
+local function toggleTyping()
+  if typingTarget then stopTyping("Jan typing OFF") return end
+  local target = typingWindow()
+  if not target then
+    hs.alert.show("Select Hi-chat in Safari once, return to your main app, then tap Option")
+    return
+  end
+  local ok = pcall(function()
+    typingSignal(target, "f17") -- focus only the page's draft field; no auto-send
+    typingSignal(target, "f18") -- explicit on signal for the keyboard symbol
+  end)
+  if not ok then hs.alert.show("Could not enable Jan typing") return end
+  typingTarget = target
+  hs.alert.show("Jan typing ON — Option or Escape to stop")
+end
+
+-- Global so macOS cannot garbage-collect the tap. Copied events are tagged
+-- before posting, so neither this tap nor the Z/X navigation sees them again.
+typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
+  types.leftMouseDown, types.rightMouseDown, types.scrollWheel }, function(e)
+  if e:getProperty(typingProps.eventSourceUserData) == TYPING_MARK then return false end
+  local kind, key, flags = e:getType(), e:getKeyCode(), e:getFlags()
+  if kind == types.flagsChanged then
+    if key == LEFT_OPTION and flags:containExactly({ "alt" }) then
+      optionDownAt = hs.timer.secondsSinceEpoch()
+    elseif key == LEFT_OPTION and not flags.alt and optionDownAt then
+      local tapped = hs.timer.secondsSinceEpoch() - optionDownAt < TAP_SECONDS
+      optionDownAt = nil
+      if tapped then hs.timer.doAfter(0, toggleTyping) end
+    else optionDownAt = nil end
+    return false
+  end
+  optionDownAt = nil -- a chord, click or scroll is not an Option tap
+  if kind ~= types.keyDown and kind ~= types.keyUp then return false end
+  local held = heldTypingKeys[key]
+  if kind == types.keyUp then
+    if not held then return false end
+    heldTypingKeys[key] = nil
+    local copy = e:copy()
+    copy:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+    pcall(function() copy:post(held.app) end)
+    return true
+  end
+  if not typingTarget then return held ~= nil end -- swallow repeats until release
+  if key == typingKeys.escape then stopTyping("Jan typing OFF") return true end
+  if not typingValid(typingTarget) then
+    stopTyping("Jan typing stopped — select Hi-chat again")
+    return true -- do not leak this character into the main app
+  end
+  if flags.fn or passKeys[key] then return false end -- keep existing fn helpers
+  if key == typingKeys.tab or flags.ctrl or (flags.cmd and not editCommands[key]) then
+    stopTyping("Jan typing OFF")
+    return false -- system/app commands still reach the main window
+  end
+  local chars = e:getCharacters()
+  local editing = key == typingKeys.delete or key == typingKeys.forwarddelete
+    or key == typingKeys.left or key == typingKeys.right
+    or key == typingKeys.up or key == typingKeys.down
+  if not editing and (not chars or chars == "") then return false end
+  local copy = e:copy()
+  if key == RETURN or key == PAD_ENTER then
+    flags.shift = true
+    copy:setFlags(flags) -- a normal Enter is a newline, not a send
+  end
+  copy:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+  local target = typingTarget
+  local ok = pcall(function() copy:post(target.app) end)
+  if ok then heldTypingKeys[key] = target
+  else stopTyping("Jan typing stopped — could not deliver text") end
+  return true
+end)
+typingTap:start()
 
 -- fn + trackpad: while fn is held, scroll gestures are moved to the Jan
 -- window. The glide after you lift your fingers follows the same gesture,
@@ -409,6 +541,8 @@ end
 
 -- Global for the same reason as scrollTap
 jumpTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
+  if typingTarget or heldTypingKeys[e:getKeyCode()]
+    or e:getProperty(props.eventSourceUserData) == TYPING_MARK then return false end
   local flags = e:getFlags()
   if flags.fn or flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
   -- Holding the key down repeats it; only the first press counts
@@ -433,11 +567,15 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, enterTap, dictateTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, enterTap, dictateTap, typingTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()
     end
+  end
+  if typingTarget then
+    if not typingValid(typingTarget) then stopTyping("Jan typing stopped — select Hi-chat again")
+    elseif not pcall(typingSignal, typingTarget, "f18") then stopTyping("Jan typing stopped") end
   end
 end)
 

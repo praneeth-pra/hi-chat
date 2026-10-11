@@ -46,6 +46,7 @@ import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
 import { DictationBanner, DictationButton } from './DictationIndicator'
+import { BackgroundTypingIndicator } from './BackgroundTypingIndicator'
 import {
   ContentType,
   ExtensionTypeEnum,
@@ -1433,6 +1434,7 @@ const ChatInput = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              <BackgroundTypingIndicator />
               <DictationButton />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&
