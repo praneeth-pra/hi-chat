@@ -367,6 +367,7 @@ export function startSpeakerCapture({
     more: { name: string; stream: SideStream }[],
     turnCheck: Promise<TurnCheck | null> = Promise.resolve(null)
   ) => {
+    const captureGeneration = generation
     // Ignore clips too short to hold a word.
     if (samples.length < TARGET_SAMPLE_RATE * 0.4) {
       live?.abort()
@@ -466,7 +467,11 @@ export function startSpeakerCapture({
     idleStatus()
     // Sequential, so text lands in the order it was spoken.
     queue = queue
-      .then(() => result ?? upload())
+      .then(() =>
+        !stopped && captureGeneration === generation
+          ? (result ?? upload())
+          : { texts: [], timings: [] }
+      )
       .then(async ({ texts, timings }) => {
         // Answered engines line up with the transcripts, in order
         const words = timings
@@ -478,16 +483,17 @@ export function startSpeakerCapture({
         ).filter((t) => t.trim())
         const turn = await turnCheck
         const text =
-          !stopped && heard.length
+          !stopped && captureGeneration === generation && heard.length
             ? await accept(heard, timings, words, turn)
             : null
-        if (!stopped && text) onText(text)
-        pending--
-        if (!stopped) idleStatus()
+        if (!stopped && captureGeneration === generation && text) onText(text)
+        if (captureGeneration === generation) pending--
+        if (!stopped && captureGeneration === generation) idleStatus()
       })
       .catch((err: Error) => {
-        pending--
-        if (!stopped) onStatus('error', err.message)
+        if (captureGeneration === generation) pending--
+        if (!stopped && captureGeneration === generation)
+          onStatus('error', err.message)
       })
   }
 
@@ -717,6 +723,8 @@ export function startSpeakerCapture({
     ctx?.close().catch(() => {})
     ctx = null
     speaking = false
+    queue = Promise.resolve()
+    pending = 0
   }
 
   const restart = () => {
@@ -736,6 +744,7 @@ export function startSpeakerCapture({
   open().catch((err: Error) => !stopped && onStatus('error', err.message))
 
   return {
+    restart,
     stop() {
       stopped = true
       media?.removeEventListener?.('devicechange', onDeviceChange)

@@ -43,10 +43,10 @@ import { McpExtensionToolLoader } from './McpExtensionToolLoader'
 import {
   SpeakerListenIndicator,
   SpeakerSuggestions,
+  SpeakerPendingQuestion,
 } from './SpeakerListenIndicator'
 import { DictationBanner, DictationButton } from './DictationIndicator'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
-import { replaceableQuestion } from '@/lib/speakerRevision'
 import {
   ContentType,
   ExtensionTypeEnum,
@@ -291,6 +291,8 @@ const ChatInput = ({
     }
 
     setMessage('')
+    // A typed question is an explicit boundary for automatic speaker turns.
+    useSpeakerTranscription.getState().resetTurns()
 
     sendMessage(
       prompt,
@@ -301,65 +303,88 @@ const ChatInput = ({
     )
   }
 
-  // Questions heard from the speaker are sent automatically, one at a time,
-  // once no reply is streaming. A typed draft is kept in the box.
-  const speakerQueueLength = useSpeakerTranscription((s) => s.queue.length)
-  const speakerRevision = useSpeakerTranscription((s) => s.revision)
+  const speakerEnabled = useSpeakerTranscription((s) => s.enabled)
+  const speakerTurnQueue = useSpeakerTranscription((s) => s.turnQueue)
+  const legacyQueueLength = useSpeakerTranscription((s) => s.queue.length)
+  const speakerVersions = useSpeakerTranscription((s) => s.turnVersions)
+  const speakerEpoch = useSpeakerTranscription((s) => s.deliveryEpoch)
   const speakerSendingRef = useRef(false)
-  /** A fuller wording of the last speaker question, to send in its place. */
-  const [speakerReplacing, setSpeakerReplacing] = useState<string | null>(null)
   const [speakerSendDone, setSpeakerSendDone] = useState(0)
 
-  // The interviewer added to the question just sent, or asked it again: stop
-  // its answer, and once the stream has ended send the fuller question in
-  // its place. If the chat has moved on, it is sent as a new question.
+  // A newly settled revision cancels only its own obsolete speaker generation.
   useEffect(() => {
-    if (!speakerRevision) return
-    const speaker = useSpeakerTranscription.getState()
-    const text = speaker.takeRevision()
-    if (!text) return
-    const messages = currentThreadId
-      ? useMessages.getState().getMessages(currentThreadId)
-      : []
-    if (!currentThreadId || !replaceableQuestion(messages, speaker.lastSent)) {
-      speaker.enqueue(text)
-      return
+    const sending = useSpeakerTranscription.getState().sendingTurn
+    if (
+      sending &&
+      (!speakerEnabled ||
+        sending.epoch !== speakerEpoch ||
+        speakerVersions[sending.id] !== sending.version)
+    ) {
+      const threadId = sending.threadId ?? currentThreadId
+      if (threadId) abortControllers[threadId]?.abort()
     }
-    setSpeakerReplacing(text)
-    abortControllers[currentThreadId]?.abort()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speakerRevision])
+  }, [
+    speakerEnabled,
+    speakerEpoch,
+    speakerVersions,
+    currentThreadId,
+    abortControllers,
+  ])
 
   useEffect(() => {
-    if (!speakerQueueLength && !speakerReplacing) return
-    if (streamingContent || ingestingAny) return
-    if (!selectedModel || speakerSendingRef.current) return
-    let text: string | undefined
-    if (speakerReplacing) {
-      // Drop the earlier wording and whatever answer it got
-      const { getMessages, deleteMessage } = useMessages.getState()
-      const ids = currentThreadId
-        ? replaceableQuestion(
-            getMessages(currentThreadId),
-            useSpeakerTranscription.getState().lastSent
-          )
-        : null
-      for (const id of ids ?? []) deleteMessage(currentThreadId!, id)
-      text = speakerReplacing
-    } else {
-      text = useSpeakerTranscription.getState().dequeue()
+    if (
+      !speakerEnabled ||
+      streamingContent ||
+      ingestingAny ||
+      !selectedModel ||
+      speakerSendingRef.current
+    )
+      return
+    const speaker = useSpeakerTranscription.getState()
+    // Explicit remote-key sends still use the common turn delivery path.
+    if (!speaker.turnQueue.length && legacyQueueLength) {
+      const text = speaker.dequeue()
+      if (text)
+        speaker.queueTurn(
+          { id: `manual-${Date.now()}`, version: 1, text, relation: 'new' },
+          currentThreadId
+        )
+      return
     }
-    setSpeakerReplacing(null)
-    if (!text) return
-    useSpeakerTranscription.getState().setLastSent(text)
+    if (!speaker.turnQueue.length) return
+    const turn = speaker.takeTurn()!
+    let boundThread = turn.threadId
+    const isCurrent = () => {
+      const state = useSpeakerTranscription.getState()
+      return (
+        state.enabled &&
+        state.deliveryEpoch === turn.epoch &&
+        state.turnVersions[turn.id] === turn.version &&
+        (boundThread
+          ? useThreads.getState().currentThreadId === boundThread
+          : !useThreads.getState().currentThreadId)
+      )
+    }
+    if (!isCurrent()) {
+      speaker.finishTurn(turn)
+      return
+    }
     const draft = usePrompt.getState().prompt
     speakerSendingRef.current = true
-    Promise.resolve(sendMessage(text, true, undefined, projectId)).finally(
-      () => {
-        speakerSendingRef.current = false
-        setSpeakerSendDone((n) => n + 1)
-      }
-    )
+    Promise.resolve(
+      sendMessage(turn.text, true, undefined, projectId, undefined, undefined, {
+        turn,
+        isCurrent,
+        onThread: (threadId) => {
+          boundThread = threadId
+          turn.threadId = threadId
+        },
+      })
+    ).finally(() => {
+      useSpeakerTranscription.getState().finishTurn(turn)
+      speakerSendingRef.current = false
+      setSpeakerSendDone((n) => n + 1)
+    })
     if (draft) {
       const unsubscribe = usePrompt.subscribe((state) => {
         if (state.prompt === '') {
@@ -369,14 +394,17 @@ const ChatInput = ({
       })
       setTimeout(unsubscribe, 5000)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    speakerQueueLength,
-    speakerReplacing,
+    speakerEnabled,
+    speakerTurnQueue,
+    legacyQueueLength,
     speakerSendDone,
     streamingContent,
     ingestingAny,
     selectedModel,
+    currentThreadId,
+    sendMessage,
+    projectId,
   ])
 
   useEffect(() => {
@@ -1177,6 +1205,7 @@ const ChatInput = ({
             onDrop={hasMmproj ? handleDrop : undefined}
           >
             <DictationBanner />
+            <SpeakerPendingQuestion />
             <SpeakerSuggestions />
             {attachments.length > 0 && (
               <div className="flex flex-col gap-2 p-2 pb-0">

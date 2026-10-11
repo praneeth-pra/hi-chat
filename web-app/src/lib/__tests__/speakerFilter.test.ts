@@ -503,6 +503,20 @@ describe('speakerFilter', () => {
     )
   })
 
+  it('does not let MORE bypass a logistics veto', async () => {
+    vi.stubGlobal(
+      'fetch',
+      groqReply(
+        'MORE: What is DNS? Can you open the shared document now?\nType: logistics'
+      )
+    )
+    expect(
+      await pickRelevant(['Can you open the shared document now?'], {
+        apiKey: 'test',
+      })
+    ).toBeNull()
+  })
+
   it('keeps a NO even when the judge typed it as a send type', async () => {
     vi.stubGlobal('fetch', groqReply('NO\nType: task\nWhy: a screen request'))
     expect(
@@ -573,8 +587,12 @@ describe('speakerFilter', () => {
       Date.now,
       { enabled: () => false, onUnsure: (t) => offered.push(t) }
     )
-    expect(await filter(['Can you write that function for the list now, please?'])).toBeNull()
-    expect(offered).toEqual(['Can you write that function for the list now, please?'])
+    expect(
+      await filter(['Can you write that function for the list now, please?'])
+    ).toBeNull()
+    expect(offered).toEqual([
+      'Can you write that function for the list now, please?',
+    ])
     expect(isUnsure({ unsure: 'x' })).toBe(true)
     // Sent with a tap: a repeat of it is skipped from then on
     filter.markSent('Can you write that function for the list now, please?')

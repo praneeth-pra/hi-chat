@@ -25,7 +25,11 @@ type ThreadState = {
     title?: string,
     assistant?: Assistant,
     projectMetadata?: { id: string; name: string; updated_at: number },
-    isTemporary?: boolean
+    isTemporary?: boolean,
+    activation?: {
+      isCurrent: () => boolean
+      onActivate: (threadId: string) => void
+    }
   ) => Promise<Thread>
   updateCurrentThreadModel: (model: ThreadModel) => void
   getFilteredThreads: (searchTerm: string) => Thread[]
@@ -247,7 +251,14 @@ export const useThreads = create<ThreadState>()((set, get) => ({
   setCurrentThreadId: (threadId) => {
     if (threadId !== get().currentThreadId) set({ currentThreadId: threadId })
   },
-  createThread: async (model, title, assistant, projectMetadata, isTemporary) => {
+  createThread: async (
+    model,
+    title,
+    assistant,
+    projectMetadata,
+    isTemporary,
+    activation
+  ) => {
     const newThread: Thread = {
       id: isTemporary ? TEMPORARY_CHAT_ID : ulid(),
       title: title || (isTemporary ? 'Temporary Chat' : 'New Thread'),
@@ -271,6 +282,9 @@ export const useThreads = create<ThreadState>()((set, get) => ({
       .threads()
       .createThread(newThread)
       .then((createdThread) => {
+        // A cancelled speaker send must not navigate away from the user's new chat.
+        if (activation && !activation.isCurrent()) return createdThread
+        activation?.onActivate(createdThread.id)
         set((state) => {
           // Get all existing threads as an array
           const existingThreads = Object.values(state.threads)

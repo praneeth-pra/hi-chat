@@ -501,60 +501,20 @@ export class RelevanceCheckError extends Error {}
  */
 export type JudgeMode = 'plain' | 'wait' | 'final'
 
-/** Returns the text to send, a clip to hold, or null to drop it. Throws if Groq fails. */
-async function classifyWithGroq(
-  texts: string[],
-  recent: RecentClip[],
+/** Shared provider routing for clip checks and question-turn decisions. */
+export async function requestSpeakerJudge(
+  system: string,
+  user: string,
+  fullUser: string,
   groq: GroqConfig,
-  onCheck?: (info: CheckInfo) => void,
-  mode: JudgeMode = 'plain'
-): Promise<Verdict> {
-  const allowWait = mode === 'wait'
-  const clipTypes = groq.clipTypes ?? getClipTypes()
+  outputTokens = 300,
+  history?: { earlierLines: string[]; earlierHeader: string }
+): Promise<CheckInfo & { reply: string }> {
+  const earlierLines = history?.earlierLines ?? []
+  const earlierHeader = history?.earlierHeader ?? ''
   const started = Date.now()
-  const merge = texts.length > 1
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 5000)
-  // The last few clips with how long ago each was heard; before them, the
-  // rest of the last few minutes with clock times.
-  const last = recent.slice(-RECENT_CLIPS)
-  const earlier = recent
-    .slice(0, -RECENT_CLIPS)
-    .filter((r) => r.ago === undefined || r.ago <= HISTORY_SECONDS)
-  const context = last.length
-    ? `Recent clips, oldest first:\n${last.map((r) => `- ${r.sent ? `[sent${r.ago !== undefined ? ` ${r.ago} s ago` : ''}] ` : ''}${r.text}`).join('\n')}\n\n`
-    : ''
-  const earlierLines = earlier.map(
-    (r) =>
-      `- [${r.at !== undefined ? clockTime(r.at) : 'earlier'}${r.sent ? ', sent' : ''}] ${r.text}\n`
-  )
-  const earlierHeader = earlier.length
-    ? 'Earlier in this interview, oldest first (clock times):\n'
-    : ''
-  const judgeTerms = withCodingTerms(groq.keyterms ?? [])
-  const terms = merge
-    ? `Key terms the speaker may use: ${judgeTerms.join(', ')}\n\n`
-    : ''
-  const clip = merge
-    ? `Clip to judge:\n${texts
-        .slice(0, 3)
-        .map((t, i) => `${'ABC'[i]}: "${t}"`)
-        .join('\n')}`
-    : `Clip to judge: "${texts[0]}"`
-  const system = [
-    CLASSIFIER_PROMPT,
-    earlier.length > 0 && INTERVIEW_PROMPT,
-    clipTypes ? WHY_PROMPT : REASON_PROMPT,
-    JOIN_PROMPT,
-    groq.coding && CODING_PROMPT,
-    allowWait && WAIT_PROMPT,
-    merge && MERGE_PROMPT,
-    mode === 'final' && FINAL_PROMPT,
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-  const user = `${context}${terms}${clip}`
-  const fullUser = `${earlierHeader}${earlierLines.join('')}${earlier.length ? '\n' : ''}${user}`
   const post = (
     baseUrl: string,
     apiKey: string | undefined,
@@ -579,7 +539,7 @@ async function classifyWithGroq(
         temperature: 0,
         max_tokens:
           // Room for a joined question ("YES: ...") and the reasoning
-          300 +
+          outputTokens +
           (isReasoningModel(model) ? (effort === 'medium' ? 1500 : 300) : 0),
         ...(isReasoningModel(model)
           ? { reasoning_effort: effort, ...extra }
@@ -590,9 +550,9 @@ async function classifyWithGroq(
         ],
       }),
     })
-  const groqBase = viaGroqProxy(
-    groq.baseUrl || 'https://api.groq.com/openai/v1'
-  )
+  const groqBase =
+    viaGroqProxy(groq.baseUrl || 'https://api.groq.com/openai/v1') ??
+    'https://api.groq.com/openai/v1'
   const request = (model: string) =>
     post(
       groqBase,
@@ -761,7 +721,7 @@ async function classifyWithGroq(
             {
               role: 'user',
               content: [
-                ...(earlier.length
+                ...(earlierLines.length
                   ? earlierLines.map((text, i) => ({
                       type: 'text',
                       text: i === 0 ? `${earlierHeader}${text}` : text,
@@ -877,13 +837,84 @@ async function classifyWithGroq(
         }
       ).choices?.[0]?.message?.content ??
       ''
+    return { reply, model, note, ms: Date.now() - started }
+  } catch (err) {
+    if (err instanceof RelevanceCheckError) throw err
+    throw new RelevanceCheckError(
+      "Couldn't reach Groq; questions are not being sent"
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function classifyWithGroq(
+  texts: string[],
+  recent: RecentClip[],
+  groq: GroqConfig,
+  onCheck?: (info: CheckInfo) => void,
+  mode: JudgeMode = 'plain'
+): Promise<Verdict> {
+  const allowWait = mode === 'wait'
+  const clipTypes = groq.clipTypes ?? getClipTypes()
+  const merge = texts.length > 1
+  // The last few clips with how long ago each was heard; before them, the
+  // rest of the last few minutes with clock times.
+  const last = recent.slice(-RECENT_CLIPS)
+  const earlier = recent
+    .slice(0, -RECENT_CLIPS)
+    .filter((r) => r.ago === undefined || r.ago <= HISTORY_SECONDS)
+  const context = last.length
+    ? `Recent clips, oldest first:\n${last.map((r) => `- ${r.sent ? `[sent${r.ago !== undefined ? ` ${r.ago} s ago` : ''}] ` : ''}${r.text}`).join('\n')}\n\n`
+    : ''
+  const earlierLines = earlier.map(
+    (r) =>
+      `- [${r.at !== undefined ? clockTime(r.at) : 'earlier'}${r.sent ? ', sent' : ''}] ${r.text}\n`
+  )
+  const earlierHeader = earlier.length
+    ? 'Earlier in this interview, oldest first (clock times):\n'
+    : ''
+  const judgeTerms = withCodingTerms(groq.keyterms ?? [])
+  const terms = merge
+    ? `Key terms the speaker may use: ${judgeTerms.join(', ')}\n\n`
+    : ''
+  const clip = merge
+    ? `Clip to judge:\n${texts
+        .slice(0, 3)
+        .map((t, i) => `${'ABC'[i]}: "${t}"`)
+        .join('\n')}`
+    : `Clip to judge: "${texts[0]}"`
+  const system = [
+    CLASSIFIER_PROMPT,
+    earlier.length > 0 && INTERVIEW_PROMPT,
+    clipTypes ? WHY_PROMPT : REASON_PROMPT,
+    JOIN_PROMPT,
+    groq.coding && CODING_PROMPT,
+    allowWait && WAIT_PROMPT,
+    merge && MERGE_PROMPT,
+    mode === 'final' && FINAL_PROMPT,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const user = `${context}${terms}${clip}`
+  const fullUser = `${earlierHeader}${earlierLines.join('')}${earlier.length ? '\n' : ''}${user}`
+  try {
+    const { reply, model, note, ms } = await requestSpeakerJudge(
+      system,
+      user,
+      fullUser,
+      groq,
+      300,
+      { earlierLines, earlierHeader }
+    )
     // The judge's reason, on its own line, goes in the log, not the question.
     const [answer, why] = splitWhy(reply)
     const [verdict, type] = clipTypes ? splitType(answer) : [answer, '']
     // A skip type drops a YES. WAIT and MORE keep their meaning, and a NO
     // stays a NO whatever the type.
     const said = /^\s*(yes|no|wait|more)\b/i.exec(verdict)?.[1].toLowerCase()
-    const vetoed = sendsType(type) === false && said === 'yes'
+    const vetoed =
+      sendsType(type) === false && (said === 'yes' || said === 'more')
     const notes = [
       note,
       type && `type: ${type}${vetoed ? ' (overrode yes)' : ''}`,
@@ -893,11 +924,12 @@ async function classifyWithGroq(
       .join('; ')
     onCheck?.({
       model,
-      ms: Date.now() - started,
+      ms,
       ...(notes ? { note: notes } : {}),
       ...(type ? { type } : {}),
     })
     if (allowWait && said === 'wait') return { wait: texts[0] }
+    if (vetoed) return null
     // The clip continues the question just sent: send them joined, as long
     // as the joined wording still has the clip's words
     const more = /^\s*more\b[\s:.,-]*([\s\S]*)$/i.exec(verdict)
@@ -909,7 +941,6 @@ async function classifyWithGroq(
       if (joined && texts.some((t) => keepsWords(joined, t)))
         return { more: joined }
     }
-    if (vetoed) return null
     const yes = more ?? /^\s*yes\b[\s:.,-]*([\s\S]*)$/i.exec(verdict)
     if (!yes) return null
     const merged = yes[1]
@@ -943,8 +974,6 @@ async function classifyWithGroq(
     throw new RelevanceCheckError(
       "Couldn't reach Groq; questions are not being sent"
     )
-  } finally {
-    clearTimeout(timer)
   }
 }
 
