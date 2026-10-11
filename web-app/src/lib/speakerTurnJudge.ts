@@ -32,7 +32,7 @@ function candidateStatement(text: string): boolean {
   return (
     !hasQuestionCue(text) &&
     !text.includes('?') &&
-    /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:i\b|we\b|my\b|our\b)/i.test(
+    /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:(?:i|we)\s+(?:(?:generally|usually|typically|mostly|currently|regularly|actually)\s+)*(?:work|worked|do|did|use|used|maintain|maintained|handle|handled|manage|managed|build|built|get|got)\b|(?:my|our)\s+(?:responsibilities|tasks|work|experience|background)\b)/i.test(
       text.trim()
     )
   )

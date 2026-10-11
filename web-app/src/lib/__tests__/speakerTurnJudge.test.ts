@@ -255,6 +255,11 @@ describe('speaker intent protocol', () => {
     ).toBe('skip')
     expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
   })
+  it('retains first-person scenario setup rather than rejecting it as a candidate answer', async () => {
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('hold'))
+    expect(await judgeSpeakerTurn(['I have a list of integers with duplicates.'], empty, { apiKey: 'test' })).toMatchObject({ action: 'new-question', complete: false, text: 'I have a list of integers with duplicates.' })
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
   it('does not interpret the old ambiguous answer label as an automatic question', () => {
     expect(parseTurnDecision(reply('answer').reply, ['How does DNS work?'], empty).action).toBe('suggest')
   })
