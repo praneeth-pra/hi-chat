@@ -43,7 +43,9 @@ The judge selects original transcript words by index, without rewriting them.
 
 Every question requires approval, including the first. Speaker proposals appear
 in the existing prompt box with Send and Discard controls in its toolbar; there
-are no separate cards above it. If you have typed a draft, **Review question**
+are no separate cards above it. In narrow composers, review controls use the model
+selector’s space; the model name stays visible in wide composers and returns when
+the proposal clears. If you have typed a draft, **Review question**
 switches to the proposal and **Back to draft** restores your text. Incoming
 speech never overwrites the typed draft. Sending creates a separate prompt; it
 never appends speech to a sent question or replaces its answer. The previous

@@ -371,21 +371,21 @@ describe('ChatInput', () => {
       discard: vi.fn(),
       keepListening: vi.fn(),
     })
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'How does DNS work?',
-        complete: true,
-        manual: false,
-        requiresReview: true,
-        reviewUntil: Date.now() + 3000,
-        reason: 'question',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'How does DNS work?',
+      complete: true,
+      manual: false,
+      requiresReview: true,
+      reviewUntil: Date.now() + 3000,
+      reason: 'question',
+    })
     await act(async () => {
       renderWithRouter()
     })
     expect(screen.getByTestId('chat-input')).toHaveValue('How does DNS work?')
+    expect(screen.getByTestId('speaker-composer-controls')).toBeInTheDocument()
+
     expect(
       screen.queryByTestId('speaker-pending-question')
     ).not.toBeInTheDocument()
@@ -396,21 +396,23 @@ describe('ChatInput', () => {
     fireEvent.keyDown(screen.getByTestId('chat-input'), { key: 'Enter' })
     expect(sendNow).toHaveBeenCalledTimes(1)
     expect(mockPromptState.setPrompt).not.toHaveBeenCalled()
+    act(() => useSpeakerTranscription.getState().setPendingQuestion(null))
+    expect(
+      screen.queryByTestId('speaker-composer-controls')
+    ).not.toBeInTheDocument()
     unregister()
   })
   it('preserves typed text while switching to the speaker proposal and back', async () => {
     mockPromptState.prompt = 'My draft'
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'What about caching?',
-        complete: true,
-        manual: false,
-        requiresReview: true,
-        reviewUntil: Date.now() + 3000,
-        reason: 'question',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'What about caching?',
+      complete: true,
+      manual: false,
+      requiresReview: true,
+      reviewUntil: Date.now() + 3000,
+      reason: 'question',
+    })
     await act(async () => {
       renderWithRouter()
     })
@@ -424,17 +426,15 @@ describe('ChatInput', () => {
   })
   it('keeps Stop available while reviewing speech during an answer', async () => {
     mockAppState.streamingContent = { thread_id: 'thread' } as any
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'What about caching?',
-        complete: true,
-        manual: false,
-        requiresReview: true,
-        reviewUntil: Date.now() + 3000,
-        reason: 'question',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'What about caching?',
+      complete: true,
+      manual: false,
+      requiresReview: true,
+      reviewUntil: Date.now() + 3000,
+      reason: 'question',
+    })
     await act(async () => {
       renderWithRouter()
     })

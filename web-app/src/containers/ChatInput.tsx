@@ -1405,23 +1405,75 @@ const ChatInput = ({
           </div>
         </div>
 
-        <div className="absolute z-20 bg-transparent bottom-0 w-full p-2 ">
+        <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full p-2 ">
           <div className="flex justify-between items-center w-full">
             <div className="px-1 flex items-center gap-1 flex-1 min-w-0">
+              {speakerReview.available && (
+                <div
+                  data-testid="speaker-composer-controls"
+                  className="flex flex-1 min-w-0 items-center gap-2"
+                >
+                  {speakerReview.showing ? (
+                    <span
+                      className="min-w-0 truncate text-xs text-accent"
+                      title="Enter or fn + Right sends; fn + Left discards"
+                    >
+                      {speakerReview.label}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="min-w-0 truncate text-xs text-accent"
+                      onClick={speakerReview.select}
+                    >
+                      Review question
+                    </button>
+                  )}
+                  {speakerReview.showing && prompt && (
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs"
+                      onClick={speakerReview.back}
+                    >
+                      Back to draft
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="shrink-0"
+                    aria-label="Discard speaker question"
+                    title="Discard · fn + Left"
+                    onClick={speakerReview.discard}
+                  >
+                    <IconX size={16} />
+                  </button>
+                </div>
+              )}
+
               <div
                 className={cn(
-                  'px-1 flex items-center w-full gap-1',
+                  'px-1 flex items-center gap-1',
+                  speakerReview.available ? 'shrink-0' : 'w-full',
                   streamingContent && 'opacity-50 pointer-events-none'
                 )}
               >
-                {model?.provider === 'llamacpp' && loadingModel ? (
-                  <ModelLoader />
-                ) : (
-                  <DropdownModelProvider
-                    model={model}
-                    useLastUsedModel={initialMessage}
-                  />
-                )}
+                <div
+                  data-testid="composer-model-selector"
+                  className={
+                    speakerReview.available
+                      ? 'hidden @min-[760px]/composer:block'
+                      : undefined
+                  }
+                >
+                  {model?.provider === 'llamacpp' && loadingModel ? (
+                    <ModelLoader />
+                  ) : (
+                    <DropdownModelProvider
+                      model={model}
+                      useLastUsedModel={initialMessage}
+                    />
+                  )}
+                </div>
                 {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                 {selectedModel?.capabilities?.includes('tools') &&
                   showAttachmentButton && (
@@ -1553,44 +1605,7 @@ const ChatInput = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {speakerReview.available && (
-                <>
-                  {speakerReview.showing ? (
-                    <span
-                      className="max-w-32 truncate text-xs text-accent"
-                      title="Enter or fn + Right sends; fn + Left discards"
-                    >
-                      {speakerReview.label}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-xs text-accent"
-                      onClick={speakerReview.select}
-                    >
-                      Review question
-                    </button>
-                  )}
-                  {speakerReview.showing && prompt && (
-                    <button
-                      type="button"
-                      className="text-xs"
-                      onClick={speakerReview.back}
-                    >
-                      Back to draft
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    aria-label="Discard speaker question"
-                    title="Discard · fn + Left"
-                    onClick={speakerReview.discard}
-                  >
-                    <IconX size={16} />
-                  </button>
-                </>
-              )}
+            <div className="flex shrink-0 items-center gap-2">
               <DictationButton />
               <SpeakerListenIndicator />
               {selectedProvider === 'llamacpp' &&
