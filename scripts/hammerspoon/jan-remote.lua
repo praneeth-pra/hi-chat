@@ -1,4 +1,4 @@
--- Jan remote for Hammerspoon: scroll the chat, toggle coding mode and the speaker
+-- Jan remote for Hammerspoon: scroll the chat and dictate
 -- Smoothly scrolls the Jan chat window on your external monitor from the
 -- keyboard, without moving your mouse there.
 --
@@ -11,21 +11,15 @@
 --   X                       jump back: the pointer returns to where it was last
 --                           seen off Jan, and the window there gets focus
 --                           (Z and X work independently)
---   tap Left Option         turn the speaker (listening) on / off
---   fn + Right              accept the visible speaker card (Add / Send)
---   fn + Left               discard the visible speaker card
 --   fn + Return             send in Jan without leaving the app you're in:
---                           what's typed in the prompt box, or when it's empty
---                           the newest suggestion chip (the judges disagreed)
+--                           what's typed in the prompt box
 --   tap Left Control        dictate in Jan: starts recording your mic; tap
---                           again and Aqua turns it into text (with your
---                           dictionary) and Jan sends it. Control held with
+--                           again to stop, transcribe and send it. Control held with
 --                           another key or a click works as usual.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
--- Hammerspoon runs, those keys no longer reach other apps. fn + Left / Right
--- (Home / End) control speaker recommendations; coding mode is switched in Jan itself.
--- Jan shows "Speaker on/off" when it gets the toggle.
+-- Hammerspoon runs, those keys no longer reach other apps. Left / Right
+-- arrows and fn + Left / Right remain available to the app in front.
 --
 -- Settings you may want to change:
 local SPEED = 700        -- pixels per second while held
@@ -123,8 +117,8 @@ end
 bind({ "shift" }, "pagedown", -1, FAST_SPEED, FAST_TAP)
 bind({ "shift" }, "pageup", 1, FAST_SPEED, FAST_TAP)
 
--- Keys for Jan, sent straight to its window without focusing it: F19
--- (speaker), Shift + F16 / F17 (code block above / below) and so on, keys a
+-- Keys for Jan, sent straight to its window without focusing it:
+-- Shift + F16 / F17 (code block above / below) and so on, keys a
 -- Mac laptop doesn't have.
 local function toggle(key, mods)
   local win = chatWindow()
@@ -140,7 +134,7 @@ hs.hotkey.bind({}, "pageup", function() toggle("f16", { "shift" }) end)
 hs.hotkey.bind({}, "pagedown", function() toggle("f17", { "shift" }) end)
 
 -- fn + Return: sends F15 to Jan, the same way as the toggles. Jan sends the
--- typed text, or the newest suggestion chip when the box is empty. The key
+-- typed text in the prompt box. The key
 -- is swallowed, so the app in front never sees it. Most Macs send fn + Return
 -- as the keypad Enter key.
 local RETURN, PAD_ENTER = hs.keycodes.map["return"], hs.keycodes.map["padenter"]
@@ -155,63 +149,20 @@ enterTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
 end)
 enterTap:start()
 
--- Recommendation-only keys: they never submit typed text or toggle coding.
--- Macs may deliver fn + arrows as the arrows themselves or Home / End.
-local LEFT, RIGHT = hs.keycodes.map["left"], hs.keycodes.map["right"]
-local HOME, END = hs.keycodes.map["home"], hs.keycodes.map["end"]
--- Arrow events can carry the macOS secondary-fn flag even without a physical
--- fn press. Track only the fn key's own flagsChanged events.
-local FN = hs.keycodes.map["fn"] or 63
-local recommendationFnDown = false
-recommendationTap = hs.eventtap.new({ hs.eventtap.event.types.flagsChanged, hs.eventtap.event.types.keyDown }, function(e)
-  local flags = e:getFlags()
-  if e:getType() == hs.eventtap.event.types.flagsChanged then
-    if e:getKeyCode() == FN then recommendationFnDown = flags.fn == true end
-    return false
-  end
-  if not recommendationFnDown or flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
-  local key = e:getKeyCode()
-  local send = key == RIGHT or key == END
-  local discard = key == LEFT or key == HOME
-  if not send and not discard then return false end
-  if e:getProperty(hs.eventtap.event.properties.keyboardEventAutorepeat) ~= 0 then return true end
-  hs.timer.doAfter(0, function()
-    toggle(send and "f15" or "f18", { "shift" })
-  end)
-  return true
-end)
-recommendationTap:start()
-
 -- Left Control on its own, pressed and let go within TAP_SECONDS: sends F14
 -- to Jan, which starts dictation, or stops it and sends the text. Control
 -- isn't swallowed, so Control + a key or a click still works everywhere.
--- Left Option tapped the same way sends F19: Jan turns the speaker on / off.
 local LEFT_CTRL = hs.keycodes.map["ctrl"]
-local LEFT_OPTION = hs.keycodes.map["alt"]
 local TAP_SECONDS = 0.35
 local ctrlDownAt = nil
-local optDownAt = nil
 local types = hs.eventtap.event.types
 
 dictateTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown, types.rightMouseDown, types.scrollWheel }, function(e)
   if e:getType() ~= types.flagsChanged then
     ctrlDownAt = nil -- used with another key or the mouse: not a tap
-    optDownAt = nil
     return false
   end
   local flags = e:getFlags()
-  if e:getKeyCode() == LEFT_OPTION and flags:containExactly({ "alt" }) then
-    optDownAt = hs.timer.secondsSinceEpoch()
-    ctrlDownAt = nil
-    return false
-  elseif e:getKeyCode() == LEFT_OPTION and not flags.alt and optDownAt then
-    if hs.timer.secondsSinceEpoch() - optDownAt < TAP_SECONDS then
-      hs.timer.doAfter(0, function() toggle("f19") end)
-    end
-    optDownAt = nil
-    return false
-  end
-  optDownAt = nil
   if e:getKeyCode() == LEFT_CTRL and flags:containExactly({ "ctrl" }) then
     ctrlDownAt = hs.timer.secondsSinceEpoch()
   elseif e:getKeyCode() == LEFT_CTRL and not flags.ctrl and ctrlDownAt then
@@ -481,7 +432,7 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, enterTap, dictateTap, recommendationTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, enterTap, dictateTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()

@@ -9,10 +9,6 @@ import {
 } from '@tanstack/react-router'
 import ChatInput from '../ChatInput'
 import { useDictationDelivery } from '@/lib/dictationDelivery'
-import {
-  setQuestionControls,
-  useSpeakerTranscription,
-} from '@/hooks/useSpeakerTranscription'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useAppState } from '@/hooks/useAppState'
@@ -30,7 +26,7 @@ let mockPromptState = {
 vi.mock('@/hooks/usePrompt', () => ({
   usePrompt: Object.assign(
     (selector: any) => (selector ? selector(mockPromptState) : mockPromptState),
-    { getState: () => mockPromptState }
+    { getState: () => mockPromptState, subscribe: () => () => {} }
   ),
 }))
 
@@ -213,6 +209,7 @@ vi.mock('react-textarea-autosize', () => ({
     value,
     onChange,
     onKeyDown,
+    onPaste,
     placeholder,
     disabled,
     className,
@@ -225,6 +222,7 @@ vi.mock('react-textarea-autosize', () => ({
       value={value}
       onChange={onChange}
       onKeyDown={onKeyDown}
+      onPaste={onPaste}
       placeholder={placeholder}
       disabled={disabled}
       readOnly={props.readOnly}
@@ -242,6 +240,9 @@ vi.mock('lucide-react', () => ({
 }))
 
 vi.mock('@tabler/icons-react', () => ({
+  IconCode: () => <svg>Code</svg>,
+  IconMicrophone: () => <svg>Mic</svg>,
+  IconRefresh: () => <svg>Retry</svg>,
   IconPhoto: () => <svg data-testid="photo-icon">Photo</svg>,
   IconWorld: () => <svg data-testid="world-icon">World</svg>,
   IconAtom: () => <svg data-testid="atom-icon">Atom</svg>,
@@ -284,8 +285,6 @@ describe('ChatInput', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useDictationDelivery.setState({ pending: [] })
-    useSpeakerTranscription.getState().resetTurns()
-    useSpeakerTranscription.getState().setEnabled(true)
 
     // Reset mock states
     mockPromptState.prompt = ''
@@ -364,95 +363,9 @@ describe('ChatInput', () => {
     expect(mockPromptState.setPrompt).toHaveBeenLastCalledWith('o')
   })
 
-  it('reviews speech in the existing prompt box without extra cards, and sends on Enter', async () => {
-    const sendNow = vi.fn()
-    const unregister = setQuestionControls({
-      sendNow,
-      discard: vi.fn(),
-      keepListening: vi.fn(),
-    })
-    useSpeakerTranscription.getState().setPendingQuestion({
-      id: 'q',
-      text: 'How does DNS work?',
-      complete: true,
-      manual: false,
-      requiresReview: true,
-      reason: 'question',
-    })
-    await act(async () => {
-      renderWithRouter()
-    })
-    expect(screen.getByTestId('chat-input')).toHaveValue('How does DNS work?')
-    expect(screen.getByTestId('speaker-composer-controls')).toBeInTheDocument()
-
-    expect(
-      screen.queryByTestId('speaker-pending-question')
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('region', { name: 'Speaker recommendations' })
-    ).not.toBeInTheDocument()
-    expect(sendNow).not.toHaveBeenCalled()
-    fireEvent.keyDown(screen.getByTestId('chat-input'), {
-      key: 'Enter',
-      repeat: true,
-    })
-    expect(sendNow).not.toHaveBeenCalled()
-    fireEvent.keyDown(screen.getByTestId('chat-input'), { key: 'Enter' })
-    expect(sendNow).toHaveBeenCalledTimes(1)
-    expect(mockPromptState.setPrompt).not.toHaveBeenCalled()
-    act(() => useSpeakerTranscription.getState().setPendingQuestion(null))
-    expect(
-      screen.queryByTestId('speaker-composer-controls')
-    ).not.toBeInTheDocument()
-    unregister()
-  })
-  it('preserves typed text while switching to the speaker proposal and back', async () => {
-    mockPromptState.prompt = 'My draft'
-    useSpeakerTranscription.getState().setPendingQuestion({
-      id: 'q',
-      text: 'What about caching?',
-      complete: true,
-      manual: false,
-      requiresReview: true,
-      reason: 'question',
-    })
-    await act(async () => {
-      renderWithRouter()
-    })
-    expect(screen.getByTestId('chat-input')).toHaveValue('My draft')
-    fireEvent.click(screen.getByRole('button', { name: 'Review question' }))
-    expect(screen.getByTestId('chat-input')).toHaveValue('What about caching?')
-    expect(screen.getByTestId('chat-input')).toHaveAttribute('readonly')
-    fireEvent.click(screen.getByRole('button', { name: 'Back to draft' }))
-    expect(screen.getByTestId('chat-input')).toHaveValue('My draft')
-    expect(mockPromptState.setPrompt).not.toHaveBeenCalled()
-  })
-  it('keeps Stop available while reviewing speech during an answer', async () => {
-    mockAppState.streamingContent = { thread_id: 'thread' } as any
-    useSpeakerTranscription.getState().setPendingQuestion({
-      id: 'q',
-      text: 'What about caching?',
-      complete: true,
-      manual: false,
-      requiresReview: true,
-      reason: 'question',
-    })
-    await act(async () => {
-      renderWithRouter()
-    })
-    expect(
-      screen.getByRole('button', { name: 'Stop the answer' })
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Discard speaker question' })
-    ).toBeInTheDocument()
-  })
-
-  it('automatically sends dictation even when Speaker is disabled', async () => {
+  it('automatically sends microphone dictation through its own queue', async () => {
     const send = vi.fn(async () => {})
     vi.mocked(useChat).mockReturnValue(send)
-    useSpeakerTranscription.getState().setEnabled(false)
     mockPromptState.prompt = 'Describe ECS pricing.'
     useDictationDelivery.setState({ pending: ['Describe ECS pricing.'] })
     await act(async () => {
@@ -468,7 +381,53 @@ describe('ChatInput', () => {
     )
     expect(mockPromptState.setPrompt).toHaveBeenCalledWith('')
     expect(useDictationDelivery.getState().pending).toEqual([])
-    useSpeakerTranscription.getState().setEnabled(true)
+    vi.mocked(useChat).mockImplementation(() => vi.fn())
+  })
+
+  it('has no Speaker controls even with legacy enablement saved, and retains dictation/coding', async () => {
+    vi.stubGlobal('IS_WEB_APP', true)
+    localStorage.setItem(
+      'jan-web-speaker-transcription',
+      JSON.stringify({ state: { enabled: true }, version: 0 })
+    )
+    await act(async () => {
+      renderWithRouter()
+    })
+    expect(
+      screen.queryByTestId('speaker-composer-controls')
+    ).not.toBeInTheDocument()
+    expect(
+      document.querySelector('[data-test-id="speaker-listen-toggle"]')
+    ).toBeNull()
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Coding mode' })
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('composer-model-selector')).toBeInTheDocument()
+    localStorage.removeItem('jan-web-speaker-transcription')
+    vi.unstubAllGlobals()
+  })
+  it('sends an F20 external dictation paste as-is without requiring Speaker', async () => {
+    const send = vi.fn(async () => {})
+    vi.mocked(useChat).mockReturnValue(send)
+    mockPromptState.prompt = 'Unrelated typed draft'
+    await act(async () => {
+      renderWithRouter()
+    })
+    const { handleRemoteKey } = await import('@/lib/remoteKeys')
+    handleRemoteKey('F20')
+    fireEvent.paste(screen.getByTestId('chat-input'), {
+      clipboardData: { getData: () => 'Explain DNS.' },
+    })
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'Explain DNS.',
+        true,
+        undefined,
+        undefined
+      )
+    )
+    expect(useDictationDelivery.getState().pending).toEqual([])
     vi.mocked(useChat).mockImplementation(() => vi.fn())
   })
 

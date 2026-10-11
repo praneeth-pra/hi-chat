@@ -64,7 +64,7 @@ type Assistant = {
   parameters: Record<string, unknown>
   // Text pulled from uploaded files, added to the instructions on each message
   documents?: { name: string; text: string }[]
-  // Technical words the speaker is likely to say (key terms for transcription)
+  // Technical words dictation is likely to hear (key terms for transcription)
   keyterms?: string[]
   // tool_steps?: number
 }

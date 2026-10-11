@@ -352,11 +352,11 @@ function liveTokenEngine(body) {
 }
 
 /**
- * Speaker clip log: the browser reports each clip it judged (text, verdict,
+ * Speech diagnostics: the browser reports each clip it judged (text, verdict,
  * timings, notes) so it shows in Railway's logs next to the timings. One line,
  * capped, so a bad request can't flood the log.
  */
-export function speakerLogLine(body) {
+export function speechLogLine(body) {
   let line = ''
   try {
     line = String(JSON.parse(body.toString('utf8')).line ?? '')
@@ -364,7 +364,7 @@ export function speakerLogLine(body) {
     return null
   }
   line = line.replace(/\s+/g, ' ').trim().slice(0, 6000)
-  return line ? `speaker ${line}` : null
+  return line ? `speech ${line}` : null
 }
 
 function readBody(req) {
@@ -398,13 +398,13 @@ export function createRelay(options = {}) {
     if (
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
-      req.url !== '/api/speaker-log'
+      req.url !== '/api/speech-log'
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
-    if (req.url === '/api/speaker-log') {
+    if (req.url === '/api/speech-log') {
       try {
-        const line = speakerLogLine(await readBody(req))
+        const line = speechLogLine(await readBody(req))
         if (!line) return send(res, 400, { error: 'No line' })
         console.log(line)
         res.writeHead(204).end()

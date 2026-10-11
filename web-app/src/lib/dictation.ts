@@ -5,20 +5,20 @@ import {
   concatSamples,
   downsample,
   rms,
-} from '@/lib/speakerCapture'
+} from '@/lib/speechAudio'
 import {
   fetchLiveToken,
   fetchLiveKeyWithTerms,
   keyTerms,
-  reportClip,
-} from '@/lib/speakerCaptureSession'
+  reportSpeech,
+} from '@/lib/speechServices'
 import {
   elevenLabsTerms,
   CartesiaLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
   SonioxLiveTranscriber,
-} from '@/lib/speakerLive'
+} from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
 import { findMicDevice, getDictationMic } from '@/lib/micActivity'
 import { deliverDictation } from './dictationDelivery'
@@ -30,8 +30,8 @@ import {
 
 /**
  * Dictation: speech heard by your selected microphone, streamed to live
- * speech-to-text engines while you record. Playback suppression is off by default. Separate from the speaker, which
- * listens to the interviewer. The text is sent like a question.
+ * speech-to-text engines while you record. Playback suppression is off by default.
+ * Stopping dictation delivers the text to the chat.
  */
 
 /**
@@ -716,7 +716,7 @@ export async function stopDictation() {
       })
     }
     if (!autoLive)
-      reportClip(
+      reportSpeech(
         `dictation ${engine}: ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     text = applyFixes(text)
@@ -734,7 +734,7 @@ export async function stopDictation() {
         keepFailed(samples, liveError ? `${liveError.message}; ${why}` : why)
         return
       }
-      reportClip(
+      reportSpeech(
         `dictation fallback (${liveError ? 'live failed' : 'live empty'}): ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     }
@@ -809,7 +809,7 @@ export async function reportAuto(
     .map((e) => `${e}=${took[e] !== undefined ? `${took[e]}ms` : 'none'}`)
     .join(' ')
   const texts = engines.map((e) => `${e}: ${heard.get(e) ?? '-'}`).join(' | ')
-  reportClip(
+  reportSpeech(
     `dictation auto: sent=${info.sent} total=${info.totalMs}ms ${times}` +
       `${info.judgeMs !== undefined ? ` judge=${info.judgeMs}ms` : ''}` +
       ` | ${texts}${info.judged ? ` | judge: ${JSON.stringify(info.judged)}` : ''}`

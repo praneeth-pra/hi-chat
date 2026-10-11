@@ -263,14 +263,14 @@ export default function AddEditAssistant({
       ...added,
     ])
     setDocumentStatus(problems.length ? problems.join('. ') : null)
-    // First documents: suggest key terms for the speaker straight away
+    // First documents: suggest key terms for dictation straight away
     if (added.length && !keyTerms.trim()) {
       suggestKeyTerms([...documents, ...added])
     }
   }
 
   // Groq gpt-oss-20b picks the technical words from the instructions and
-  // documents; they bias Grok's transcription of speaker clips.
+  // documents; they bias dictation's live transcription.
   const suggestKeyTerms = async (docs: AssistantDocument[] = documents) => {
     const source = [instructions, ...docs.map((d) => d.text)]
       .filter(Boolean)
@@ -540,8 +540,8 @@ export default function AddEditAssistant({
               </div>
             )}
             <div className="text-xs text-main-view-fg/60">
-              One per line (up to 100). The speaker's live transcription is
-              biased toward these words, and the judge uses them to fix misheard
+              One per line (up to 100). Dictation's live transcription is
+              biased toward these words, and its transcript judge can fix misheard
               terms. Suggest picks them from the documents and your dictionary
               (Settings &gt; General). Left empty, the first 100 dictionary
               words are used.

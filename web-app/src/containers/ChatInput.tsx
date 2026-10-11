@@ -1,7 +1,9 @@
 'use client'
 
-import { useDictationDelivery } from '@/lib/dictationDelivery'
-import { reportClip } from '@/lib/speakerCaptureSession'
+import {
+  deliverDictationPaste,
+  useDictationDelivery,
+} from '@/lib/dictationDelivery'
 
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
@@ -10,8 +12,7 @@ import {
   cancelDictation,
   stripFunctionKeyChars,
   takeDictationPaste,
-} from '@/lib/speakerRemoteKeys'
-import { useSpeakerComposerReview } from '@/hooks/useSpeakerComposerReview'
+} from '@/lib/remoteKeys'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -44,9 +45,8 @@ import { TokenCounter } from '@/components/TokenCounter'
 import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
-import { SpeakerListenIndicator } from './SpeakerListenIndicator'
+import { CodingModeButton } from './CodingModeButton'
 import { DictationBanner, DictationButton } from './DictationIndicator'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
   ContentType,
   ExtensionTypeEnum,
@@ -103,8 +103,6 @@ const ChatInput = ({
   const setActiveModels = useAppState((state) => state.setActiveModels)
   const prompt = usePrompt((state) => state.prompt)
   const setPrompt = usePrompt((state) => state.setPrompt)
-  const speakerReview = useSpeakerComposerReview(prompt)
-  const composerText = speakerReview.showing ? speakerReview.text : prompt
   const currentThreadId = useThreads((state) => state.currentThreadId)
   const { t } = useTranslation()
   const spellCheckChatInput = useGeneralSetting(
@@ -293,8 +291,6 @@ const ChatInput = ({
     }
 
     setMessage('')
-    // A typed question is an explicit boundary for automatic speaker turns.
-    useSpeakerTranscription.getState().resetTurns()
 
     sendMessage(
       prompt,
@@ -320,9 +316,21 @@ const ChatInput = ({
     const text = dictated[0]
     dictationSending.current = true
     useDictationDelivery.setState((s) => ({ pending: s.pending.slice(1) }))
-    useSpeakerTranscription.getState().resetTurns()
     // Show the recognised words even if sending has to wait for the current answer.
-    if (usePrompt.getState().prompt === text) usePrompt.getState().setPrompt('')
+    const draft = usePrompt.getState().prompt
+    let unsubscribe = () => {}
+    let restoreTimer: ReturnType<typeof setTimeout> | undefined
+    if (draft === text) usePrompt.getState().setPrompt('')
+    else if (draft) {
+      // External dictation bypasses the composer; keep an unrelated typed draft.
+      unsubscribe = usePrompt.subscribe((state) => {
+        if (state.prompt === '') {
+          unsubscribe()
+          usePrompt.getState().setPrompt(draft)
+        }
+      })
+      restoreTimer = setTimeout(() => unsubscribe(), 5000)
+    }
     Promise.resolve()
       .then(() => sendMessage(text, true, undefined, projectId))
       .catch((error: Error) => {
@@ -330,6 +338,8 @@ const ChatInput = ({
         toast(`Dictation could not send: ${error.message}`)
       })
       .finally(() => {
+        unsubscribe()
+        clearTimeout(restoreTimer)
         dictationSending.current = false
         setDictationDone((n) => n + 1)
       })
@@ -341,121 +351,6 @@ const ChatInput = ({
     sendMessage,
     projectId,
     dictationDone,
-  ])
-
-  const speakerEnabled = useSpeakerTranscription((s) => s.enabled)
-  const speakerTurnQueue = useSpeakerTranscription((s) => s.turnQueue)
-  const legacyQueueLength = useSpeakerTranscription((s) => s.queue.length)
-  const speakerVersions = useSpeakerTranscription((s) => s.turnVersions)
-  const speakerEpoch = useSpeakerTranscription((s) => s.deliveryEpoch)
-  const speakerSendingRef = useRef(false)
-  const [speakerSendDone, setSpeakerSendDone] = useState(0)
-
-  // A newly settled revision cancels only its own obsolete speaker generation.
-  useEffect(() => {
-    const sending = useSpeakerTranscription.getState().sendingTurn
-    if (
-      sending &&
-      (!speakerEnabled ||
-        sending.epoch !== speakerEpoch ||
-        speakerVersions[sending.id] !== sending.version)
-    ) {
-      const threadId = sending.threadId ?? currentThreadId
-      if (threadId) abortControllers[threadId]?.abort()
-    }
-  }, [
-    speakerEnabled,
-    speakerEpoch,
-    speakerVersions,
-    currentThreadId,
-    abortControllers,
-  ])
-
-  useEffect(() => {
-    if (
-      !speakerEnabled ||
-      streamingContent ||
-      ingestingAny ||
-      !selectedModel ||
-      speakerSendingRef.current
-    )
-      return
-    const speaker = useSpeakerTranscription.getState()
-    // Explicit remote-key sends still use the common turn delivery path.
-    if (!speaker.turnQueue.length && legacyQueueLength) {
-      const text = speaker.dequeue()
-      if (text)
-        speaker.queueTurn(
-          { id: `manual-${Date.now()}`, version: 1, text, relation: 'new' },
-          currentThreadId
-        )
-      return
-    }
-    if (!speaker.turnQueue.length) return
-    const turn = speaker.takeTurn()!
-    let boundThread = turn.threadId
-    const isCurrent = () => {
-      const state = useSpeakerTranscription.getState()
-      return (
-        state.enabled &&
-        state.deliveryEpoch === turn.epoch &&
-        state.turnVersions[turn.id] === turn.version &&
-        (boundThread
-          ? useThreads.getState().currentThreadId === boundThread
-          : !useThreads.getState().currentThreadId)
-      )
-    }
-    if (!isCurrent()) {
-      speaker.finishTurn(turn)
-      return
-    }
-    const draft = usePrompt.getState().prompt
-    speakerSendingRef.current = true
-    let answerStarted = false
-    reportClip(
-      `stage=send-start turn=${turn.id} version=${turn.version} at=${Date.now()}`
-    )
-    Promise.resolve(
-      sendMessage(turn.text, true, undefined, projectId, undefined, undefined, {
-        turn,
-        isCurrent,
-        onAnswerStart: () => {
-          if (answerStarted) return
-          answerStarted = true
-          reportClip(
-            `stage=answer-start turn=${turn.id} version=${turn.version} origin=${turn.origin ?? 'unknown'} at=${Date.now()}`
-          )
-        },
-        onThread: (threadId) => {
-          boundThread = threadId
-          turn.threadId = threadId
-        },
-      })
-    ).finally(() => {
-      useSpeakerTranscription.getState().finishTurn(turn)
-      speakerSendingRef.current = false
-      setSpeakerSendDone((n) => n + 1)
-    })
-    if (draft) {
-      const unsubscribe = usePrompt.subscribe((state) => {
-        if (state.prompt === '') {
-          unsubscribe()
-          usePrompt.getState().setPrompt(draft)
-        }
-      })
-      setTimeout(unsubscribe, 5000)
-    }
-  }, [
-    speakerEnabled,
-    speakerTurnQueue,
-    legacyQueueLength,
-    speakerSendDone,
-    streamingContent,
-    ingestingAny,
-    selectedModel,
-    currentThreadId,
-    sendMessage,
-    projectId,
   ])
 
   useEffect(() => {
@@ -1115,7 +1010,7 @@ const ChatInput = ({
     const pasted = e.clipboardData?.getData('text/plain')?.trim()
     if (takeDictationPaste() && pasted) {
       e.preventDefault()
-      useSpeakerTranscription.getState().enqueue(pasted)
+      deliverDictationPaste(pasted)
       return
     }
     // Only process images if model supports mmproj
@@ -1338,34 +1233,16 @@ const ChatInput = ({
               minRows={2}
               rows={1}
               maxRows={10}
-              value={composerText}
-              readOnly={speakerReview.showing && !!prompt}
+              value={prompt}
               data-testid={'chat-input'}
               onChange={(e) => {
                 const value = stripFunctionKeyChars(e.target.value)
-                if (speakerReview.showing) speakerReview.discard()
                 setPrompt(value)
                 // Count the number of newlines to estimate rows
                 const newRows = (e.target.value.match(/\n/g) || []).length + 1
                 setRows(Math.min(newRows, maxRows))
               }}
               onKeyDown={(e) => {
-                if (speakerReview.showing && e.key === 'Escape') {
-                  e.preventDefault()
-                  if (!e.repeat) speakerReview.discard()
-                  return
-                }
-                if (
-                  speakerReview.showing &&
-                  e.key === 'Enter' &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing &&
-                  e.keyCode !== 229
-                ) {
-                  e.preventDefault()
-                  if (!e.repeat) speakerReview.send()
-                  return
-                }
                 // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
                 // dictation
                 if (
@@ -1408,73 +1285,14 @@ const ChatInput = ({
         <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full p-2 ">
           <div className="flex justify-between items-center w-full">
             <div className="px-1 flex items-center gap-1 flex-1 min-w-0">
-              {speakerReview.available && (
-                <div
-                  data-testid="speaker-composer-controls"
-                  className="flex flex-1 min-w-0 items-center gap-2"
-                >
-                  {speakerReview.showing ? (
-                    <span
-                      className="min-w-0 truncate text-xs text-accent"
-                      title="Enter or fn + Right sends; fn + Left discards"
-                    >
-                      {speakerReview.label}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="min-w-0 truncate text-xs text-accent"
-                      onClick={speakerReview.select}
-                    >
-                      Review question
-                    </button>
-                  )}
-                  {!!speakerReview.queuedQuestions && (
-                    <button
-                      type="button"
-                      className="shrink-0 text-xs text-accent"
-                      onClick={speakerReview.next}
-                      title="Review another held question"
-                    >
-                      {speakerReview.queuedQuestions} more
-                    </button>
-                  )}
-                  {speakerReview.showing && prompt && (
-                    <button
-                      type="button"
-                      className="shrink-0 text-xs"
-                      onClick={speakerReview.back}
-                    >
-                      Back to draft
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="shrink-0"
-                    aria-label="Discard speaker question"
-                    title="Discard · fn + Left"
-                    onClick={speakerReview.discard}
-                  >
-                    <IconX size={16} />
-                  </button>
-                </div>
-              )}
-
               <div
                 className={cn(
                   'px-1 flex items-center gap-1',
-                  speakerReview.available ? 'shrink-0' : 'w-full',
+                  'w-full',
                   streamingContent && 'opacity-50 pointer-events-none'
                 )}
               >
-                <div
-                  data-testid="composer-model-selector"
-                  className={
-                    speakerReview.available
-                      ? 'hidden @min-[760px]/composer:block'
-                      : undefined
-                  }
-                >
+                <div data-testid="composer-model-selector">
                   {model?.provider === 'llamacpp' && loadingModel ? (
                     <ModelLoader />
                   ) : (
@@ -1617,7 +1435,7 @@ const ChatInput = ({
 
             <div className="flex shrink-0 items-center gap-2">
               <DictationButton />
-              <SpeakerListenIndicator />
+              <CodingModeButton />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&
                 tokenCounterCompact &&
@@ -1653,27 +1471,15 @@ const ChatInput = ({
                   <IconPlayerStopFilled />
                 </Button>
               ) : null}
-              {(!streamingContent || speakerReview.showing) && (
+              {!streamingContent && (
                 <Button
-                  variant={!composerText.trim() ? null : 'default'}
+                  variant={!prompt.trim() ? null : 'default'}
                   size="icon"
-                  disabled={
-                    !composerText.trim() ||
-                    ingestingAny ||
-                    (speakerReview.showing && !speakerReview.canSend)
-                  }
+                  disabled={!prompt.trim() || ingestingAny}
                   data-test-id="send-message-button"
                   aria-label="Send"
-                  title={
-                    speakerReview.showing
-                      ? 'Send speaker question · fn + Right'
-                      : 'Send'
-                  }
-                  onClick={() =>
-                    speakerReview.showing
-                      ? speakerReview.send()
-                      : handleSendMessage(prompt)
-                  }
+                  title="Send"
+                  onClick={() => handleSendMessage(prompt)}
                 >
                   {ingestingAny ? (
                     <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />

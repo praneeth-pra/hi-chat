@@ -26,8 +26,6 @@ COPY ./.yarnrc.yml ./.yarnrc.yml
 COPY ./package.json ./package.json
 COPY ./yarn.lock ./yarn.lock
 COPY ./core ./core
-# Labelled interview clips, replayed by Settings > Speaker test
-COPY ./scripts/speaker-classifier/labeled.jsonl ./scripts/speaker-classifier/labeled.jsonl
 
 # Build web application
 RUN yarn install && yarn build:core && make build-web-app

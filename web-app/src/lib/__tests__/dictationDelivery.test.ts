@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { usePrompt } from '@/hooks/usePrompt'
-import { deliverDictation, useDictationDelivery } from '../dictationDelivery'
+import {
+  deliverDictation,
+  deliverDictationPaste,
+  useDictationDelivery,
+} from '../dictationDelivery'
 
 beforeEach(() => {
   usePrompt.getState().resetPrompt()
@@ -21,5 +25,12 @@ describe('dictation prompt delivery', () => {
     expect(useDictationDelivery.getState().pending).toEqual([
       'Explain ECS. Compare it with EKS.',
     ])
+  })
+  it('queues external pasted dictation as-is while leaving the typed draft alone', () => {
+    usePrompt.getState().setPrompt('My typed draft')
+    useDictationDelivery.setState({ pending: [] })
+    deliverDictationPaste(' Explain DNS. ')
+    expect(usePrompt.getState().prompt).toBe('My typed draft')
+    expect(useDictationDelivery.getState().pending).toEqual(['Explain DNS.'])
   })
 })

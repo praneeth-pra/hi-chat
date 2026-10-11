@@ -1,4 +1,3 @@
-import { getSmartTurn, setSmartTurn } from '@/lib/smartTurn'
 import { createFileRoute } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import SettingsMenu from '@/containers/SettingsMenu'
@@ -31,7 +30,6 @@ import LanguageSwitcher from '@/containers/LanguageSwitcher'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
 import { isRootDir } from '@/utils/path'
-import { getLiveMode, setLiveMode } from '@/lib/speakerLive'
 import {
   DICTATION_ENGINES,
   getDictationEngine,
@@ -43,35 +41,7 @@ import {
   switchMic,
 } from '@/lib/dictation'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  availableJudges,
-  compareJudges,
-  formatBench,
-  type BenchResult,
-} from '@/lib/judgeBench'
-import {
-  activeKeyTerms,
-  dictionaryTerms,
-  getDictionary,
-  setDictionary,
-} from '@/lib/keyTerms'
-import {
-  formatReplay,
-  formatTypes,
-  loadLabeledClips,
-  replayLabeled,
-  replaySummary,
-  type ReplayResult,
-} from '@/lib/replayBench'
-import {
-  getJudgeModel,
-  getWaitMode,
-  getSecondJudge,
-  setSecondJudge,
-  JUDGE_MODELS,
-  setJudgeModel,
-  type JudgeModel,
-} from '@/lib/speakerFilter'
+import { dictionaryTerms, getDictionary, setDictionary } from '@/lib/keyTerms'
 import { getDictationMic, listMics, setDictationMic } from '@/lib/micActivity'
 import { getTablesAsLists, setTablesAsLists } from '@/lib/tablesToLists'
 import {
@@ -107,14 +77,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  getTranscribeMode,
-  reportClip,
-  setTranscribeMode,
-  TRANSCRIBE_MODES,
-  type TranscribeMode,
-} from '@/lib/speakerCaptureSession'
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.general as any)({
   component: General,
@@ -145,86 +107,12 @@ function General() {
   const [isCopied, setIsCopied] = useState(false)
   const [selectedNewPath, setSelectedNewPath] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [transcribeMode, setTranscribeModeState] =
-    useState<TranscribeMode>(getTranscribeMode)
-  const [liveMode, setLiveModeState] = useState(getLiveMode)
   const [dictationEngine, setDictationEngineState] =
     useState(getDictationEngine)
-  const [reduceDictationEcho, setReduceDictationEchoState] =
-    useState(getDictationReduceEcho)
-  const [keepMic, setKeepMicState] = useState(getKeepMicReady)
-  const [judgeModel, setJudgeModelState] = useState<JudgeModel>(getJudgeModel)
-  const [secondJudge, setSecondJudgeState] = useState<JudgeModel | undefined>(
-    getSecondJudge
+  const [reduceDictationEcho, setReduceDictationEchoState] = useState(
+    getDictationReduceEcho
   )
-  const [bench, setBench] = useState<BenchResult[] | null>(null)
-  const [benchRunning, setBenchRunning] = useState(false)
-  const runBench = async () => {
-    const providers = useModelProvider.getState()
-    const groq = providers.getProviderByName('groq')
-    const cerebras = providers.getProviderByName('cerebras')
-    const config = {
-      apiKey: groq?.api_key,
-      baseUrl: groq?.base_url,
-      cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
-      anthropic: anthropicConfig(providers.providers),
-    }
-    const judges = availableJudges(config)
-    if (!judges.length) {
-      toast.error('Add a Cerebras, Groq or Anthropic key first')
-      return
-    }
-    setBenchRunning(true)
-    setBench([])
-    try {
-      await compareJudges(config, judges, (r) =>
-        setBench((done) => [...(done ?? []), r])
-      )
-    } finally {
-      setBenchRunning(false)
-    }
-  }
-  const [replay, setReplay] = useState<ReplayResult | null>(null)
-  const [replayProgress, setReplayProgress] = useState<string | null>(null)
-  const runReplay = async () => {
-    const providers = useModelProvider.getState()
-    const groq = providers.getProviderByName('groq')
-    const cerebras = providers.getProviderByName('cerebras')
-    // Provider settings for comparison with the previous clip filter
-    const config = {
-      apiKey: groq?.api_key,
-      baseUrl: groq?.base_url,
-      cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
-      anthropic: anthropicConfig(providers.providers),
-      judge: getJudgeModel(),
-      secondJudge: getSecondJudge(),
-      keyterms: activeKeyTerms(
-        useAssistant.getState().currentAssistant?.keyterms
-      ),
-    }
-    if (!availableJudges(config).length) {
-      toast.error('Add a Cerebras, Groq or Anthropic key first')
-      return
-    }
-    setReplay(null)
-    setReplayProgress('Loading...')
-    try {
-      const clips = await loadLabeledClips()
-      const result = await replayLabeled(
-        clips,
-        config,
-        getWaitMode(),
-        (done, total) => setReplayProgress(`${done}/${total}`)
-      )
-      setReplay(result)
-      // Kept in the server log, so runs can be compared over time
-      reportClip(replaySummary(result))
-    } catch (err) {
-      toast.error(`Replay failed: ${(err as Error).message}`)
-    } finally {
-      setReplayProgress(null)
-    }
-  }
+  const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [answers, setAnswers] = useState<AnswerResult[] | null>(null)
   const [answersRunning, setAnswersRunning] = useState(false)
   const runAnswers = async () => {
@@ -262,7 +150,6 @@ function General() {
     useState<ChatModelKey>(getChatFallback)
   const [chatThinking, setChatThinkingState] =
     useState<ChatThinking>(getChatThinking)
-  const [smartTurn, setSmartTurnState] = useState(getSmartTurn)
   const [dictationMic, setDictationMicState] = useState(getDictationMic)
   const [mics, setMics] = useState<string[] | null>(null)
   const loadMics = (open: boolean) => {
@@ -859,147 +746,6 @@ function General() {
                   />
                 }
               />
-            </Card>
-
-            {/* Speaker */}
-            <Card title="Speaker">
-              <CardItem
-                title="Live transcription"
-                description="Streams the speaker's audio to ElevenLabs while they talk, so the text is ready the moment they pause. The live engines below need it."
-                actions={
-                  <Switch
-                    checked={liveMode}
-                    onCheckedChange={(on) => {
-                      setLiveMode(on)
-                      setLiveModeState(on)
-                    }}
-                  />
-                }
-              />
-              <CardItem
-                title="Engines beside ElevenLabs"
-                description={
-                  !liveMode && transcribeMode === 'live-soniox-cartesia'
-                    ? 'Live transcription is off, so the speaker uses ElevenLabs alone. Turn it on to stream to Soniox and Cartesia too.'
-                    : !liveMode && transcribeMode === 'live'
-                      ? 'Live transcription is off, so Grok transcribes each clip after the pause instead of streaming. Turn it on for Grok live.'
-                      : 'The judge merges their transcripts with ElevenLabs to fix misheard words. Soniox + Cartesia (the default) get your dictionary. None is fastest.'
-                }
-                actions={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
-                      >
-                        {
-                          TRANSCRIBE_MODES.find(
-                            (m) => m.value === transcribeMode
-                          )?.label
-                        }
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {TRANSCRIBE_MODES.map((m) => (
-                        <DropdownMenuItem
-                          key={m.value}
-                          className={`cursor-pointer my-0.5 ${transcribeMode === m.value ? 'bg-main-view-fg/5' : ''}`}
-                          onClick={() => {
-                            setTranscribeMode(m.value)
-                            setTranscribeModeState(m.value)
-                          }}
-                        >
-                          {m.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
-              />
-              <CardItem
-                title="Judgement model"
-                description="Identifies interviewer speech as ignore, keep building, or answer now. The app assembles scenarios and related follow-ups. Cerebras is fastest. Claude needs an Anthropic key in Model Providers."
-                actions={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
-                      >
-                        {
-                          JUDGE_MODELS.find((m) => m.value === judgeModel)
-                            ?.label
-                        }
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {JUDGE_MODELS.map((m) => (
-                        <DropdownMenuItem
-                          key={m.value}
-                          className={`cursor-pointer my-0.5 ${judgeModel === m.value ? 'bg-main-view-fg/5' : ''}`}
-                          onClick={() => {
-                            setJudgeModel(m.value)
-                            setJudgeModelState(m.value)
-                          }}
-                        >
-                          {m.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
-              />
-              <CardItem
-                title="Second judge"
-                description="Automatic questions use the primary judge immediately. The second judge is consulted only when its decision is unclear; it does not delay or veto a clear question. Legacy clip benchmarks still compare both judges."
-                actions={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
-                      >
-                        {JUDGE_MODELS.find((m) => m.value === secondJudge)
-                          ?.label ?? 'Off'}
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {[undefined, ...JUDGE_MODELS.map((m) => m.value)]
-                        .filter((v) => v !== judgeModel)
-                        .map((value) => (
-                          <DropdownMenuItem
-                            key={value ?? 'off'}
-                            className={`cursor-pointer my-0.5 ${secondJudge === value ? 'bg-main-view-fg/5' : ''}`}
-                            onClick={() => {
-                              setSecondJudge(value)
-                              setSecondJudgeState(value)
-                            }}
-                          >
-                            {JUDGE_MODELS.find((m) => m.value === value)
-                              ?.label ?? 'Off'}
-                          </DropdownMenuItem>
-                        ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
-              />
-              <CardItem
-                title="Speaker question review"
-                description="Scenario fragments stay together across pauses until you send or discard them. Separate questions remain available through the more control in the prompt box. Every question requires approval. Send creates a separate prompt and never appends to an existing question or replaces its answer. fn + Right sends; fn + Left discards. Drafts never expire. Streaming text is previewed while transcription finishes; sending does not wait for the judge. Your typed draft is preserved."
-              />
-              <CardItem
-                title="Smart turn detection"
-                description="Listens to the interviewer's voice to help detect when they have finished. Questions still require your approval; unfinished scenarios stay pending. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
-                actions={
-                  <Switch
-                    checked={smartTurn}
-                    onCheckedChange={(on) => {
-                      setSmartTurn(on)
-                      setSmartTurnState(on)
-                    }}
-                  />
-                }
-              />
               <CardItem
                 title="Your dictionary"
                 description={`Names and terms the transcription should spell right, one per line or separated by commas (${dictionaryTerms().length} saved).`}
@@ -1018,139 +764,8 @@ function General() {
               />
             </Card>
 
-            {/* Speaker test */}
-            <Card title="Speaker test">
-              <CardItem
-                title="Compare legacy clip judges"
-                description="Runs each judgement model you have a key for on 58 recorded clips and shows how many it gets right, and how fast."
-                actions={
-                  <div className="flex gap-2">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0"
-                      disabled={benchRunning}
-                      onClick={runBench}
-                    >
-                      <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                        {benchRunning ? 'Running...' : 'Run test'}
-                      </div>
-                    </Button>
-                    {bench && bench.length > 0 && !benchRunning && (
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="p-0"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(formatBench(bench))
-                            .then(() => toast.success('Results copied'))
-                            .catch(() => toast.error("Couldn't copy"))
-                        }}
-                      >
-                        <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                          Copy results
-                        </div>
-                      </Button>
-                    )}
-                  </div>
-                }
-              />
-              {bench && bench.length > 0 && (
-                <div className="text-sm text-main-view-fg/80 px-1 pb-2 space-y-1">
-                  {[...bench]
-                    .sort(
-                      (a, b) => b.right - a.right || a.medianMs - b.medianMs
-                    )
-                    .map((r) => (
-                      <div key={r.judge}>
-                        <span className="font-medium text-main-view-fg">
-                          {r.label}
-                        </span>
-                        : {r.right}/{r.total} right, median{' '}
-                        {(r.medianMs / 1000).toFixed(2)} s, slowest{' '}
-                        {(r.slowestMs / 1000).toFixed(2)} s
-                        {r.backup ? `, ${r.backup} answered by backup` : ''}
-                      </div>
-                    ))}
-                </div>
-              )}
-              <CardItem
-                title="Replay legacy clip filtering"
-                description="Evaluates the previous clip-based filter, not the new question-turn coordinator. Replays labelled interview transcripts and counts chatter it would send and questions it would miss, next to what happened live. Takes a few minutes."
-                actions={
-                  <div className="flex gap-2">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0"
-                      disabled={replayProgress !== null}
-                      onClick={runReplay}
-                    >
-                      <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                        {replayProgress
-                          ? `Running ${replayProgress}`
-                          : 'Run replay'}
-                      </div>
-                    </Button>
-                    {replay && (
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="p-0"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(formatReplay(replay))
-                            .then(() => toast.success('Results copied'))
-                            .catch(() => toast.error("Couldn't copy"))
-                        }}
-                      >
-                        <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                          Copy results
-                        </div>
-                      </Button>
-                    )}
-                  </div>
-                }
-              />
-              {replay && (
-                <div className="text-sm text-main-view-fg/80 px-1 pb-2 space-y-1">
-                  <div>
-                    Chatter sent: {replay.now.chatterSent.length} (live{' '}
-                    {replay.live.chatterSent.length})
-                  </div>
-                  <div>
-                    Questions missed: {replay.now.missed.length} of{' '}
-                    {replay.sends} (live {replay.live.missed.length})
-                  </div>
-                  <div>
-                    Unseen clips only ({replay.unseen.clips} not quoted in the
-                    judge's instructions): chatter sent{' '}
-                    {replay.unseen.now.chatterSent.length} (live{' '}
-                    {replay.unseen.live.chatterSent.length}), missed{' '}
-                    {replay.unseen.now.missed.length} of {replay.unseen.sends}{' '}
-                    (live {replay.unseen.live.missed.length})
-                  </div>
-                  {replay.second !== 'off' && (
-                    <div>
-                      Offered as a chip: {replay.offered.questions} real
-                      questions, {replay.offered.chatter} chatter
-                    </div>
-                  )}
-                  <div>
-                    Chatter sent by type:{' '}
-                    {formatTypes(replay.types.chatterSent)}
-                  </div>
-                  <div>Missed by type: {formatTypes(replay.types.missed)}</div>
-                  <div>
-                    Judge median {(replay.medianMs / 1000).toFixed(2)} s,
-                    slowest {(replay.slowestMs / 1000).toFixed(2)} s
-                    {replay.errors.length
-                      ? `, ${replay.errors.length} errors`
-                      : ''}
-                  </div>
-                </div>
-              )}
+            {/* Answer models */}
+            <Card title="Answer model test">
               <CardItem
                 title="Compare answer models"
                 description={`Asks Claude Haiku 4.5, Haiku 5.5, Sonnet 5.5 and Cerebras ${ANSWER_QUESTIONS.length} real interview questions at the same moment, with your current assistant's instructions, and shows each answer and how fast it started.`}

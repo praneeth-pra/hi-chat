@@ -1,29 +1,4 @@
-import { TARGET_SAMPLE_RATE } from './speakerCapture'
-
-/**
- * Live transcription: audio streams to ElevenLabs' realtime model
- * (scribe_v2_realtime), Grok, Soniox or Cartesia while someone talks, so the
- * text is ready moments after the pause instead of after uploading the whole
- * clip. Dictation always streams. For the speaker it is live mode, kept in
- * this browser and off by default.
- */
-export const LIVE_MODE_STORAGE_KEY = 'speaker-live-mode'
-
-export function getLiveMode(): boolean {
-  try {
-    return localStorage.getItem(LIVE_MODE_STORAGE_KEY) === 'on'
-  } catch {
-    return false
-  }
-}
-
-export function setLiveMode(on: boolean) {
-  try {
-    localStorage.setItem(LIVE_MODE_STORAGE_KEY, on ? 'on' : 'off')
-  } catch {
-    // Storage blocked: live mode stays off
-  }
-}
+import { TARGET_SAMPLE_RATE } from './speechAudio'
 
 export const LIVE_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime'
 

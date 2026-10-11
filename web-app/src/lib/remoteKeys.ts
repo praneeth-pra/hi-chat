@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { useCodingMode } from '@/hooks/useCodingMode'
 import { stopDictation, toggleDictation } from '@/lib/dictation'
 
 /**
@@ -8,25 +8,15 @@ import { stopDictation, toggleDictation } from '@/lib/dictation'
  * hand triggers them.
  */
 export const CODING_KEY = 'F18'
-export const LISTEN_KEY = 'F19'
 export const FOCUS_CHAT_KEY = 'F20'
 /** Like F20, but the dictated text stays in the box for you to send. */
 export const FOCUS_CHAT_DRAFT_KEY = 'F17'
-/** Sends everything heard since the last sent question as one question. */
-export const SCENARIO_KEY = 'F16'
-/**
- * Sends what's typed in the chat box, or when it's empty the newest
- * suggestion chip (a clip the two judges disagreed on).
- */
-export const SUGGESTION_KEY = 'F15'
-/** Hammerspoon fn + Right / Left; recommendation-only, independent of the typed draft. */
-export const RECOMMENDATION_SEND_KEY = 'Shift+F15'
-export const RECOMMENDATION_DISCARD_KEY = 'Shift+F18'
 /**
  * F14 starts dictating your own voice and, pressed again, stops and
  * sends the text; F13 only stops. Hammerspoon sends F14 on a tap of Left
  * Control.
  */
+export const SEND_KEY = 'F15'
 export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
 /**
@@ -36,35 +26,6 @@ export const DICTATION_STOP_KEY = 'F13'
  */
 export const CODE_UP_KEY = 'Shift+F16'
 export const CODE_DOWN_KEY = 'Shift+F17'
-
-let scenarioSender: (() => string | null | boolean) | null = null
-
-/** The speaker listener registers how to send the scenario; returns the cleanup. */
-export function setScenarioSender(send: () => string | null | boolean) {
-  scenarioSender = send
-  return () => {
-    if (scenarioSender === send) scenarioSender = null
-  }
-}
-
-function sendScenario(): boolean {
-  if (!scenarioSender) {
-    toast('Speaker is off')
-    return true
-  }
-  const text = scenarioSender()
-  if (text === true) {
-    toast('Sending assembled question')
-    return true
-  }
-  if (!text) {
-    toast('Nothing new heard since the last question')
-    return true
-  }
-  useSpeakerTranscription.getState().enqueue(text)
-  toast('Sent scenario')
-  return true
-}
 
 /** A press within this long of the last continues from where it was going. */
 const CODE_STEP_MS = 1000
@@ -185,11 +146,10 @@ function keyName(e: KeyboardEvent): string {
   return byCode[e.keyCode] ?? e.key
 }
 
-/** Toggles coding mode or listening, focuses the chat box, sends the scenario or jumps to code; returns false for any other key. */
-export function handleSpeakerKey(key: string): boolean {
+/** Dictation, coding mode, explicit send and navigation shortcuts. */
+export function handleRemoteKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
-  if (key === SCENARIO_KEY) return sendScenario()
   if (key === CODE_UP_KEY) return stepCode(-1)
   if (key === CODE_DOWN_KEY) return stepCode(1)
   if (key === DICTATION_TOGGLE_KEY) {
@@ -200,89 +160,29 @@ export function handleSpeakerKey(key: string): boolean {
     void stopDictation()
     return true
   }
-  const state = useSpeakerTranscription.getState()
-  if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
-    if (!state.composerReviewVisible) {
-      toast('No speaker question visible in the prompt box')
-      return true
-    }
-    if (state.enabled && state.pendingQuestion) {
-      if (
-        key === RECOMMENDATION_SEND_KEY &&
-        state.preview &&
-        !state.pendingQuestion.complete &&
-        !state.pendingQuestion.queuedQuestions
-      ) {
-        toast('Finishing transcription…')
-        return true
-      }
-      if (key === RECOMMENDATION_SEND_KEY) {
-        state.sendPendingQuestion()
-        toast('Sending assembled question')
-      } else {
-        state.discardPendingQuestion()
-        toast('Question discarded')
-      }
-      return true
-    }
-    if (state.enabled && state.preview) {
-      if (key === RECOMMENDATION_DISCARD_KEY) state.discardPendingQuestion()
-      else toast('Finishing transcription…')
-      return true
-    }
-    const [newest] = state.suggestions
-    if (!state.enabled || !newest) {
-      toast('No speaker recommendation')
-      return true
-    }
-    if (key === RECOMMENDATION_SEND_KEY) {
-      state.acceptSuggestion(newest)
-      toast('Sending recommendation as a new question')
-    } else {
-      state.dismissSuggestion(newest)
-      toast('Recommendation discarded')
-    }
-    return true
-  }
-  if (key === SUGGESTION_KEY) {
+  if (key === SEND_KEY) {
     const send = document.querySelector<HTMLButtonElement>(
       '[data-test-id="send-message-button"]'
     )
-    if (send && !send.disabled) {
-      send.click()
-      return true
-    }
-    if (state.enabled && state.preview) {
-      toast('Finishing transcription…')
-      return true
-    }
-    const [newest] = state.suggestions
-    if (newest) {
-      state.acceptSuggestion(newest)
-      toast('Sent suggestion')
-    } else toast('Nothing to send')
+    if (send && !send.disabled) send.click()
+    else toast('Nothing to send')
     return true
   }
+  const state = useCodingMode.getState()
   if (key === CODING_KEY) {
     state.setCoding(!state.coding)
     toast(`Coding mode ${state.coding ? 'off' : 'on'}`)
-    return true
-  }
-  if (key === LISTEN_KEY) {
-    state.setEnabled(!state.enabled)
-    toast(`Speaker ${state.enabled ? 'off' : 'on'}`)
     return true
   }
   return false
 }
 
 /** Listens for the keys on the whole page; returns the cleanup. */
-export function listenForSpeakerKeys() {
+export function listenForRemoteKeys() {
   const onKey = (e: KeyboardEvent) => {
     if (e.repeat) return
     const name = keyName(e)
-    if (handleSpeakerKey(e.shiftKey ? `Shift+${name}` : name))
-      e.preventDefault()
+    if (handleRemoteKey(e.shiftKey ? `Shift+${name}` : name)) e.preventDefault()
   }
   window.addEventListener('keydown', onKey)
   return () => window.removeEventListener('keydown', onKey)

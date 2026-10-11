@@ -31,7 +31,7 @@ import {
 import { useCallback, useEffect } from 'react'
 import GlobalError from '@/containers/GlobalError'
 import { GlobalEventHandler } from '@/providers/GlobalEventHandler'
-import { SpeakerTranscriptionProvider } from '@/containers/SpeakerListenIndicator'
+import { RemoteKeysProvider } from '@/containers/RemoteKeysProvider'
 import ErrorDialog from '@/containers/dialogs/ErrorDialog'
 import { ServiceHubProvider } from '@/providers/ServiceHubProvider'
 import { PlatformFeatures } from '@/lib/platform/const'
@@ -239,7 +239,7 @@ function RootLayout() {
           <ExtensionProvider>
             <DataProvider />
             <GlobalEventHandler />
-            <SpeakerTranscriptionProvider />
+            <RemoteKeysProvider />
             {IS_LOGS_ROUTE ? <LogsLayout /> : <AppLayout />}
           </ExtensionProvider>
           {/* {isLocalAPIServerLogsRoute ? <LogsLayout /> : <AppLayout />} */}

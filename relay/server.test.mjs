@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   createRelay,
   liveToken,
-  speakerLogLine,
+  speechLogLine,
   transcribeAll,
   useGrokTicket,
   clipLogLine,
@@ -242,15 +242,15 @@ test('live token: 503 without an ElevenLabs key', async () => {
   await assert.rejects(liveToken({ env: {} }), (err) => err.status === 503)
 })
 
-test('speaker log: one capped line per clip', () => {
+test('speech log: one capped line per clip', () => {
   const body = (o) => Buffer.from(JSON.stringify(o))
   assert.equal(
-    speakerLogLine(body({ line: 'sent "What is a pod?"\n| ElevenLabs 0.3 s' })),
-    'speaker sent "What is a pod?" | ElevenLabs 0.3 s'
+    speechLogLine(body({ line: 'sent "What is a pod?"\n| ElevenLabs 0.3 s' })),
+    'speech sent "What is a pod?" | ElevenLabs 0.3 s'
   )
-  assert.equal(speakerLogLine(body({ line: 'x'.repeat(9000) })).length, 6008)
-  assert.equal(speakerLogLine(body({})), null)
-  assert.equal(speakerLogLine(Buffer.from('not json')), null)
+  assert.equal(speechLogLine(body({ line: 'x'.repeat(9000) })).length, 6007)
+  assert.equal(speechLogLine(body({})), null)
+  assert.equal(speechLogLine(Buffer.from('not json')), null)
 })
 
 test('HTTP: Grok runs with its key and the browser can shorten the wait', async () => {

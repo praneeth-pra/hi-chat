@@ -2,9 +2,8 @@
 
 A web-only fork of [Jan](https://github.com/janhq/jan). The chat app runs in
 the browser, keeps threads and assistants in browser storage, and talks to
-Groq. It can also turn the Mac's own sound (through a BlackHole loopback
-device) into prompts by transcribing each spoken clip, and turn your own
-voice into prompts with dictation.
+Groq and other configured models. Microphone dictation turns speech into prompts.
+The continuous Speaker listener has been removed.
 
 ## Layout
 
@@ -29,79 +28,35 @@ yarn build:core
 yarn dev:web-app        # http://localhost:3001
 ```
 
-## Speaker questions
+## Dictation
 
-The speaker uses a conversation buffer rather than one prompt per audio clip.
-Finalized transcription enters an unsent review draft immediately. The judge runs
-in the background with the accumulated turn and previous sent question, advising
-on completeness and current/new topic relation. Its original-word selection and
-non-question checks remain available for classification, but cannot silently
-delete or rewrite the speech you are reviewing. This review flow assumes question,
-scenario and follow-up audio; approval determines exactly what is sent.
+Tap Left Control or click the mic button to record; tap or click again to stop,
+transcribe and send. Playback suppression is off by default so the selected
+microphone can capture played speech as well as your voice. Settings > Dictation
+offers a microphone selector, optional echo suppression, engine selection,
+Keep microphone ready and your dictionary. Assistant key terms remain available
+to dictation's live engines without any background question listener.
 
-Every question requires approval, including the first. Speaker proposals appear
-in the existing prompt box with Send and Discard controls in its toolbar; there
-are no separate cards above it. In narrow composers, review controls use the model
-selector’s space; the model name stays visible in wide composers and returns when
-the proposal clears. If you have typed a draft, **Review question**
-switches to the proposal and **Back to draft** restores your text. Incoming
-speech never overwrites the typed draft. Sending creates a separate prompt; it
-never appends speech to a sent question or replaces its answer. The previous
-question remains context for the judge, not text copied into the new prompt.
-Incomplete scenarios survive pauses and accumulate without displaying background
-cards. A final fragment can complete a question begun in an earlier clip.
-Short questions retain preceding unsent scenario context.
+Recognized dictation appends to the prompt box and automatically sends through
+its own queue. If an answer is streaming, text waits until the chat can send it.
+An error restores the text for retry. The external F20-then-paste dictation path
+also uses the dictation queue. Ordinary text pastes remain drafts.
 
-Approval sends immediately without an additional settling timer.
-A valid primary decision needs no second
-model; failed/invalid decisions get at most one recovery attempt. Endpointing,
-transcription, provider processing and answer generation still add latency.
-Speaker finalization takes the first usable live engine result and gathers other
-ready transcripts for up to 300 ms. If none arrive within 1.5 seconds, batch
-fallback starts without waiting for the live timeout. Batch transcription starts
-at each clip endpoint, independently of earlier questions being judged. Logs
-separate clip-finalized, engine-ready, fallback-start, transcripts-ready,
-capture-queue-ready and turn-check-observed stages.
+## Hammerspoon shortcuts
 
-One persistent unsent draft accumulates scenario fragments across pauses, without
-expiring. **Send**, Enter or fn + Right approves the finalized text; **Discard**,
-Escape or fn + Left removes that draft. Separate topics are retained in a review
-queue; the composer shows a small “more” control when another question is held.
-fn shortcuts act only on the visible proposal, leaving ordinary arrows free for
-navigation. Streaming text appears as “Listening…” until finalized; approval does
-not wait for the judge. The judge advises on topic and readiness, never deletes
-speech or sends it. Approval always creates a separate prompt; later speech cannot
-change a sent question. The user's typed draft stays separate.
+The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy
+and reload Hammerspoon; a Railway deployment cannot update a script on your Mac.
+The script retains scrolling, fn + Up/Down code navigation, Left Control dictation,
+fn + Return sending, Z/X and the native-sized dummy cursor. The retired Speaker
+Option toggle and fn + Left/Right recommendation shortcuts are removed. Ordinary
+arrows and fn + Left/Right pass through to the app in front.
 
-Speaker logs record `conversation-v5`, endpoint configuration, invalid fields,
-provider finish reason and recovery outcome. Stage timestamps distinguish clip
-finalization, transcript readiness, decision readiness, settling, queueing,
-sending and first answer content. Commit origin distinguishes Send now and clicked recommendations. Review discards and background judge failures are logged. Capture end is the audio endpoint, not the last word.
-No raw judge replies or credentials are logged.
+Coding mode remains available as its own chat toolbar button and F18 shortcut.
+There is no Speaker capture, review UI, question judge, background microphone
+turn detector or Smart Turn model download.
 
-Speaker sends retain all earlier questions and answers.
-Switching chats, typing a question or disabling Speaker cancels stale speaker
-work. Dictation retains its separate microphone flow. Playback suppression is off by
-default so the selected microphone can capture played speech as well as your voice.
-Settings > Dictation offers an opt-in suppression switch and a microphone selector.
-Dictation batch fallback requires nonempty speech before ending the engine race.
-Recognized dictation
-appends to the prompt box and automatically sends through its own queue even
-when Speaker is disabled. While an answer is streaming, the text stays visible
-until it can send; a delivery error restores the text for retry. Smart Turn remains
-optional; a stalled model load cannot block text decisions.
-
-## Hammerspoon speaker shortcuts
-
-The updated version of the supplied Mac script is
-`scripts/hammerspoon/jan-remote.lua`. Replace the corresponding script on your
-Mac with this file and reload Hammerspoon. **fn + Right** accepts the visible
-draft; **fn + Left** discards it. Plain Left/Right arrows remain
-normal navigation. The script tracks the physical fn press because macOS can
-mark plain arrow events with a secondary fn flag. These commands use
-Shift + F15 / Shift + F18 and do not submit a typed draft or toggle coding.
-The script retains scrolling, code navigation, dictation, fn + Return, Z/X and
-speaker toggling. No Mac-side changes are applied by a Railway deployment.
+See [Question input alternatives and answer latency](docs/question-input-alternatives.md)
+for the assessed replacement options; no replacement listener is enabled.
 
 ## Test and build
 
@@ -126,22 +81,12 @@ The whole site sits behind a login: a 6-digit code is emailed to
 can sign in.
 
 Dictation's Auto mode streams to Cartesia, Soniox and ElevenLabs, so it
-needs all three keys; the speaker uses ElevenLabs plus the engines picked in
-Settings. Keys for Groq, Cerebras (the judges) and Anthropic are entered in
-the app under Model Providers.
+needs all three keys. Keys for Groq, Cerebras and Anthropic chat models are
+entered in the app under Model Providers.
 
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE).
-
-The word-range protocol uses `span: {start, end}` (zero-based, end exclusive)
-or `null` for the whole selected transcript. Out-of-bounds or invented spans
-cannot automatically send. The optional secondary judge is recovery only.
-
-Run `lua scripts/hammerspoon/test-recommendation-shortcuts.lua` from the repo
-root to exercise the actual shortcut callback, including plain-arrow rejection,
-fn release, repeats and conflicting modifiers. Native Mac loading still needs
-verification on the user's machine.
 
 The dummy cursor uses macOS’s native arrow image, logical dimensions and hotspot,
 with Accessibility cursor scaling. Update the Mac script and reload Hammerspoon
