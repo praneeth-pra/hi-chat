@@ -148,7 +148,7 @@ export async function judgeSpeakerTurn(
       TURN_PROMPT,
       user,
       user,
-      { ...config, judge },
+      { ...config, judge, json: true },
       300
     )
     return { decision: parseTurnDecision(result.reply, distinct), result }
@@ -202,7 +202,7 @@ export async function judgeSpeakerTurn(
     )
     onCheck?.({
       model: 'manual confirmation',
-      ms: 0,
+      ms: Date.now() - started,
       note: reason,
       type: 'suggest',
     })

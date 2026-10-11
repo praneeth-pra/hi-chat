@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
+  requestSpeakerJudge,
   CEREBRAS_CLASSIFIER_MODEL,
   CLASSIFIER_MODELS,
   createRelevanceFilter,
@@ -29,6 +30,19 @@ const groqReply = (content: string) =>
   }))
 
 describe('speakerFilter', () => {
+  it('requests JSON only for structured turns without changing legacy classifiers', async () => {
+    const fetchMock = vi.fn(async (_url: string, _options: { body: string }) => ({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '{"action":"skip"}' } }] }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await requestSpeakerJudge('Return JSON', 'clip', 'clip', { apiKey: 'test', json: true })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).response_format).toEqual({ type: 'json_object' })
+    fetchMock.mockClear()
+    await requestSpeakerJudge('Return YES or NO', 'clip', 'clip', { apiKey: 'test' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).response_format).toBeUndefined()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
     resetClassifierModel()
