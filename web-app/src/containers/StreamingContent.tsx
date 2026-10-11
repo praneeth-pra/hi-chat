@@ -50,10 +50,6 @@ export const StreamingContent = memo(({ threadId }: Props) => {
     return extractReasoningSegment(text)
   }, [lastAssistant])
 
-  if (!streamingContent || streamingContent.thread_id !== threadId) {
-    return null
-  }
-
   if (accuracyStatus?.threadId === threadId) {
     return (
       <p role="status" className="text-sm text-main-view-fg/60 py-3">
@@ -62,6 +58,10 @@ export const StreamingContent = memo(({ threadId }: Props) => {
           : 'Accuracy: checking the answer…'}
       </p>
     )
+  }
+
+  if (!streamingContent || streamingContent.thread_id !== threadId) {
+    return null
   }
 
   if (streamingReasoning && streamingReasoning === lastAssistantReasoning) {
