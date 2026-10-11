@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import {
   IconCode,
   IconHeadphones,
@@ -36,8 +36,8 @@ import {
   getSmartTurn,
   SMART_TURN_HOLD_BELOW,
 } from '@/lib/smartTurn'
-import { createQuestionTurns, SPEAKER_REVIEW_MS } from '@/lib/speakerTurns'
-import { hasQuestionCue, judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
+import { createQuestionTurns } from '@/lib/speakerTurns'
+import { judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
 import { useThreads } from '@/hooks/useThreads'
 import { toast } from 'sonner'
 import { isPlatformTauri } from '@/lib/platform/utils'
@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=conversation-v3',
+        'protocol=conversation-v4',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
@@ -292,216 +292,6 @@ export function SpeakerTranscriptionProvider() {
 }
 
 /** The draft is distinct from sent chat messages and survives long scenario pauses. */
-export function SpeakerPendingQuestion() {
-  const {
-    enabled,
-    pendingQuestion,
-    sendingTurn,
-    sendPendingQuestion,
-    discardPendingQuestion,
-  } = useSpeakerTranscription()
-  const [expired, setExpired] = useState('')
-  const reviewKey = pendingQuestion
-    ? `${pendingQuestion.id}:${pendingQuestion.text}:${pendingQuestion.reviewUntil ?? 0}`
-    : ''
-  useEffect(() => {
-    if (
-      !enabled ||
-      !pendingQuestion ||
-      (pendingQuestion.complete && !pendingQuestion.requiresReview)
-    )
-      return
-    const snapshot = pendingQuestion
-    const timer = setTimeout(
-      () => {
-        setExpired(reviewKey)
-        const current = useSpeakerTranscription.getState()
-        // Hide the card only; later speech can complete this retained follow-up.
-        if (
-          snapshot.requiresReview &&
-          current.pendingQuestion?.id === snapshot.id &&
-          current.pendingQuestion.text === snapshot.text
-        )
-          current.expirePendingReview(snapshot.id, snapshot.text)
-      },
-      Math.max(
-        0,
-        (snapshot.reviewUntil ?? Date.now() + SPEAKER_REVIEW_MS) - Date.now()
-      )
-    )
-    return () => clearTimeout(timer)
-  }, [
-    enabled,
-    pendingQuestion?.id,
-    pendingQuestion?.text,
-    pendingQuestion?.complete,
-    pendingQuestion?.requiresReview,
-    pendingQuestion?.reviewUntil,
-  ])
-  if (isPlatformTauri() || !enabled) return null
-  if (!pendingQuestion)
-    return sendingTurn ? (
-      <div className="px-3 pt-2 text-sm text-main-view-fg/60" role="status">
-        {sendingTurn.relation === 'update'
-          ? 'Updating the same question…'
-          : 'Preparing answer…'}
-      </div>
-    ) : null
-  if (
-    expired === reviewKey &&
-    (!pendingQuestion.complete || pendingQuestion.requiresReview)
-  )
-    return null
-  // Scenario background accumulates without repeatedly asking for approval.
-  if (
-    !pendingQuestion.complete &&
-    !pendingQuestion.manual &&
-    !pendingQuestion.uncertain &&
-    !pendingQuestion.requiresReview &&
-    !hasQuestionCue(pendingQuestion.text)
-  )
-    return null
-  return (
-    <div
-      className="m-2 rounded-md border border-main-view-fg/15 p-3 text-sm"
-      data-test-id="speaker-pending-question"
-    >
-      <div className="font-medium">
-        {pendingQuestion.requiresReview
-          ? pendingQuestion.followsQuestion
-            ? 'Follow-up question?'
-            : 'New question?'
-          : pendingQuestion.manual
-            ? 'Waiting for you to send'
-            : pendingQuestion.uncertain
-              ? 'Waiting for clearer speech…'
-              : pendingQuestion.complete
-                ? pendingQuestion.relation === 'new'
-                  ? 'Sending new question…'
-                  : 'Sending automatically…'
-                : 'New question?'}
-      </div>
-      {(!pendingQuestion.complete || pendingQuestion.requiresReview) && (
-        <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">
-          {pendingQuestion.text}
-        </p>
-      )}
-      {(!pendingQuestion.complete || pendingQuestion.requiresReview) && (
-        <p className="mt-1 text-xs text-main-view-fg/50">
-          {pendingQuestion.requiresReview
-            ? 'Sends as a separate prompt'
-            : 'New question setup'}{' '}
-          · hides after 3 seconds
-        </p>
-      )}
-      {pendingQuestion.uncertain && (
-        <p className="mt-1 text-main-view-fg/60">{pendingQuestion.reason}</p>
-      )}
-      <div className="mt-2 flex gap-3">
-        <button
-          type="button"
-          className="text-accent"
-          onClick={sendPendingQuestion}
-        >
-          {pendingQuestion.requiresReview ? 'Send as new' : 'Send now'}{' '}
-          <kbd className="ml-1 text-xs">fn + →</kbd>
-        </button>
-        <button type="button" onClick={discardPendingQuestion}>
-          Discard <kbd className="ml-1 text-xs">fn + ←</kbd>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** Manual fallback cards are separate from automatically delivered questions. */
-export function SpeakerSuggestions() {
-  const {
-    enabled,
-    pendingQuestion,
-    suggestions,
-    suggestionReasons,
-    acceptSuggestion,
-    dismissSuggestion,
-  } = useSpeakerTranscription()
-  const newestText = suggestions[0]
-  useEffect(() => {
-    if (!enabled || !newestText) return
-    const timer = setTimeout(
-      () => useSpeakerTranscription.getState().dismissSuggestion(newestText),
-      SPEAKER_REVIEW_MS
-    )
-    return () => clearTimeout(timer)
-  }, [enabled, newestText])
-  if (isPlatformTauri() || !enabled || pendingQuestion || !suggestions.length)
-    return null
-  const card = (text: string, newest = false) => (
-    <article
-      key={text}
-      aria-label={
-        newest
-          ? 'Latest speaker recommendation'
-          : 'Earlier speaker recommendation'
-      }
-      data-test-id="speaker-suggestion"
-      className="rounded-lg border border-main-view-fg/15 bg-main-view-fg/5 p-3"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-main-view-fg/70">
-          {newest ? 'New question?' : 'Earlier recommendation'}
-        </span>
-        <span className="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent">
-          Needs review
-        </span>
-      </div>
-      <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
-        {text}
-      </p>
-      <p className="mt-2 break-words text-xs text-main-view-fg/60">
-        {suggestionReasons[text] ?? 'Speech needs clarification'}
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => acceptSuggestion(text)}
-          className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          Send as new
-          {newest && <kbd className="ml-2 text-xs opacity-75">fn + →</kbd>}
-        </button>
-        <button
-          type="button"
-          aria-label="Discard recommendation"
-          onClick={() => dismissSuggestion(text)}
-          className="rounded-md border border-main-view-fg/15 px-3 py-2 text-sm hover:bg-main-view-fg/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          Discard
-          {newest && (
-            <kbd className="ml-2 text-xs text-main-view-fg/60">fn + ←</kbd>
-          )}
-        </button>
-        <span className="text-xs text-main-view-fg/50">
-          New question · hides after 3 seconds
-        </span>
-      </div>
-    </article>
-  )
-  return (
-    <section aria-label="Speaker recommendations" className="space-y-2 p-2">
-      <div className="flex flex-wrap items-center justify-between gap-1 px-1">
-        <span className="text-xs font-medium text-main-view-fg/70">
-          Speaker recommendations
-        </span>
-        <span className="text-xs text-main-view-fg/50">
-          Clear questions send automatically
-        </span>
-      </div>
-      {card(suggestions[0], true)}
-    </section>
-  )
-}
-
-/** Small on/off chip in the chat box showing what the speaker listener is doing. */
 export function SpeakerListenIndicator() {
   const { enabled, status, error, setEnabled, coding, setCoding } =
     useSpeakerTranscription()

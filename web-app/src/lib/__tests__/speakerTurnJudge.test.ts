@@ -147,6 +147,8 @@ describe('speaker intent protocol', () => {
       'Can you tell me a scenario where ECS will be better suited?',
     ])
     await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit).not.toHaveBeenCalled()
+    turns.sendNow()
     expect(onCommit.mock.calls[0][0].text).toBe(
       'Can you tell me a scenario where ECS will be better suited?'
     )
@@ -498,6 +500,7 @@ describe('speaker intent protocol', () => {
       onSuggest: vi.fn(),
     })
     await turns.accept(['Compare ECS and EKS for this workload.'])
+    turns.sendNow()
     await vi.advanceTimersByTimeAsync(500)
     await turns.accept([
       'And what do you think which one is cheaper as compared to each other?',
@@ -512,7 +515,7 @@ describe('speaker intent protocol', () => {
     })
     turns.stop()
   })
-  it('automatically sends the first question, offers its real follow-up for review and excludes the candidate answer', async () => {
+  it('requires approval for the first question and its real follow-up and excludes the candidate answer', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)
       .mockResolvedValueOnce(reply('question'))
@@ -527,6 +530,8 @@ describe('speaker intent protocol', () => {
       onSuggest: vi.fn(),
     })
     await turns.accept(['What is your strong zone?'])
+    expect(onCommit).not.toHaveBeenCalled()
+    turns.sendNow()
     await vi.advanceTimersByTimeAsync(500)
     await turns.accept([
       'Out of all of these things, what do you work regularly on?',
@@ -538,7 +543,7 @@ describe('speaker intent protocol', () => {
     turns.sendNow()
     expect(onCommit).toHaveBeenCalledTimes(2)
     const [first, second] = onCommit.mock.calls.map(([turn]) => turn)
-    expect(first.origin).toBe('automatic')
+    expect(first.origin).toBe('send-now')
     expect(second).toMatchObject({
       version: 1,
       origin: 'send-now',

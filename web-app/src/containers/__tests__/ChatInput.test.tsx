@@ -1,10 +1,18 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { RouterProvider, createRouter, createRootRoute, createMemoryHistory } from '@tanstack/react-router'
+import {
+  RouterProvider,
+  createRouter,
+  createRootRoute,
+  createMemoryHistory,
+} from '@tanstack/react-router'
 import ChatInput from '../ChatInput'
 import { useDictationDelivery } from '@/lib/dictationDelivery'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import {
+  setQuestionControls,
+  useSpeakerTranscription,
+} from '@/hooks/useSpeakerTranscription'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useAppState } from '@/hooks/useAppState'
@@ -20,7 +28,10 @@ let mockPromptState = {
 }
 
 vi.mock('@/hooks/usePrompt', () => ({
-  usePrompt: Object.assign((selector: any) => selector ? selector(mockPromptState) : mockPromptState, {getState: () => mockPromptState}),
+  usePrompt: Object.assign(
+    (selector: any) => (selector ? selector(mockPromptState) : mockPromptState),
+    { getState: () => mockPromptState }
+  ),
 }))
 
 vi.mock('@/hooks/useThreads', () => ({
@@ -45,7 +56,8 @@ let mockAppState = {
 }
 
 vi.mock('@/hooks/useAppState', () => ({
-  useAppState: (selector?: any) => selector ? selector(mockAppState) : mockAppState,
+  useAppState: (selector?: any) =>
+    selector ? selector(mockAppState) : mockAppState,
 }))
 
 vi.mock('@/hooks/useGeneralSetting', () => ({
@@ -138,12 +150,18 @@ vi.mock('@/hooks/useServiceHub', () => ({
 }))
 
 vi.mock('../MovingBorder', () => ({
-  MovingBorder: ({ children }: { children: React.ReactNode }) => <div data-testid="moving-border">{children}</div>,
+  MovingBorder: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="moving-border">{children}</div>
+  ),
 }))
 
 vi.mock('../DropdownModelProvider', () => ({
   __esModule: true,
-  default: () => <div data-testid="model-dropdown" data-slot="popover-trigger">Model Dropdown</div>,
+  default: () => (
+    <div data-testid="model-dropdown" data-slot="popover-trigger">
+      Model Dropdown
+    </div>
+  ),
 }))
 
 vi.mock('../loaders/ModelLoader', () => ({
@@ -152,7 +170,11 @@ vi.mock('../loaders/ModelLoader', () => ({
 
 vi.mock('../DropdownToolsAvailable', () => ({
   __esModule: true,
-  default: ({ children }: { children: (isOpen: boolean, toolsCount: number) => React.ReactNode }) => {
+  default: ({
+    children,
+  }: {
+    children: (isOpen: boolean, toolsCount: number) => React.ReactNode
+  }) => {
     return <div data-testid="tools-dropdown">{children(false, 0)}</div>
   },
 }))
@@ -172,20 +194,40 @@ vi.mock('@/components/ui/button', () => ({
 }))
 
 vi.mock('@/components/ui/tooltip', () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Tooltip: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
 }))
 
 vi.mock('react-textarea-autosize', () => ({
-  default: ({ value, onChange, onKeyDown, placeholder, disabled, className, minRows, maxRows, onHeightChange, ...props }: any) => (
+  default: ({
+    value,
+    onChange,
+    onKeyDown,
+    placeholder,
+    disabled,
+    className,
+    minRows,
+    maxRows,
+    onHeightChange,
+    ...props
+  }: any) => (
     <textarea
       value={value}
       onChange={onChange}
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       disabled={disabled}
+      readOnly={props.readOnly}
       className={className}
       data-testid={props['data-testid']}
       rows={minRows || 1}
@@ -208,7 +250,11 @@ vi.mock('@tabler/icons-react', () => ({
   IconPaperclip: () => <svg data-testid="paperclip-icon">Paperclip</svg>,
   IconLoader2: () => <svg data-testid="loader-icon">Loader</svg>,
   IconCheck: () => <svg data-testid="check-icon">Check</svg>,
-  IconPlayerStopFilled: () => <svg className="tabler-icon-player-stop-filled" data-testid="stop-icon">Stop</svg>,
+  IconPlayerStopFilled: () => (
+    <svg className="tabler-icon-player-stop-filled" data-testid="stop-icon">
+      Stop
+    </svg>
+  ),
   IconX: () => <svg data-testid="x-icon">X</svg>,
 }))
 
@@ -222,7 +268,7 @@ describe('ChatInput', () => {
       component: MockComponent,
     })
 
-    return createRouter({ 
+    return createRouter({
       routeTree: rootRoute,
       history: createMemoryHistory({
         initialEntries: ['/'],
@@ -235,10 +281,11 @@ describe('ChatInput', () => {
     return render(<RouterProvider router={router} />)
   }
 
-
   beforeEach(() => {
     vi.clearAllMocks()
-    useDictationDelivery.setState({pending: []})
+    useDictationDelivery.setState({ pending: [] })
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setEnabled(true)
 
     // Reset mock states
     mockPromptState.prompt = ''
@@ -259,7 +306,10 @@ describe('ChatInput', () => {
 
     const textarea = screen.getByTestId('chat-input')
     expect(textarea).toBeInTheDocument()
-    expect(textarea).toHaveAttribute('placeholder', 'common:placeholder.chatInput')
+    expect(textarea).toHaveAttribute(
+      'placeholder',
+      'common:placeholder.chatInput'
+    )
   })
 
   it('renders send button', async () => {
@@ -267,7 +317,9 @@ describe('ChatInput', () => {
       renderWithRouter()
     })
 
-    const sendButton = document.querySelector('[data-test-id="send-message-button"]')
+    const sendButton = document.querySelector(
+      '[data-test-id="send-message-button"]'
+    )
     expect(sendButton).toBeInTheDocument()
   })
 
@@ -276,7 +328,9 @@ describe('ChatInput', () => {
       renderWithRouter()
     })
 
-    const sendButton = document.querySelector('[data-test-id="send-message-button"]')
+    const sendButton = document.querySelector(
+      '[data-test-id="send-message-button"]'
+    )
     expect(sendButton).toBeDisabled()
   })
 
@@ -288,7 +342,9 @@ describe('ChatInput', () => {
       renderWithRouter()
     })
 
-    const sendButton = document.querySelector('[data-test-id="send-message-button"]')
+    const sendButton = document.querySelector(
+      '[data-test-id="send-message-button"]'
+    )
     expect(sendButton).not.toBeDisabled()
   })
 
@@ -308,14 +364,106 @@ describe('ChatInput', () => {
     expect(mockPromptState.setPrompt).toHaveBeenLastCalledWith('o')
   })
 
+  it('reviews speech in the existing prompt box without extra cards, and sends on Enter', async () => {
+    const sendNow = vi.fn()
+    const unregister = setQuestionControls({
+      sendNow,
+      discard: vi.fn(),
+      keepListening: vi.fn(),
+    })
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'How does DNS work?',
+        complete: true,
+        manual: false,
+        requiresReview: true,
+        reviewUntil: Date.now() + 3000,
+        reason: 'question',
+      })
+    await act(async () => {
+      renderWithRouter()
+    })
+    expect(screen.getByTestId('chat-input')).toHaveValue('How does DNS work?')
+    expect(
+      screen.queryByTestId('speaker-pending-question')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: 'Speaker recommendations' })
+    ).not.toBeInTheDocument()
+    expect(sendNow).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId('chat-input'), { key: 'Enter' })
+    expect(sendNow).toHaveBeenCalledTimes(1)
+    expect(mockPromptState.setPrompt).not.toHaveBeenCalled()
+    unregister()
+  })
+  it('preserves typed text while switching to the speaker proposal and back', async () => {
+    mockPromptState.prompt = 'My draft'
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'What about caching?',
+        complete: true,
+        manual: false,
+        requiresReview: true,
+        reviewUntil: Date.now() + 3000,
+        reason: 'question',
+      })
+    await act(async () => {
+      renderWithRouter()
+    })
+    expect(screen.getByTestId('chat-input')).toHaveValue('My draft')
+    fireEvent.click(screen.getByRole('button', { name: 'Review question' }))
+    expect(screen.getByTestId('chat-input')).toHaveValue('What about caching?')
+    expect(screen.getByTestId('chat-input')).toHaveAttribute('readonly')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to draft' }))
+    expect(screen.getByTestId('chat-input')).toHaveValue('My draft')
+    expect(mockPromptState.setPrompt).not.toHaveBeenCalled()
+  })
+  it('keeps Stop available while reviewing speech during an answer', async () => {
+    mockAppState.streamingContent = { thread_id: 'thread' } as any
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'What about caching?',
+        complete: true,
+        manual: false,
+        requiresReview: true,
+        reviewUntil: Date.now() + 3000,
+        reason: 'question',
+      })
+    await act(async () => {
+      renderWithRouter()
+    })
+    expect(
+      screen.getByRole('button', { name: 'Stop the answer' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Discard speaker question' })
+    ).toBeInTheDocument()
+  })
+
   it('automatically sends dictation even when Speaker is disabled', async () => {
     const send = vi.fn(async () => {})
     vi.mocked(useChat).mockReturnValue(send)
     useSpeakerTranscription.getState().setEnabled(false)
     mockPromptState.prompt = 'Describe ECS pricing.'
-    useDictationDelivery.setState({pending: ['Describe ECS pricing.']})
-    await act(async () => {renderWithRouter()})
-    await waitFor(() => expect(send).toHaveBeenCalledWith('Describe ECS pricing.', true, undefined, undefined))
+    useDictationDelivery.setState({ pending: ['Describe ECS pricing.'] })
+    await act(async () => {
+      renderWithRouter()
+    })
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        'Describe ECS pricing.',
+        true,
+        undefined,
+        undefined
+      )
+    )
     expect(mockPromptState.setPrompt).toHaveBeenCalledWith('')
     expect(useDictationDelivery.getState().pending).toEqual([])
     useSpeakerTranscription.getState().setEnabled(true)
@@ -332,7 +480,9 @@ describe('ChatInput', () => {
       renderWithRouter()
     })
 
-    const sendButton = document.querySelector('[data-test-id="send-message-button"]')
+    const sendButton = document.querySelector(
+      '[data-test-id="send-message-button"]'
+    )
     await act(async () => {
       await user.click(sendButton)
     })
@@ -393,14 +543,15 @@ describe('ChatInput', () => {
     expect(stopButton).toBeInTheDocument()
   })
 
-
   it('shows model selection dropdown', async () => {
     await act(async () => {
       renderWithRouter()
     })
 
     // Model selection dropdown should be rendered (look for popover trigger)
-    const modelDropdown = document.querySelector('[data-slot="popover-trigger"]')
+    const modelDropdown = document.querySelector(
+      '[data-slot="popover-trigger"]'
+    )
     expect(modelDropdown).toBeInTheDocument()
   })
 
@@ -414,7 +565,9 @@ describe('ChatInput', () => {
       renderWithRouter()
     })
 
-    const sendButton = document.querySelector('[data-test-id="send-message-button"]')
+    const sendButton = document.querySelector(
+      '[data-test-id="send-message-button"]'
+    )
     await act(async () => {
       await user.click(sendButton)
     })

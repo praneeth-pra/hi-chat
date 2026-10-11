@@ -203,6 +203,10 @@ export function handleSpeakerKey(key: string): boolean {
   }
   const state = useSpeakerTranscription.getState()
   if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
+    if (!state.composerReviewVisible) {
+      toast('No speaker question visible in the prompt box')
+      return true
+    }
     if (state.enabled && state.pendingQuestion) {
       if (
         ((!state.pendingQuestion.complete ||

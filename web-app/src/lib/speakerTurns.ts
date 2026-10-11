@@ -4,8 +4,6 @@ import {
   type TurnDecision,
 } from './speakerTurnJudge'
 
-export const QUESTION_SETTLE_MS = 500
-export const UNFINISHED_TURN_SETTLE_MS = 1000
 export const SPEAKER_REVIEW_MS = 3000
 const MAX_DRAFT_CHARS = 24000
 
@@ -38,7 +36,6 @@ type Options = {
   onDraft: (draft: QuestionDraft | null) => void
   onCommit: (turn: QuestionCommit) => void
   onSuggest: (text: string, reason?: string) => void
-  settleMs?: number
   onTrace?: (event: string, fields: Record<string, unknown>) => void
 }
 const normalize = (t: string) =>
@@ -50,13 +47,11 @@ const normalize = (t: string) =>
 const append = (base: string, text: string) =>
   normalize(base).includes(normalize(text)) ? base : `${base} ${text}`.trim()
 
-/** Sole authority for committing speech. Incomplete scenarios never expire into sends. */
+/** Speech is committed only by explicit approval; pauses never trigger sends. */
 export function createQuestionTurns(options: Options) {
   let draft: QuestionDraft | null = null
   let active: QuestionCommit | null = null
-  let hasSentQuestion = false
   let recent: string[] = []
-  let timer: ReturnType<typeof setTimeout> | undefined
   let processing = 0
   let hearing = false
   let quietSince: number | null = null
@@ -67,16 +62,10 @@ export function createQuestionTurns(options: Options) {
   let clipSequence = 0
   let manualRequested = false
   let manualOrigin: 'send-now' | 'suggestion' = 'send-now'
-  let delay = options.settleMs ?? QUESTION_SETTLE_MS
   let queue: Promise<unknown> = Promise.resolve()
   const session = Math.random().toString(36).slice(2)
-  const cancelTimer = () => {
-    clearTimeout(timer)
-    timer = undefined
-  }
   const publish = () => options.onDraft(draft ? { ...draft } : null)
   const emitDraft = () => {
-    cancelTimer()
     if (!draft || stopped) return
     const relation = 'new' as const
     active = {
@@ -84,12 +73,11 @@ export function createQuestionTurns(options: Options) {
       text: draft.text,
       version: 1,
       relation,
-      origin: manualRequested ? manualOrigin : 'automatic',
+      origin: manualOrigin,
       captureEnd: draft.captureEnd,
       clip: draft.clip,
     }
     draft = null
-    hasSentQuestion = true
     manualRequested = false
     publish()
     options.onTrace?.('commit', {
@@ -104,38 +92,9 @@ export function createQuestionTurns(options: Options) {
     })
     options.onCommit({ ...active })
   }
-  const commit = () => {
-    if (!draft || stopped) return
-    emitDraft()
-  }
   const schedule = () => {
-    if (!draft || stopped) return
-    if (manualRequested) {
-      cancelTimer()
-      commit()
-      return
-    }
-    if (
-      draft.complete &&
-      !draft.manual &&
-      !draft.requiresReview &&
-      !draft.uncertain &&
-      !timer
-    ) {
-      // The endpoint belongs to this contribution. Later speech and queued clips
-      // cannot postpone a question already judged answerable.
-      const elapsed = Date.now() - (draft.captureEnd ?? Date.now())
-      const waitMs = Math.max(0, delay - elapsed)
-      options.onTrace?.('settling', {
-        at: Date.now(),
-        waitMs,
-        clip: draft.clip,
-        captureEnd: draft.captureEnd,
-        processing,
-        busy,
-      })
-      timer = setTimeout(commit, waitMs)
-    }
+    // Approval applies only to the visible draft, never future in-flight speech.
+    if (draft && !stopped && manualRequested) emitDraft()
   }
   const suggestQuestion = (text: string, reason?: string) => {
     if (hasQuestionCue(text)) {
@@ -151,9 +110,7 @@ export function createQuestionTurns(options: Options) {
     const { text, complete, reason } = decision
     let action = decision.action
     if (action === 'skip' || !text.trim()) return
-    cancelTimer()
     if (action === 'suggest') {
-      if (draft?.complete && !draft.manual && !draft.requiresReview) emitDraft()
       // An uncertain continuation must not let an earlier partial question escape.
       if (draft) {
         draft.uncertain = true
@@ -179,21 +136,13 @@ export function createQuestionTurns(options: Options) {
       !complete
     )
       action = 'context'
-    if (draft && draft.complete && !draft.manual && !draft.requiresReview) {
-      emitDraft()
-      if (action === 'context' || action === 'question') action = 'followup'
-    }
     if (draft && action === 'new-question') {
-      if (draft.complete && !draft.manual && !draft.requiresReview) {
-        emitDraft()
-      } else if (draft.requiresReview) {
-        options.onTrace?.('context-cleared', {
-          at: Date.now(),
-          turn: draft.id,
-          reason: 'new-topic',
-          clip: draft.clip,
-        })
-      } else suggestQuestion(draft.text, draft.reason)
+      options.onTrace?.('context-cleared', {
+        at: Date.now(),
+        turn: draft.id,
+        reason: 'new-topic',
+        clip: draft.clip,
+      })
       draft = null
     }
     if (!draft) {
@@ -201,7 +150,7 @@ export function createQuestionTurns(options: Options) {
       draft = {
         id: `${session}-${++sequence}`,
         text: '',
-        requiresReview: hasSentQuestion,
+        requiresReview: true,
         followsQuestion: continuation ? active!.id : undefined,
         complete: false,
         manual: false,
@@ -224,7 +173,7 @@ export function createQuestionTurns(options: Options) {
   return {
     accept(
       texts: string[],
-      unfinishedTurn = false,
+      _unfinishedTurn = false,
       capture?: { clipId: number; captureEnd: number }
     ): Promise<void> {
       const clip = capture?.clipId ?? ++clipSequence
@@ -257,9 +206,6 @@ export function createQuestionTurns(options: Options) {
           })
           const decision = await options.judge(texts, context)
           if (stopped || acceptedEpoch !== epoch) return
-          delay = unfinishedTurn
-            ? UNFINISHED_TURN_SETTLE_MS
-            : (options.settleMs ?? QUESTION_SETTLE_MS)
           options.onTrace?.('decision-ready', {
             clip,
             at: Date.now(),
@@ -315,7 +261,7 @@ export function createQuestionTurns(options: Options) {
       schedule()
     },
     sendNow() {
-      const available = !!draft || processing > 0
+      const available = !!draft && !stopped
       manualOrigin = 'send-now'
       manualRequested = available
       schedule()
@@ -325,7 +271,6 @@ export function createQuestionTurns(options: Options) {
       if (draft) {
         draft.manual = true
         draft.reason = 'Waiting for you to send'
-        cancelTimer()
         publish()
       }
     },
@@ -349,13 +294,11 @@ export function createQuestionTurns(options: Options) {
       epoch++
       manualRequested = false
       quietSince = null
-      cancelTimer()
       draft = null
       publish()
     },
     confirm(text: string) {
       epoch++
-      cancelTimer()
       // A manual click does not establish semantic relatedness or spoken order.
       // Preserve unsent context; never append a stale recommendation to an answer.
       if (draft && draft.text !== text)
@@ -374,12 +317,10 @@ export function createQuestionTurns(options: Options) {
     },
     endTurn() {
       active = null
-      hasSentQuestion = false
     },
     stop() {
       stopped = true
       epoch++
-      cancelTimer()
       draft = null
       publish()
     },

@@ -11,6 +11,7 @@ import {
   stripFunctionKeyChars,
   takeDictationPaste,
 } from '@/lib/speakerRemoteKeys'
+import { useSpeakerComposerReview } from '@/hooks/useSpeakerComposerReview'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -43,11 +44,7 @@ import { TokenCounter } from '@/components/TokenCounter'
 import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
-import {
-  SpeakerListenIndicator,
-  SpeakerSuggestions,
-  SpeakerPendingQuestion,
-} from './SpeakerListenIndicator'
+import { SpeakerListenIndicator } from './SpeakerListenIndicator'
 import { DictationBanner, DictationButton } from './DictationIndicator'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
@@ -106,6 +103,8 @@ const ChatInput = ({
   const setActiveModels = useAppState((state) => state.setActiveModels)
   const prompt = usePrompt((state) => state.prompt)
   const setPrompt = usePrompt((state) => state.setPrompt)
+  const speakerReview = useSpeakerComposerReview(prompt)
+  const composerText = speakerReview.showing ? speakerReview.text : prompt
   const currentThreadId = useThreads((state) => state.currentThreadId)
   const { t } = useTranslation()
   const spellCheckChatInput = useGeneralSetting(
@@ -1257,8 +1256,6 @@ const ChatInput = ({
             onDrop={hasMmproj ? handleDrop : undefined}
           >
             <DictationBanner />
-            <SpeakerPendingQuestion />
-            <SpeakerSuggestions />
             {attachments.length > 0 && (
               <div className="flex flex-col gap-2 p-2 pb-0">
                 <div className="flex gap-3 items-center">
@@ -1341,16 +1338,34 @@ const ChatInput = ({
               minRows={2}
               rows={1}
               maxRows={10}
-              value={prompt}
+              value={composerText}
+              readOnly={speakerReview.showing && !!prompt}
               data-testid={'chat-input'}
               onChange={(e) => {
                 const value = stripFunctionKeyChars(e.target.value)
+                if (speakerReview.showing) speakerReview.discard()
                 setPrompt(value)
                 // Count the number of newlines to estimate rows
                 const newRows = (e.target.value.match(/\n/g) || []).length + 1
                 setRows(Math.min(newRows, maxRows))
               }}
               onKeyDown={(e) => {
+                if (speakerReview.showing && e.key === 'Escape') {
+                  e.preventDefault()
+                  speakerReview.discard()
+                  return
+                }
+                if (
+                  speakerReview.showing &&
+                  e.key === 'Enter' &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing &&
+                  e.keyCode !== 229
+                ) {
+                  e.preventDefault()
+                  speakerReview.send()
+                  return
+                }
                 // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
                 // dictation
                 if (
@@ -1539,6 +1554,43 @@ const ChatInput = ({
             </div>
 
             <div className="flex items-center gap-2">
+              {speakerReview.available && (
+                <>
+                  {speakerReview.showing ? (
+                    <span
+                      className="max-w-32 truncate text-xs text-accent"
+                      title="Enter or fn + Right sends; fn + Left discards"
+                    >
+                      {speakerReview.label}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-xs text-accent"
+                      onClick={speakerReview.select}
+                    >
+                      Review question
+                    </button>
+                  )}
+                  {speakerReview.showing && prompt && (
+                    <button
+                      type="button"
+                      className="text-xs"
+                      onClick={speakerReview.back}
+                    >
+                      Back to draft
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Discard speaker question"
+                    title="Discard · fn + Left"
+                    onClick={speakerReview.discard}
+                  >
+                    <IconX size={16} />
+                  </button>
+                </>
+              )}
               <DictationButton />
               <SpeakerListenIndicator />
               {selectedProvider === 'llamacpp' &&
@@ -1575,17 +1627,26 @@ const ChatInput = ({
                 >
                   <IconPlayerStopFilled />
                 </Button>
-              ) : (
+              ) : null}
+              {(!streamingContent || speakerReview.showing) && (
                 <Button
-                  variant={!prompt.trim() ? null : 'default'}
+                  variant={!composerText.trim() ? null : 'default'}
                   size="icon"
-                  disabled={!prompt.trim() || ingestingAny}
+                  disabled={!composerText.trim() || ingestingAny}
                   data-test-id="send-message-button"
                   aria-label="Send"
-                  title="Send"
-                  onClick={() => handleSendMessage(prompt)}
+                  title={
+                    speakerReview.showing
+                      ? 'Send speaker question · fn + Right'
+                      : 'Send'
+                  }
+                  onClick={() =>
+                    speakerReview.showing
+                      ? speakerReview.send()
+                      : handleSendMessage(prompt)
+                  }
                 >
-                  {streamingContent || ingestingAny ? (
+                  {ingestingAny ? (
                     <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
                   ) : (
                     <ArrowRight className="text-primary-fg" />

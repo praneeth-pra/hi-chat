@@ -29,7 +29,7 @@ yarn build:core
 yarn dev:web-app        # http://localhost:3001
 ```
 
-## Automatic speaker questions
+## Speaker questions
 
 The speaker uses a conversation buffer, not one prompt per audio clip. The
 judge receives the accumulated interviewer turn and the active question, then
@@ -41,20 +41,19 @@ answer beginning after a question mark is excluded from the selected question. C
 and chatter are rejected; technical vocabulary alone cannot authorize sending.
 The judge selects original transcript words by index, without rewriting them.
 
-The first complete question sends automatically. Every later follow-up or new
-question requires approval through a review card. **Send as new** creates a
-separate prompt containing only the new draft; it never appends speech to a sent
-question or replaces its answer. The previous question remains context for the
-judge, not text copied into the new prompt. This policy resets when the speaker
-conversation is reset or listening restarts.
-Incomplete scenarios survive pauses and accumulate without background review
+Every question requires approval, including the first. Speaker proposals appear
+in the existing prompt box with Send and Discard controls in its toolbar; there
+are no separate cards above it. If you have typed a draft, **Review question**
+switches to the proposal and **Back to draft** restores your text. Incoming
+speech never overwrites the typed draft. Sending creates a separate prompt; it
+never appends speech to a sent question or replaces its answer. The previous
+question remains context for the judge, not text copied into the new prompt.
+Incomplete scenarios survive pauses and accumulate without displaying background
 cards. A final fragment can complete a question begun in an earlier clip.
 Bare “What do you think?” needs surrounding context before it can send.
 
-The 500 ms settling window overlaps transcription and judgement, measured from
-that contribution's immutable clip endpoint. Smart Turn can extend it to one
-second for unfinished intonation. Later capture or queued judgement does not
-block an already complete question. A valid primary decision needs no second
+Approval sends immediately without an additional settling timer.
+A valid primary decision needs no second
 model; failed/invalid decisions get at most one recovery attempt. Endpointing,
 transcription, provider processing and answer generation still add latency.
 Speaker finalization takes the first usable live engine result and gathers other
@@ -64,24 +63,22 @@ at each clip endpoint, independently of earlier questions being judged. Logs
 separate clip-finalized, engine-ready, fallback-start, transcripts-ready,
 capture-queue-ready and turn-check-ready stages.
 
-Only the latest review card appears. Follow-ups are labelled **Follow-up
-question?** and separate topics **New question?**. Both use **Send as new** or
-**Discard**; fn + Right sends and fn + Left discards. **Send now** explicitly
-sends the initial draft. Cards hide after three seconds;
-hiding never deletes accumulated context. Later relevant speech can complete a
-hidden draft. **Discard** explicitly removes it. An uncertain standalone
-recommendation uses **Send as new**, preserving its separate question boundary.
+Only the latest proposal appears. **Send**, Enter or fn + Right approves it;
+**Discard**, Escape or fn + Left removes it. fn shortcuts act only on a proposal
+visible in the prompt box, leaving ordinary arrows free for navigation. Proposals
+hide after three seconds without sending or deleting accumulated context. Later
+relevant speech can complete a hidden draft. An uncertain standalone
+recommendation is also sent as a separate question after approval.
 
-Speaker logs record `conversation-v3`, endpoint configuration, invalid fields,
+Speaker logs record `conversation-v4`, endpoint configuration, invalid fields,
 provider finish reason and recovery outcome. Stage timestamps distinguish clip
 finalization, transcript readiness, decision readiness, settling, queueing,
-sending and first answer content. Commit origin distinguishes automatic sends,
-Send now and clicked recommendations. Recommendation creation/suppression and
+sending and first answer content. Commit origin distinguishes Send now and clicked recommendations. Recommendation creation/suppression and
 review hiding are logged. Capture end is the audio endpoint, not the last word.
 No raw judge replies or credentials are logged.
 
 Speaker sends retain all earlier questions and answers.
-Switching chats, typing a question or disabling Speaker cancels stale automatic
+Switching chats, typing a question or disabling Speaker cancels stale speaker
 work. Dictation retains its separate microphone flow. Recognized dictation
 appends to the prompt box and automatically sends through its own queue even
 when Speaker is disabled. While an answer is streaming, the text stays visible
