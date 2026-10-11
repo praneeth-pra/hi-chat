@@ -103,6 +103,66 @@ describe('startSpeakerCapture', () => {
     expect(statuses.at(-1)).toBe('listening')
     session.stop()
   })
+  it('starts the next batch upload while an earlier question is still being judged', async () => {
+    localStorage.setItem('speaker-live-mode', 'off')
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                name: 'elevenlabs',
+                ok: true,
+                ms: 1,
+                text: 'How does DNS work?',
+              },
+            ],
+          })
+        )
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    let release!: () => void
+    const accept = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<null>((resolve) => {
+            release = () => resolve(null)
+          })
+      )
+      .mockResolvedValue(null)
+    const trace = vi.fn()
+    const session = startSpeakerCapture({
+      onStatus: () => {},
+      onText: () => {},
+      accept,
+      onTrace: trace,
+    })
+    for (let i = 0; i < 10; i++) await flush()
+    const utterance = () => {
+      for (let i = 0; i < 4; i++)
+        taps[0].port.onmessage?.({ data: new Float32Array(2400).fill(0.1) })
+      for (let i = 0; i < 20; i++)
+        taps[0].port.onmessage?.({ data: new Float32Array(2400) })
+    }
+    utterance()
+    for (let i = 0; i < 5; i++) await flush()
+    expect(accept).toHaveBeenCalledTimes(1)
+    utterance()
+    for (let i = 0; i < 5; i++) await flush()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(accept).toHaveBeenCalledTimes(1)
+    release()
+    for (let i = 0; i < 5; i++) await flush()
+    expect(accept).toHaveBeenCalledTimes(2)
+    expect(
+      trace.mock.calls.some(([line]) =>
+        line.includes('stage=transcripts-ready')
+      )
+    ).toBe(true)
+    session.stop()
+    localStorage.removeItem('speaker-live-mode')
+  })
   it('ignores an old transcript after restarting capture for another chat', async () => {
     let resolveOld!: (response: Response) => void
     const reply = (text: string) =>

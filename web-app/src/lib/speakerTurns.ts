@@ -170,6 +170,13 @@ export function createQuestionTurns(options: Options) {
     if (draft && action === 'new-question') {
       if (draft.complete && !draft.manual) {
         emitDraft()
+      } else if (draft.relation === 'update') {
+        options.onTrace?.('context-cleared', {
+          at: Date.now(),
+          turn: draft.id,
+          reason: 'new-topic',
+          clip: draft.clip,
+        })
       } else suggestQuestion(draft.text, draft.reason)
       draft = null
     }

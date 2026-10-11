@@ -29,6 +29,7 @@ const CALL_CHECKS = [
   /^(it was )?(nice|great|good) (talking|speaking) to you$/,
   /^(have a )?(nice|good|great) day$/,
   /^we are done$/,
+  /^no worries$/,
 ]
 
 /**

@@ -1,5 +1,6 @@
 'use client'
 
+import { useDictationDelivery } from '@/lib/dictationDelivery'
 import { reportClip } from '@/lib/speakerCaptureSession'
 
 import TextareaAutosize from 'react-textarea-autosize'
@@ -304,6 +305,44 @@ const ChatInput = ({
       updateAttachmentProcessing
     )
   }
+
+  const dictated = useDictationDelivery((s) => s.pending)
+  const dictationSending = useRef(false)
+  const [dictationDone, setDictationDone] = useState(0)
+  useEffect(() => {
+    if (
+      !dictated.length ||
+      streamingContent ||
+      ingestingAny ||
+      !selectedModel ||
+      dictationSending.current
+    )
+      return
+    const text = dictated[0]
+    dictationSending.current = true
+    useDictationDelivery.setState((s) => ({ pending: s.pending.slice(1) }))
+    useSpeakerTranscription.getState().resetTurns()
+    // Show the recognised words even if sending has to wait for the current answer.
+    if (usePrompt.getState().prompt === text) usePrompt.getState().setPrompt('')
+    Promise.resolve()
+      .then(() => sendMessage(text, true, undefined, projectId))
+      .catch((error: Error) => {
+        usePrompt.getState().setPrompt(text)
+        toast(`Dictation could not send: ${error.message}`)
+      })
+      .finally(() => {
+        dictationSending.current = false
+        setDictationDone((n) => n + 1)
+      })
+  }, [
+    dictated,
+    streamingContent,
+    ingestingAny,
+    selectedModel,
+    sendMessage,
+    projectId,
+    dictationDone,
+  ])
 
   const speakerEnabled = useSpeakerTranscription((s) => s.enabled)
   const speakerTurnQueue = useSpeakerTranscription((s) => s.turnQueue)

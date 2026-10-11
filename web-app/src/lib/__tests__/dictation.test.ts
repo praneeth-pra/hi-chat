@@ -28,6 +28,8 @@ import {
   setMicDevice,
 } from '@/lib/micActivity'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { usePrompt } from '@/hooks/usePrompt'
+import { useDictationDelivery } from '../dictationDelivery'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 const reportClip = vi.hoisted(() => vi.fn())
@@ -516,11 +518,16 @@ describe('dictation', () => {
     const enqueue = vi.fn()
     beforeEach(() => {
       enqueue.mockReset()
+      usePrompt.getState().resetPrompt()
+      useDictationDelivery.setState({ pending: [] })
+      useSpeakerTranscription.getState().setEnabled(false)
       useSpeakerTranscription.setState({ enqueue })
     })
     afterEach(() => {
       liveResult.finish = () => Promise.resolve('')
       dismissFailedDictation()
+      usePrompt.getState().resetPrompt()
+      useDictationDelivery.setState({ pending: [] })
       localStorage.removeItem('dictation-engine')
       localStorage.removeItem('dictation-keep-mic')
       vi.unstubAllGlobals()
@@ -530,7 +537,9 @@ describe('dictation', () => {
       liveResult.finish = () => Promise.resolve('What is EKS?')
       const fetchMock = relay({ text: 'unused' })
       await dictate('elevenlabs')
-      expect(enqueue).toHaveBeenCalledWith('What is EKS?')
+      expect(usePrompt.getState().prompt).toBe('What is EKS?')
+      expect(useDictationDelivery.getState().pending).toEqual(['What is EKS?'])
+      expect(enqueue).not.toHaveBeenCalled()
       expect(fetchMock).not.toHaveBeenCalled()
     })
 
@@ -538,7 +547,10 @@ describe('dictation', () => {
       liveResult.finish = () => Promise.reject(new Error('no token'))
       const fetchMock = relay({ text: 'What is a NAT gateway?' })
       await dictate('auto', 2)
-      expect(enqueue).toHaveBeenCalledWith('What is a NAT gateway?')
+      expect(usePrompt.getState().prompt).toBe('What is a NAT gateway?')
+      expect(useDictationDelivery.getState().pending).toEqual([
+        'What is a NAT gateway?',
+      ])
       const [url, init] = fetchMock.mock.calls[0]
       expect(url).toBe('/api/transcribe')
       const body = init.body as FormData
@@ -555,7 +567,10 @@ describe('dictation', () => {
       const fetchMock = relay({ text: 'Run kubectl get pods.' })
       await dictate('elevenlabs')
       expect(fetchMock).toHaveBeenCalledTimes(1)
-      expect(enqueue).toHaveBeenCalledWith('Run kubectl get pods.')
+      expect(usePrompt.getState().prompt).toBe('Run kubectl get pods.')
+      expect(useDictationDelivery.getState().pending).toEqual([
+        'Run kubectl get pods.',
+      ])
     })
 
     it('keeps the audio when the batch route fails too, and Retry resends it', async () => {
@@ -570,7 +585,9 @@ describe('dictation', () => {
 
       const fetchMock = relay({ text: 'What is EKS?' })
       await retryDictation()
-      expect(enqueue).toHaveBeenCalledWith('What is EKS?')
+      expect(usePrompt.getState().prompt).toBe('What is EKS?')
+      expect(useDictationDelivery.getState().pending).toEqual(['What is EKS?'])
+      expect(enqueue).not.toHaveBeenCalled()
       expect(
         (fetchMock.mock.calls[0][1].body as FormData).get('file')
       ).toBeTruthy()

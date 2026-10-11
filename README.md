@@ -34,7 +34,10 @@ yarn dev:web-app        # http://localhost:3001
 The speaker uses a conversation buffer, not one prompt per audio clip. The
 judge receives the accumulated interviewer turn and the active question, then
 returns `ignore`, `hold`, or `question` with a current/new topic relation. Only
-accepted interviewer speech enters the conversation history. Candidate answers
+accepted interviewer speech enters the conversation history. Unanchored
+declarative clips cannot become scenario background merely because the judge
+returned hold; explicit setup or a related continuation is required. A clear
+answer beginning after a question mark is excluded from the selected question. Candidate answers
 and chatter are rejected; technical vocabulary alone cannot authorize sending.
 The judge selects original transcript words by index, without rewriting them.
 
@@ -50,6 +53,12 @@ second for unfinished intonation. Later capture or queued judgement does not
 block an already complete question. A valid primary decision needs no second
 model; failed/invalid decisions get at most one recovery attempt. Endpointing,
 transcription, provider processing and answer generation still add latency.
+Speaker finalization takes the first usable live engine result and gathers other
+ready transcripts for up to 300 ms. If none arrive within 1.5 seconds, batch
+fallback starts without waiting for the live timeout. Batch transcription starts
+at each clip endpoint, independently of earlier questions being judged. Logs
+separate clip-finalized, engine-ready, fallback-start, transcripts-ready,
+capture-queue-ready and turn-check-ready stages.
 
 Only the latest review card appears. **Add** updates the current question;
 **Send now** explicitly sends a new draft. Cards hide after three seconds;
@@ -57,7 +66,7 @@ hiding never deletes accumulated context. Later relevant speech can complete a
 hidden draft. **Discard** explicitly removes it. An uncertain standalone
 recommendation uses **Send as new**, preserving its separate question boundary.
 
-Speaker logs record `conversation-v1`, endpoint configuration, invalid fields,
+Speaker logs record `conversation-v2`, endpoint configuration, invalid fields,
 provider finish reason and recovery outcome. Stage timestamps distinguish clip
 finalization, transcript readiness, decision readiness, settling, queueing,
 sending and first answer content. Commit origin distinguishes automatic sends,
@@ -67,7 +76,10 @@ No raw judge replies or credentials are logged.
 
 Related updates retain the previous answer until a replacement is ready.
 Switching chats, typing a question or disabling Speaker cancels stale automatic
-work. Dictation retains its separate microphone flow. Smart Turn remains
+work. Dictation retains its separate microphone flow. Recognized dictation
+appends to the prompt box and automatically sends through its own queue even
+when Speaker is disabled. While an answer is streaming, the text stays visible
+until it can send; a delivery error restores the text for retry. Smart Turn remains
 optional; a stalled model load cannot block text decisions.
 
 ## Hammerspoon speaker shortcuts

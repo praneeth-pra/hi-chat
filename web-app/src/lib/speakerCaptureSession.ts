@@ -1,3 +1,4 @@
+import { collectSpeakerTranscripts } from './speakerTranscripts'
 import {
   PauseDetector,
   TARGET_SAMPLE_RATE,
@@ -71,9 +72,9 @@ const MODE_ENGINES: Record<TranscribeMode, string[]> = {
   // These stream instead when live mode is on (see grokLive); without live
   // mode, Soniox + Cartesia falls back to ElevenLabs alone
   'live-soniox-cartesia': ['elevenlabs'],
-  live: ['elevenlabs', 'grok'],
-  grok: ['elevenlabs', 'grok'],
-  elevenlabs: ['elevenlabs'],
+  'live': ['elevenlabs', 'grok'],
+  'grok': ['elevenlabs', 'grok'],
+  'elevenlabs': ['elevenlabs'],
 }
 
 /** Engines that answer within SECOND_ENGINE_WAIT_MS of ElevenLabs. */
@@ -223,6 +224,7 @@ registerProcessor('speaker-tap', SpeakerTap)
 `
 
 type Callbacks = {
+  onTrace?: (line: string) => void
   onStatus: (status: SpeakerStatus, error?: string) => void
   onText: (text: string) => void
   /**
@@ -309,6 +311,7 @@ export function startSpeakerCapture({
   onLevel,
   onAudio,
   checkTurn,
+  onTrace,
 }: Callbacks) {
   let stopped = false
   let stream: MediaStream | null = null
@@ -331,7 +334,7 @@ export function startSpeakerCapture({
   }
 
   // Live mode keeps one token in hand so a new utterance can connect at once.
-  const pool = <T,>(fetchToken: () => Promise<T>, maxAge: number) => {
+  const pool = <T>(fetchToken: () => Promise<T>, maxAge: number) => {
     let spare: { token: Promise<T>; at: number } | null = null
     const fetchOne = () => {
       const token = fetchToken()
@@ -381,13 +384,22 @@ export function startSpeakerCapture({
     // Lossless FLAC is about half the size of WAV, so it uploads faster.
     let flac: Blob | null = null
     const audio = () => (flac ??= encodeFlac(samples, TARGET_SAMPLE_RATE))
-    const upload = () => transcribeClip(audio())
+    const stage = (event: string) =>
+      onTrace?.(
+        `stage=${event} clip=${capture.clipId} at=${Date.now()} afterCaptureMs=${Date.now() - capture.captureEnd}`
+      )
+    stage('clip-finalized')
+    const upload = () => {
+      if (stopped || captureGeneration !== generation)
+        return Promise.resolve({ texts: [], timings: [] })
+      stage('upload-start')
+      return transcribeClip(audio())
+    }
     // Live: commit now, so the text is ready by the time earlier clips are
     // done. If streaming fails, the clip is uploaded as usual.
     const committedAt = Date.now()
-    // Beside live mode the other engines get the clip at the same moment
-    // (Grok live is already streaming); whatever arrives within
-    // SECOND_ENGINE_WAIT_MS of the ElevenLabs text is used.
+    // Finalize all live engines together; a usable side result can win.
+    // A short collection window retains other promptly available transcripts.
     if (!live) {
       third?.abort()
       more.forEach((m) => m.stream.abort())
@@ -425,46 +437,22 @@ export function startSpeakerCapture({
         names: others,
         result: transcribeClip(audio(), others, 1).catch(() => null),
       })
-    const result = live
-      ? live.finish().then(
-          async (text) => {
-            const texts = [text]
-            const timings: EngineTiming[] = [
-              {
-                name: 'elevenlabs live',
-                ms: Date.now() - committedAt,
-                ok: true,
-              },
-            ]
-            const late = new Promise<null>((r) =>
-              setTimeout(() => r(null), SECOND_ENGINE_WAIT_MS)
-            )
-            const more = await Promise.all(
-              extras.map((e) => Promise.race([e.result, late]))
-            )
-            more.forEach((m, i) => {
-              if (m) {
-                texts.push(...m.texts)
-                timings.push(...m.timings)
-              } else {
-                for (const name of extras[i].names)
-                  timings.push({
-                    name,
-                    ms: Date.now() - committedAt,
-                    ok: false,
-                  })
-              }
-            })
-            return { texts, timings }
-          },
-          (err: Error) => {
-            console.warn(
-              `[speaker] live failed, uploading clip: ${err.message}`
-            )
-            return upload()
-          }
-        )
-      : null
+    const result = (
+      live
+        ? collectSpeakerTranscripts(
+            [streamed('elevenlabs live', live), ...extras.map((e) => e.result)],
+            upload,
+            stage
+          ).finally(() => {
+            live.abort()
+            third?.abort()
+            more.forEach((m) => m.stream.abort())
+          })
+        : upload()
+    ).then((result) => {
+      stage('transcripts-ready')
+      return result
+    })
     result?.catch(() => {})
     pending++
     idleStatus()
@@ -472,10 +460,11 @@ export function startSpeakerCapture({
     queue = queue
       .then(() =>
         !stopped && captureGeneration === generation
-          ? (result ?? upload())
+          ? result
           : { texts: [], timings: [] }
       )
       .then(async ({ texts, timings }) => {
+        stage('capture-queue-ready')
         // Answered engines line up with the transcripts, in order
         const words = timings
           .filter((t) => t.ok)
@@ -485,6 +474,7 @@ export function startSpeakerCapture({
           words.map((w) => w.name)
         ).filter((t) => t.trim())
         const turn = await turnCheck
+        stage('turn-check-ready')
         const text =
           !stopped && captureGeneration === generation && heard.length
             ? await accept(heard, timings, words, turn, capture)

@@ -21,7 +21,7 @@ import {
 } from '@/lib/speakerLive'
 import { applyFixes } from '@/lib/dictationFixes'
 import { findMicDevice, getDictationMic } from '@/lib/micActivity'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { deliverDictation } from './dictationDelivery'
 import {
   SKIP_AGREEMENT,
   judgeDictation,
@@ -693,7 +693,7 @@ export async function stopDictation() {
         `dictation fallback (${liveError ? 'live failed' : 'live empty'}): ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     }
-    if (text) useSpeakerTranscription.getState().enqueue(text)
+    if (text) deliverDictation(text)
     else toast(`${label} heard nothing`)
   } catch (err) {
     toast(`Dictation failed: ${(err as Error).message}`)
@@ -716,7 +716,7 @@ export async function retryDictation() {
   try {
     const text = applyFixes(await transcribe(samples))
     dismissFailedDictation()
-    if (text) useSpeakerTranscription.getState().enqueue(text)
+    if (text) deliverDictation(text)
     else toast('Dictation heard nothing')
   } catch (err) {
     keepFailed(samples, (err as Error).message)
