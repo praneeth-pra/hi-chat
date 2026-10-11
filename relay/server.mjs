@@ -15,6 +15,7 @@ import { randomBytes } from 'node:crypto'
 import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
 import { handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
+import { searchWeb } from './search.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -389,13 +390,13 @@ export function speechLogLine(body, includeText = false) {
   return `speech ${auto?.[0] ?? single?.[0] ?? 'diagnostic text omitted'}`
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = []
     let size = 0
     req.on('data', (c) => {
       size += c.length
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(Object.assign(new Error('Clip too large'), { status: 413 }))
         req.destroy()
       } else chunks.push(c)
@@ -420,12 +421,36 @@ export function createRelay(options = {}) {
     if (
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
+      req.url !== '/api/search' &&
       req.url !== '/api/speech-log'
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
     if (!sameOriginRequest(req))
       return send(res, 403, { error: 'Cross-origin request refused' })
+    if (req.url === '/api/search') {
+      const controller = new AbortController()
+      const disconnect = () => {
+        if (!res.writableEnded) controller.abort()
+      }
+      res.on('close', disconnect)
+      try {
+        const body = JSON.parse(
+          (await readBody(req, 16 * 1024)).toString('utf8')
+        )
+        const result = await searchWeb(body.query, {
+          ...options,
+          signal: controller.signal,
+        })
+        if (!res.destroyed) send(res, 200, result)
+      } catch (err) {
+        if (!res.destroyed)
+          send(res, err.status ?? 400, { error: 'Invalid search request' })
+      } finally {
+        res.off('close', disconnect)
+      }
+      return
+    }
     if (req.url === '/api/speech-log') {
       try {
         const line = speechLogLine(

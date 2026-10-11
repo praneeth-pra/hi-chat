@@ -46,22 +46,29 @@ also uses the dictation queue. Ordinary text pastes remain drafts.
 
 The model picker offers **Auto · Speed** and **Auto · Accuracy**, using Groq 20B,
 Groq 120B and Cerebras 120B. Speed races all three with Low reasoning. Accuracy
-races the two 120B models with Medium reasoning and uses 20B only for recovery.
-Both stream one answer and cancel the unused requests. Manual model choices remain
-available. Parallel requests can increase API usage; Accuracy is a preference,
-not a correctness guarantee. See [Auto modes](docs/auto-modes.md).
+races the two 120B models with Medium reasoning (20B is draft recovery), requires
+Exa web evidence, then checks the full draft with a 120B reviewer before showing
+it. Set `EXA_API_KEY` securely in Railway for Accuracy; missing sources or failed
+review produces an error rather than an unchecked answer. Speed streams the
+first useful winner immediately. Manual model choices remain available. Parallel
+requests and review increase API usage; checking does not guarantee correctness.
+See [Auto modes](docs/auto-modes.md) and [Accuracy setup](docs/accuracy-mode.md).
+
+Answers default to a useful medium length, mostly bullet points, with no tabular
+layouts. Use the header list icon to extract a copyable question list from that
+chat's prompts on demand. Trash icons in the header/sidebar open confirmation.
 
 ## Hammerspoon shortcuts
 
 The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy
 and reload Hammerspoon; a Railway deployment cannot update a script on your Mac.
 The script retains scrolling, fn + Up/Down code navigation, Left Control dictation,
-fn + Return sending, Z/X and the native-sized dummy cursor. The retired Speaker
-Option toggle and fn + Left/Right recommendation shortcuts are removed.
+fn + Right sending, Z/X and the native-sized dummy cursor. The retired Speaker
+Option toggle and recommendation shortcuts are removed. Plain arrows and fn + Left remain free.
 Tap **Left Option** to toggle background typing into Jan; tap it again or press
 Escape to stop. Jan's keyboard symbol lights up while enabled. Your main app
 stays active; ordinary typing goes to Jan, including Z/X. Enter adds a newline;
-fn + Return sends. Option used in a chord does not toggle the mode. The normal
+fn + Right sends; fn + Return is released. Option used in a chord does not toggle the mode. The normal
 Z/X navigation resumes when typing is off. Fn navigation remains available.
 
 Before first use, select Hi-chat in Safari (or the Jan web app), then return to
@@ -71,12 +78,12 @@ without activating a window. Background event handling needs testing on your Mac
 Linux checks cannot verify Safari receiving input or macOS window appearance.
 Only typing/editing keys are routed; Tab and non-editing Command/Control chords
 exit the mode and go to the main app. Side arrows edit Jan's text while enabled
-and pass through normally when disabled. The icon resets if script heartbeats stop.
+and pass through normally when disabled. The icon resets if script heartbeats stop. Typing and missing-window messages use the Hammerspoon console instead of popups.
 
 The coding-mode toolbar button and toggle are also removed. F18/F19 now carry
 explicit typing-status signals, without recording or sending. Questions asking
 for code still receive the existing short-code instruction automatically.
-There is no Speaker capture, review UI, question judge, background microphone
+There is no Speaker capture, speech review UI, background question judge or microphone
 turn detector or Smart Turn model download.
 
 See [Question input alternatives and answer latency](docs/question-input-alternatives.md)

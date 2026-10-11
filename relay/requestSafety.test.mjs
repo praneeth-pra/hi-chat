@@ -42,6 +42,7 @@ test('HTTP cross-origin auth/API calls stop before sending mail or contacting pr
       '/api/live-token',
       '/api/transcribe',
       '/api/speech-log',
+      '/api/search',
     ]) {
       const response = await fetch(
         `http://127.0.0.1:${server.address().port}${path}`,

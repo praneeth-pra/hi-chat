@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ThreadMessage } from '@janhq/core'
-import { getTablesAsLists, tablesToLists } from '@/lib/tablesToLists'
+import type { AccuracyReview } from '@/lib/accuracyReview'
 import { RenderMarkdown } from './RenderMarkdown'
 import React, { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import {
@@ -453,13 +453,15 @@ export const ThreadContent = memo(
             )}
 
             <RenderMarkdown
-              content={
-                getTablesAsLists()
-                  ? tablesToLists(textSegment.replace('</think>', ''))
-                  : textSegment.replace('</think>', '')
-              }
+              content={textSegment.replace('</think>', '')}
               components={linkComponents}
             />
+
+            {!!item.metadata?.accuracyReview && (
+              <AccuracyReviewInfo
+                review={item.metadata.accuracyReview as AccuracyReview}
+              />
+            )}
 
             {isToolCalls && item.metadata?.tool_calls ? (
               <>
@@ -564,3 +566,46 @@ export const ThreadContent = memo(
     )
   }
 )
+
+function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
+  return (
+    <div className="text-xs text-main-view-fg/50 mt-2">
+      Reviewed with {review.verifier}
+      {review.verdict === 'revised'
+        ? ' · Draft revised'
+        : review.verdict === 'uncertain'
+          ? ' · Uncertainty flagged'
+          : ''}
+      {review.webStatus !== 'ready' && (
+        <span>
+          {' '}
+          ·{' '}
+          {review.webStatus === 'unconfigured'
+            ? 'Web search not configured'
+            : 'Web evidence unavailable'}
+        </span>
+      )}
+      {!!review.sources.length && (
+        <details className="mt-1">
+          <summary className="cursor-pointer">
+            Exa sources ({review.sources.length})
+          </summary>
+          <ul className="mt-1 space-y-1">
+            {review.sources.map((source) => (
+              <li key={source.url}>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  {source.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
+}

@@ -222,6 +222,19 @@ const SortableItem = memo(
           )}
         </div>
         <div className="flex items-center">
+          <button
+            type="button"
+            aria-label={`${t('common:delete')} ${plainTitleForRename || t('common:newThread')}`}
+            title={t('common:deleteThread')}
+            className="size-7 shrink-0 flex items-center justify-center rounded text-left-panel-fg/50 hover:text-destructive hover:bg-left-panel-fg/10 focus-visible:ring-2 focus-visible:ring-main-view-fg/40"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setDeleteConfirmOpen(true)
+            }}
+          >
+            <IconTrash size={14} />
+          </button>
           <DropdownMenu
             open={openDropdown}
             onOpenChange={(open) => setOpenDropdown(open)}

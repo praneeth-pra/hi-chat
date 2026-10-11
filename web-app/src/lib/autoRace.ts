@@ -13,7 +13,8 @@ export const AUTO_MODES: {
   {
     value: 'accuracy',
     label: 'Auto · Accuracy',
-    description: 'Prefer the two 120B models; 20B is a recovery option.',
+    description:
+      '120B draft, required Exa web search, and correctness review before showing the answer.',
   },
 ]
 export const AUTO_ANSWER_TIMEOUT_MS = 8000

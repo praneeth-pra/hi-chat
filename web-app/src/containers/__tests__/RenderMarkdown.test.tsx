@@ -16,6 +16,95 @@ Object.assign(navigator, {
 })
 
 describe('RenderMarkdown', () => {
+  it('always displays model comparisons as bullets even with an old disabled setting', () => {
+    localStorage.setItem('tables-as-lists', 'off')
+    try {
+      const { container } = render(
+        <RenderMarkdown
+          content={
+            'Service | Scope | Cost\n--- | --- | ---\n**ECS** | Containers | Low\nEKS | Kubernetes | Higher'
+          }
+        />
+      )
+      expect(container.querySelector('table')).toBeNull()
+      const items = container.querySelectorAll('li')
+      expect(items).toHaveLength(2)
+      expect(items[0].textContent).toBe('ECS: Scope: Containers; Cost: Low')
+      expect(items[1].textContent).toBe('EKS: Scope: Kubernetes; Cost: Higher')
+    } finally {
+      localStorage.removeItem('tables-as-lists')
+    }
+  })
+
+  it('converts nested tables while preserving links, code and escaped pipes', () => {
+    const { container } = render(
+      <RenderMarkdown
+        content={
+          '> | Option | Details |\n> | --- | --- |\n> | [VPN](https://example.com) | Use `a\\|b` |'
+        }
+      />
+    )
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('blockquote li')?.textContent).toBe(
+      'VPN: Use a|b'
+    )
+    expect(container.querySelector('a')?.getAttribute('href')).toBe(
+      'https://example.com'
+    )
+    expect(container.querySelector('code')?.textContent).toBe('a|b')
+  })
+
+  it('keeps header-only streaming tables visible and updates them into row bullets', () => {
+    const { container, rerender } = render(
+      <RenderMarkdown content={'| Option | Benefit |\n| --- | --- |'} />
+    )
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('li')?.textContent).toBe('Option: Benefit')
+    rerender(
+      <RenderMarkdown
+        content={'| Option | Benefit |\n| --- | --- |\n| VPN | Quick setup |'}
+      />
+    )
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('li')?.textContent).toBe('VPN: Quick setup')
+  })
+
+  it('preserves empty first cells without losing other column labels', () => {
+    const { container } = render(
+      <RenderMarkdown
+        content={
+          '| Option | Scope | Cost |\n| --- | --- | --- |\n| | Global | Low |'
+        }
+      />
+    )
+    expect(container.querySelector('li')?.textContent).toBe(
+      'Scope: Global; Cost: Low'
+    )
+  })
+
+  it('preserves table examples in fenced code and tables in user input', () => {
+    const table = '| A | B |\n| --- | --- |\n| 1 | 2 |'
+    const { container, rerender } = render(
+      <RenderMarkdown content={'````text\n' + table + '\n````'} />
+    )
+    expect(container.querySelector('table')).toBeNull()
+    expect(container.querySelector('code')?.textContent).toContain('| A | B |')
+    rerender(<RenderMarkdown content={table} isUser />)
+    expect(container.querySelector('table')).not.toBeNull()
+    rerender(<RenderMarkdown content={table} />)
+    expect(container.querySelector('table')).toBeNull()
+  })
+
+  it('preserves tables in external HTML documents', () => {
+    const { container } = render(
+      <RenderMarkdown
+        enableRawHtml
+        content={'<table><tr><td>Documentation</td></tr></table>'}
+      />
+    )
+    expect(container.querySelector('table')?.textContent).toBe('Documentation')
+  })
+
   it('sanitizes external HTML while preserving text and mathematical rendering', () => {
     const { container } = render(
       <RenderMarkdown

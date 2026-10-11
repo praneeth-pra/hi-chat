@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useMatches } from '@tanstack/react-router'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { IconTrash } from '@tabler/icons-react'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { toast } from 'sonner'
 import { route } from '@/constants/routes'
+import { useAppState } from '@/hooks/useAppState'
 
 interface DeleteThreadDialogProps {
   thread: Thread
@@ -38,6 +39,7 @@ export function DeleteThreadDialog({
 }: DeleteThreadDialogProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const matches = useMatches()
   const [internalOpen, setInternalOpen] = useState(false)
   const deleteButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -59,6 +61,7 @@ export function DeleteThreadDialog({
   }
 
   const handleDelete = () => {
+    useAppState.getState().abortControllers[thread.id]?.abort()
     onDelete(thread.id)
     setOpenSafe(false)
     onDropdownClose?.()
@@ -66,16 +69,16 @@ export function DeleteThreadDialog({
       id: 'delete-thread',
       description: t('common:toast.deleteThread.description'),
     })
-    if (variant !== 'project') {
+    if (
+      variant !== 'project' &&
+      matches.some(
+        (match) =>
+          'threadId' in match.params && match.params.threadId === thread.id
+      )
+    ) {
       setTimeout(() => {
         navigate({ to: route.home })
       }, 0)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleDelete()
     }
   }
 
@@ -90,6 +93,7 @@ export function DeleteThreadDialog({
         </DialogTrigger>
       )}
       <DialogContent
+        onClick={(event) => event.stopPropagation()}
         onOpenAutoFocus={(e) => {
           e.preventDefault()
           deleteButtonRef.current?.focus()
@@ -110,7 +114,6 @@ export function DeleteThreadDialog({
               ref={deleteButtonRef}
               variant="destructive"
               onClick={handleDelete}
-              onKeyDown={handleKeyDown}
               size="sm"
               className="w-full sm:w-auto"
               aria-label={`${t('common:delete')} ${thread.title || t('common:newThread')}`}

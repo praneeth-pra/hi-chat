@@ -18,6 +18,8 @@ type AppErrorMessage = {
 }
 
 type AppState = {
+  accuracyStatus?: { threadId: string; phase: 'drafting' | 'verifying' }
+  setAccuracyStatus: (status: AppState['accuracyStatus']) => void
   streamingContent?: ThreadMessage
   loadingModel?: boolean
   tools: MCPTool[]
@@ -54,6 +56,8 @@ type AppState = {
 }
 
 export const useAppState = create<AppState>()((set) => ({
+  accuracyStatus: undefined,
+  setAccuracyStatus: (accuracyStatus) => set({ accuracyStatus }),
   streamingContent: undefined,
   loadingModel: false,
   tools: [],
@@ -150,6 +154,7 @@ export const useAppState = create<AppState>()((set) => ({
     }),
   clearAppState: () =>
     set({
+      accuracyStatus: undefined,
       streamingContent: undefined,
       abortControllers: {},
       tokenSpeed: undefined,
@@ -182,5 +187,5 @@ export const useAppState = create<AppState>()((set) => ({
     set(() => ({
       activeModels: models,
     }))
-  }
+  },
 }))

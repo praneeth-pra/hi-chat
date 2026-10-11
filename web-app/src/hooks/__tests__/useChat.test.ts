@@ -75,6 +75,7 @@ vi.mock('../useAppState', () => ({
         updateLoadingModel: vi.fn(),
         setAbortController: vi.fn(),
         streamingContent: undefined,
+        setAccuracyStatus: vi.fn(),
         setTokenSpeed: vi.fn(), // Added setTokenSpeed mock
         setActiveModels: vi.fn(),
       }
@@ -85,6 +86,7 @@ vi.mock('../useAppState', () => ({
         tools: [],
         tokenSpeed: { tokensPerSecond: 10 },
         streamingContent: undefined,
+        setAccuracyStatus: vi.fn(),
       })),
     }
   ),
@@ -158,6 +160,7 @@ vi.mock('../useModelProvider', () => ({
     },
     {
       getState: () => ({
+        providers: Object.values(autoProviders),
         getProviderByName: vi.fn(
           (name: string) =>
             autoProviders[name] ?? {
@@ -582,7 +585,7 @@ describe('useChat', () => {
       const builderCall = (messagesLib.CompletionMessagesBuilder as any).mock
         .calls[0]
       expect(builderCall[0]).toEqual([userMsg]) // stopped message filtered out
-      expect(builderCall[1]).toEqual('test instructions')
+      expect(builderCall[1]).toContain('test instructions')
     })
 
     it('should update existing message instead of adding new one when continuing', async () => {
@@ -790,23 +793,75 @@ describe('useChat', () => {
       )
       expect(answer.metadata.timings.answered_by).toBe('Groq gpt-oss-20b')
     })
-    it('races the two 120B models in Accuracy with Medium reasoning', async () => {
+    it('reviews the winning 120B draft before saving an Accuracy answer', async () => {
       configure('accuracy')
-      mockSendCompletion.mockImplementation(async () =>
-        (async function* () {
-          yield { choices: [{ delta: { content: 'Large answer' } }] }
-        })()
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              status: 'ready',
+              sources: [
+                {
+                  url: 'https://docs.example.com',
+                  title: 'Docs',
+                  text: 'Evidence',
+                },
+              ],
+            })
+          )
+        )
+      mockSendCompletion.mockImplementation(
+        async (
+          _thread: any,
+          _provider: any,
+          _messages: any,
+          _abort: any,
+          _tools: any,
+          stream: boolean
+        ) =>
+          stream
+            ? (async function* () {
+                yield { choices: [{ delta: { content: 'Large answer' } }] }
+              })()
+            : {
+                choices: [
+                  {
+                    message: {
+                      content: JSON.stringify({
+                        verdict: 'revised',
+                        answer: '- Checked answer',
+                      }),
+                    },
+                  },
+                ],
+              }
       )
-      const { result } = renderHook(() => useChat())
-      await act(async () => {
-        await result.current('Explain DNS.')
-      })
-      expect(
-        mockSendCompletion.mock.calls.map((args: any[]) => args[0].model.id)
-      ).toEqual(['gpt-oss-120b', 'openai/gpt-oss-120b'])
-      for (const args of mockSendCompletion.mock.calls as any[][])
-        expect(args[6]).toMatchObject({ reasoning_effort: 'medium' })
-      expect(mockAddMessage).toHaveBeenCalledTimes(2)
+      try {
+        const { result } = renderHook(() => useChat())
+        await act(async () => {
+          await result.current('Explain DNS.')
+        })
+        expect(
+          mockSendCompletion.mock.calls
+            .slice(0, 2)
+            .map((args: any[]) => args[0].model.id)
+        ).toEqual(['gpt-oss-120b', 'openai/gpt-oss-120b'])
+        const review = mockSendCompletion.mock.calls[2]
+        expect(review[5]).toBe(false)
+        expect(review[4]).toEqual([])
+        expect(review[6]).toMatchObject({ reasoning_effort: 'medium' })
+        expect(mockAddMessage).toHaveBeenCalledTimes(2)
+        expect(mockAddMessage.mock.calls[1][0].content[0].text.value).toBe(
+          '- Checked answer'
+        )
+        expect(
+          mockAddMessage.mock.calls[1][0].metadata.accuracyReview.verdict
+        ).toBe('revised')
+        expect(fetchSpy).toHaveBeenCalledWith('/api/search', expect.anything())
+      } finally {
+        fetchSpy.mockRestore()
+      }
     })
   })
 

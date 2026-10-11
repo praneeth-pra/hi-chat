@@ -43,7 +43,6 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { dictionaryTerms, getDictionary, setDictionary } from '@/lib/keyTerms'
 import { getDictationMic, listMics, setDictationMic } from '@/lib/micActivity'
-import { getTablesAsLists, setTablesAsLists } from '@/lib/tablesToLists'
 import {
   ANSWER_MODELS,
   ANSWER_QUESTIONS,
@@ -153,7 +152,6 @@ function General() {
         toast.error('Allow microphone access to list your mics')
       })
   }
-  const [tablesAsLists, setTablesAsListsState] = useState(getTablesAsLists)
   const [dictionary, setDictionaryState] = useState(getDictionary)
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
 
@@ -548,17 +546,8 @@ function General() {
                 }
               />
               <CardItem
-                title="Show tables as lists"
-                description="Answers that come back as a table are shown as bullet points, one per row."
-                actions={
-                  <Switch
-                    checked={tablesAsLists}
-                    onCheckedChange={(on) => {
-                      setTablesAsLists(on)
-                      setTablesAsListsState(on)
-                    }}
-                  />
-                }
+                title="Answer format"
+                description="Medium-length answers, mostly bullet points. Tables in answers are always displayed as lists."
               />
               <CardItem
                 title="Chat thinking"

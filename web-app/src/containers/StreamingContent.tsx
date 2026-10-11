@@ -23,6 +23,7 @@ function extractReasoningSegment(text: string) {
 // Avoid duplicate reasoning segments after tool calls
 export const StreamingContent = memo(({ threadId }: Props) => {
   const streamingContent = useAppState((state) => state.streamingContent)
+  const accuracyStatus = useAppState((state) => state.accuracyStatus)
   const { getMessages } = useMessages()
   const messages = getMessages(threadId)
 
@@ -48,6 +49,16 @@ export const StreamingContent = memo(({ threadId }: Props) => {
       lastAssistant.content?.find((e) => e.type === 'text')?.text?.value || ''
     return extractReasoningSegment(text)
   }, [lastAssistant])
+
+  if (accuracyStatus?.threadId === threadId) {
+    return (
+      <p role="status" className="text-sm text-main-view-fg/60 py-3">
+        {accuracyStatus.phase === 'drafting'
+          ? 'Accuracy: preparing an answer…'
+          : 'Accuracy: checking the answer…'}
+      </p>
+    )
+  }
 
   if (!streamingContent || streamingContent.thread_id !== threadId) {
     return null
