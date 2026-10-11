@@ -45,7 +45,7 @@ export const defaultAssistant: Assistant = {
   avatar: '👋',
   description: 'A fast, helpful assistant.',
   instructions:
-    'You are a helpful AI assistant. Answer directly, concisely and clearly. Admit when you are unsure rather than making things up.\n\nCurrent date: {{current_date}}',
+    'You are a helpful AI assistant. Answer directly and clearly, with useful explanation and practical detail. Admit when you are unsure rather than making things up.\n\nCurrent date: {{current_date}}',
 }
 
 // Platform-aware initial state

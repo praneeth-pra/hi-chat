@@ -23,6 +23,7 @@ import { CompletionMessagesBuilder } from '@/lib/messages'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
+import { withAnswerDetail } from '@/lib/answerDetail'
 import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
@@ -717,16 +718,18 @@ export const useChat = () => {
           ? messages.filter((m) => m.id !== continueFromMessageId)
           : messages
 
-        // Code questions get a rule asking for the shortest working version
+        // Apply fuller reply detail to saved assistants too; code itself stays focused.
         const builder = new CompletionMessagesBuilder(
           contextMessages,
           withCodingRule(
-            currentAssistant
-              ? withDocuments(
-                  renderInstructions(currentAssistant.instructions),
-                  currentAssistant.documents
-                )
-              : undefined,
+            withAnswerDetail(
+              currentAssistant
+                ? withDocuments(
+                    renderInstructions(currentAssistant.instructions),
+                    currentAssistant.documents
+                  )
+                : undefined
+            ),
             message
           )
         )

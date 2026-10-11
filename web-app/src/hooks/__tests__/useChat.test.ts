@@ -582,7 +582,7 @@ describe('useChat', () => {
       const builderCall = (messagesLib.CompletionMessagesBuilder as any).mock
         .calls[0]
       expect(builderCall[0]).toEqual([userMsg]) // stopped message filtered out
-      expect(builderCall[1]).toEqual('test instructions')
+      expect(builderCall[1]).toContain('test instructions')
     })
 
     it('should update existing message instead of adding new one when continuing', async () => {
