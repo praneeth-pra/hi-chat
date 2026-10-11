@@ -6,6 +6,7 @@
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { sameOriginRequest } from './requestSafety.mjs'
 import {
   createHmac,
   createHash,
@@ -171,6 +172,14 @@ export async function handleAuth(
   fetchImpl = fetch
 ) {
   const path = (req.url ?? '').split('?')[0]
+  if (
+    path.startsWith('/auth/') &&
+    req.method === 'POST' &&
+    !sameOriginRequest(req)
+  ) {
+    json(res, 403, { error: 'Cross-origin request refused' })
+    return true
+  }
   if (path === '/auth/check') {
     res.writeHead(signedIn(req.headers.cookie, env) ? 204 : 401).end()
     return true
@@ -188,8 +197,7 @@ export async function handleAuth(
     return true
   }
   if (path === '/auth/code' && req.method === 'POST') {
-    if (!loginOn(env))
-      return (json(res, 503, { error: NOT_SET_UP }), true)
+    if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
     const code = newCode()
     if (code === 'wait')
       return (
@@ -219,8 +227,7 @@ export async function handleAuth(
     }
   }
   if (path === '/auth/verify' && req.method === 'POST') {
-    if (!loginOn(env))
-      return (json(res, 503, { error: NOT_SET_UP }), true)
+    if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
     const body = await readJson(req)
     const r = checkCode(String(body?.code ?? '').replace(/\D/g, ''))
     if (r !== 'ok') {

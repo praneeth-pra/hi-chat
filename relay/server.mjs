@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
 import { handleAuth } from './auth.mjs'
+import { sameOriginRequest } from './requestSafety.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -93,12 +94,14 @@ export function transcribeAll(
     need = Infinity,
     // Dictation races require usable speech, not merely a successful request.
     requireText = false,
+    timeoutMs = ENGINE_TIMEOUT_MS,
+    signal,
   } = {}
 ) {
   return new Promise((resolve) => {
     const started = Date.now()
     const abort = new AbortController()
-    const timeout = setTimeout(() => abort.abort(), ENGINE_TIMEOUT_MS)
+    let timeout
     const results = engines.map((e) =>
       env[e.keyVar]
         ? null
@@ -120,6 +123,7 @@ export function transcribeAll(
       done = true
       clearTimeout(timer)
       clearTimeout(timeout)
+      signal?.removeEventListener('abort', finish)
       abort.abort()
       resolve(
         results.map(
@@ -134,12 +138,17 @@ export function transcribeAll(
       )
     }
 
-    if (running === 0) return finish()
+    timeout = setTimeout(finish, timeoutMs)
+    signal?.addEventListener('abort', finish, { once: true })
+    if (running === 0 || signal?.aborted) return finish()
 
     engines.forEach((engine, i) => {
       if (results[i]) return
-      engine
-        .run(file, env[engine.keyVar], abort.signal, fetchImpl)
+      Promise.resolve()
+        .then(() => {
+          if (abort.signal.aborted) throw abort.signal.reason
+          return engine.run(file, env[engine.keyVar], abort.signal, fetchImpl)
+        })
         .then((text) => {
           if (!done)
             results[i] = {
@@ -172,7 +181,7 @@ export function transcribeAll(
  * One line per clip, so slow or failing engines show in Railway's logs. Each
  * engine's own words are included so their accuracy can be compared.
  */
-export function clipLogLine(size, results) {
+export function clipLogLine(size, results, includeText = false) {
   return (
     `clip ${size} B: ` +
     results
@@ -180,7 +189,7 @@ export function clipLogLine(size, results) {
         r.off
           ? `${r.name} off`
           : r.ok
-            ? `${r.name} ${r.ms} ms ${JSON.stringify(String(r.text).slice(0, 400))}`
+            ? `${r.name} ${r.ms} ms ${includeText ? JSON.stringify(String(r.text).slice(0, 400)) : `${String(r.text).length} chars`}`
             : `${r.name} failed after ${r.ms} ms (${r.error})`
       )
       .join(', ')
@@ -207,7 +216,11 @@ export async function liveToken({
     })
   const res = await fetchImpl(
     'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
-    { method: 'POST', headers: { 'xi-api-key': key } }
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': key },
+      signal: AbortSignal.timeout(15_000),
+    }
   )
   if (!res.ok)
     throw Object.assign(
@@ -258,6 +271,7 @@ export async function sonioxKey({ env = process.env, fetchImpl = fetch } = {}) {
     'https://api.soniox.com/v1/auth/temporary-api-key',
     {
       method: 'POST',
+      signal: AbortSignal.timeout(15_000),
       headers: {
         'Authorization': `Bearer ${env.SONIOX_API_KEY}`,
         'Content-Type': 'application/json',
@@ -270,9 +284,7 @@ export async function sonioxKey({ env = process.env, fetchImpl = fetch } = {}) {
   )
   if (!res.ok)
     throw Object.assign(
-      new Error(
-        `Soniox key failed (${res.status}): ${await errorText(res)}`
-      ),
+      new Error(`Soniox key failed (${res.status}): ${await errorText(res)}`),
       { status: 502 }
     )
   const { api_key } = await res.json()
@@ -292,6 +304,7 @@ export async function cartesiaToken({
     throw Object.assign(new Error('CARTESIA_API_KEY not set'), { status: 503 })
   const res = await fetchImpl('https://api.cartesia.ai/access-token', {
     method: 'POST',
+    signal: AbortSignal.timeout(15_000),
     headers: {
       'Authorization': `Bearer ${env.CARTESIA_API_KEY}`,
       'Cartesia-Version': CARTESIA_VERSION,
@@ -328,8 +341,8 @@ export function dictionaryTerms(
   }
   const seen = new Set()
   dictionary = []
+  // Commas split terms, except inside brackets: "Services (ClusterIP, …)"
   for (const line of lines)
-    // Commas split terms, except inside brackets: "Services (ClusterIP, …)"
     for (const raw of line.split(/,(?![^(]*\))/)) {
       const term = raw.replace(/\s+/g, ' ').replace(/[.:]$/, '').trim()
       if (!term || seen.has(term.toLowerCase())) continue
@@ -356,7 +369,7 @@ function liveTokenEngine(body) {
  * timings, notes) so it shows in Railway's logs next to the timings. One line,
  * capped, so a bad request can't flood the log.
  */
-export function speechLogLine(body) {
+export function speechLogLine(body, includeText = false) {
   let line = ''
   try {
     line = String(JSON.parse(body.toString('utf8')).line ?? '')
@@ -364,7 +377,16 @@ export function speechLogLine(body) {
     return null
   }
   line = line.replace(/\s+/g, ' ').trim().slice(0, 6000)
-  return line ? `speech ${line}` : null
+  if (!line) return null
+  if (includeText) return `speech ${line}`
+  // Retain numeric diagnostics; arbitrary text is never copied into default logs.
+  const auto = line.match(
+    /^dictation auto: sent=[\w-]+ total=\d+ms(?: [\w-]+=(?:\d+ms|none))*(?: judge=\d+ms)?(?= \||$)/
+  )
+  const single = line.match(
+    /^dictation (?:[\w-]+|fallback \((?:live failed|live empty)\)): \d+ ms after stop, \d+ chars$/
+  )
+  return `speech ${auto?.[0] ?? single?.[0] ?? 'diagnostic text omitted'}`
 }
 
 function readBody(req) {
@@ -402,9 +424,14 @@ export function createRelay(options = {}) {
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
+    if (!sameOriginRequest(req))
+      return send(res, 403, { error: 'Cross-origin request refused' })
     if (req.url === '/api/speech-log') {
       try {
-        const line = speechLogLine(await readBody(req))
+        const line = speechLogLine(
+          await readBody(req),
+          (options.env ?? process.env).SPEECH_LOG_TEXT === '1'
+        )
         if (!line) return send(res, 400, { error: 'No line' })
         console.log(line)
         res.writeHead(204).end()
@@ -451,9 +478,15 @@ export function createRelay(options = {}) {
       const need = Number(form.get('need'))
       // The browser can shorten the wait for the second engine (never longer)
       const wait = Number(form.get('wait_ms'))
+      const disconnected = new AbortController()
+      const onClose = () => {
+        if (!res.writableEnded) disconnected.abort()
+      }
+      res.once('close', onClose)
       const results = await transcribeAll(file, {
         ...options,
         engines: wanted.length ? wanted : all,
+        signal: disconnected.signal,
         requireText: form.get('require_text') === '1',
         ...(Number.isInteger(need) && need > 0 ? { need } : {}),
         ...(Number.isFinite(wait) && wait >= 0 && form.get('wait_ms') !== null
@@ -462,8 +495,16 @@ export function createRelay(options = {}) {
             }
           : {}),
       })
+      res.removeListener('close', onClose)
+      if (disconnected.signal.aborted) return
       // One line per clip, so slow or failing engines show in Railway's logs
-      console.log(clipLogLine(file.size, results))
+      console.log(
+        clipLogLine(
+          file.size,
+          results,
+          (options.env ?? process.env).SPEECH_LOG_TEXT === '1'
+        )
+      )
       const status = results.some((r) => r.ok)
         ? 200
         : results.every((r) => r.off)
@@ -478,6 +519,8 @@ export function createRelay(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
     if (url.pathname !== '/api/grok-live') return socket.destroy()
+    if (!sameOriginRequest(req))
+      return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
     if (!useGrokTicket(url.searchParams.get('ticket') ?? '')) {
       console.log('grok live refused: bad or used ticket')
       return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')

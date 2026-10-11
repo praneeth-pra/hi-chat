@@ -13,6 +13,7 @@ for i = 1, 20 do keymap["f" .. i] = 200 + i end
 local types = { flagsChanged = 1, keyDown = 2, keyUp = 3, leftMouseDown = 4,
   rightMouseDown = 5, scrollWheel = 6 }
 local app, win = {}, {}
+local secureInput = false
 local title, available = "Hi-chat — Safari", true
 app.focusedWindow = function() return available and win end
 app.mainWindow = app.focusedWindow
@@ -59,7 +60,7 @@ hs = {
   alert = { show = function(message) alerts[#alerts + 1] = message end },
   timer = { secondsSinceEpoch = function() return now end,
     doAfter = function(_, fn) fn() end },
-  eventtap = { keyStroke = function(_, key, _, target)
+  eventtap = { isSecureInputEnabled = function() return secureInput end, keyStroke = function(_, key, _, target)
       assert(target == app, "Send must use the pinned typing app")
       sentKeys[#sentKeys + 1] = key
     end,
@@ -152,6 +153,15 @@ title = "Sign in to Hi-chat"
 toggle()
 assert(not state() and #posted == count)
 title = "Hi-chat"
+secureInput = true
+toggle()
+assert(not state())
+secureInput = false
+toggle()
+assert(state())
+secureInput = true
+assert(callback(event(types.keyDown, 0, {}, "a")) == true and not state())
+secureInput = false
 available = false
 toggle()
 assert(not state())

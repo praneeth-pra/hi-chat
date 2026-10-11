@@ -126,7 +126,10 @@ test('relay: without LOGIN_EMAIL, codes are refused', async () => {
   await new Promise((r) => server.once('listening', r))
   try {
     assert.equal((await call(server, '/auth/check')).status, 401)
-    assert.equal((await call(server, '/auth/code', { method: 'POST' })).status, 503)
+    assert.equal(
+      (await call(server, '/auth/code', { method: 'POST' })).status,
+      503
+    )
   } finally {
     server.close()
   }

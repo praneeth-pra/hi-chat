@@ -16,6 +16,37 @@ Object.assign(navigator, {
 })
 
 describe('RenderMarkdown', () => {
+  it('sanitizes external HTML while preserving text and mathematical rendering', () => {
+    const { container } = render(
+      <RenderMarkdown
+        enableRawHtml
+        content={
+          '<iframe srcdoc="<script>parent.alert(1)</script>"></iframe><img src="https://example.com/x" onerror="alert(1)"><form><input></form><p>Safe text</p>\n\n$\\alpha + \\beta$'
+        }
+      />
+    )
+    expect(
+      container.querySelector('iframe, script, form, input:not([disabled])')
+    ).toBeNull()
+    expect(container.querySelector('img')?.hasAttribute('onerror')).toBe(false)
+    expect(container.textContent).toContain('Safe text')
+    expect(container.querySelector('.katex')).not.toBeNull()
+  })
+  it('applies raw HTML mode changes when content stays the same', () => {
+    const { container, rerender } = render(
+      <RenderMarkdown
+        content={'<details><summary>Details</summary>Text</details>'}
+      />
+    )
+    expect(container.querySelector('details')).toBeNull()
+    rerender(
+      <RenderMarkdown
+        enableRawHtml
+        content={'<details><summary>Details</summary>Text</details>'}
+      />
+    )
+    expect(container.querySelector('details')).not.toBeNull()
+  })
   it('preserves line breaks in model responses (when isUser == undefined)', () => {
     const modelResponseWithNewLines = `This is line 1
     This is line 2
@@ -164,4 +195,3 @@ describe('RenderMarkdown', () => {
     })
   })
 })
-

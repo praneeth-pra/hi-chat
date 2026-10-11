@@ -80,7 +80,13 @@ export function decodeFrames(buf) {
       for (let i = 0; i < len; i++) payload[i] = buf[pos + i] ^ mask[i & 3]
     } else payload = Buffer.from(buf.subarray(pos, pos + len))
     pos += len
-    frames.push({ fin: (b0 & 0x80) !== 0, opcode: b0 & 0x0f, payload })
+    frames.push({
+      fin: (b0 & 0x80) !== 0,
+      opcode: b0 & 0x0f,
+      rsv: b0 & 0x70,
+      masked,
+      payload,
+    })
     offset = pos
   }
   return { frames, rest: buf.subarray(offset) }
@@ -92,7 +98,11 @@ export function decodeFrames(buf) {
  */
 export function acceptWebSocket(req, socket, head) {
   const key = req.headers['sec-websocket-key']
-  if (!key || req.headers.upgrade?.toLowerCase() !== 'websocket') {
+  if (
+    !/^[A-Za-z0-9+/]{22}==$/.test(key ?? '') ||
+    req.headers['sec-websocket-version'] !== '13' ||
+    req.headers.upgrade?.toLowerCase() !== 'websocket'
+  ) {
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
     return null
   }
@@ -116,11 +126,14 @@ export function acceptWebSocket(req, socket, head) {
   let buf = head?.length ? Buffer.from(head) : Buffer.alloc(0)
   let parts = []
   let partsOpcode = 0
+  let partsBytes = 0
   const ws = {
     onmessage: () => {},
     onclose: () => {},
     send(data) {
       if (closed) return
+      if (Buffer.byteLength(data) + socket.writableLength > MAX_MESSAGE_BYTES)
+        return ws.close(1009)
       socket.write(
         typeof data === 'string' ? encodeFrame(1, data) : encodeFrame(2, data)
       )
@@ -143,21 +156,34 @@ export function acceptWebSocket(req, socket, head) {
       return ws.close(1009)
     }
     for (const f of frames) {
+      if (closed) return
+      if (
+        !f.masked ||
+        f.rsv ||
+        ![0, 1, 2, 8, 9, 10].includes(f.opcode) ||
+        (f.opcode >= 8 && (!f.fin || f.payload.length > 125))
+      )
+        return ws.close(1002)
       if (f.opcode === 8) return ws.close()
       if (f.opcode === 9) {
         socket.write(encodeFrame(10, f.payload))
         continue
       }
       if (f.opcode === 10) continue
+      if ((f.opcode === 0 && !partsOpcode) || (f.opcode !== 0 && partsOpcode))
+        return ws.close(1002)
       if (f.opcode !== 0) partsOpcode = f.opcode
+      partsBytes += f.payload.length
+      if (partsBytes > MAX_MESSAGE_BYTES || parts.length >= 1024)
+        return ws.close(1009)
       parts.push(f.payload)
       if (!f.fin) continue
       const data = Buffer.concat(parts)
+      const opcode = partsOpcode
       parts = []
-      ws.onmessage(
-        partsOpcode === 1 ? data.toString('utf8') : data,
-        partsOpcode === 2
-      )
+      partsBytes = 0
+      partsOpcode = 0
+      ws.onmessage(opcode === 1 ? data.toString('utf8') : data, opcode === 2)
     }
   }
   socket.on('data', onData)
@@ -167,7 +193,11 @@ export function acceptWebSocket(req, socket, head) {
     ws.onclose()
   })
   socket.on('error', () => socket.destroy())
-  if (buf.length) onData(Buffer.alloc(0))
+  // Let grokLive attach its callbacks before delivering upgrade-head audio.
+  if (buf.length)
+    queueMicrotask(() => {
+      if (!closed) onData(Buffer.alloc(0))
+    })
   return ws
 }
 
@@ -209,10 +239,16 @@ export function grokLive(
   upstream.binaryType = 'arraybuffer'
   let ready = false
   const held = []
+  let heldBytes = 0
   let done = false
+  const readiness = setTimeout(() => finish('readiness timeout'), 10_000)
+  readiness.unref?.()
   const finish = (why) => {
     if (done) return
     done = true
+    clearTimeout(readiness)
+    held.length = 0
+    heldBytes = 0
     log(`grok live ${why} after ${Date.now() - started} ms`)
     try {
       upstream.close()
@@ -222,21 +258,35 @@ export function grokLive(
     client.close()
   }
   client.onmessage = (data) => {
+    if (done) return
+    const size =
+      typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+    if (
+      (ready ? upstream.bufferedAmount : heldBytes) + size >
+      MAX_MESSAGE_BYTES
+    )
+      return finish('audio backlog exceeded')
     if (ready && upstream.readyState === 1) upstream.send(data)
-    else held.push(data)
+    else {
+      held.push(data)
+      heldBytes += size
+    }
   }
   client.onclose = () => finish('closed by browser')
   upstream.onmessage = (e) => {
+    if (done) return
     const text =
       typeof e.data === 'string' ? e.data : Buffer.from(e.data).toString('utf8')
     client.send(text)
     if (!ready && text.includes('"transcript.created"')) {
       ready = true
+      clearTimeout(readiness)
       log(
         `grok live ready in ${Date.now() - started} ms` +
           (keyterms.length ? ` (${keyterms.length} key terms)` : '')
       )
       for (const msg of held.splice(0)) upstream.send(msg)
+      heldBytes = 0
     }
   }
   upstream.onerror = () => {

@@ -19,10 +19,12 @@ jobs:
       - run: yarn build:core
       - name: Web app tests
         run: yarn workspace @janhq/web-app test
-      - name: Transcription relay tests
-        run: node --test relay/server.test.mjs
+      - name: Relay and authentication security tests
+        run: node --test relay/*.test.mjs
       - name: Build web app
         run: yarn build:web-app
+      - name: Strict web application types
+        run: yarn workspace @janhq/web-app exec tsc --noEmit -p tsconfig.app.json
 
   docker:
     runs-on: ubuntu-latest
@@ -53,6 +55,10 @@ jobs:
           curl -sf -b "$C" http://localhost:8081/serviceWorker.js | grep -q 'registration.unregister'
           worker=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^pdf.worker" | head -1')
           curl -sfI -b "$C" "http://localhost:8081/assets/$worker" | grep -qi '^content-type: text/javascript'
+          # Browser Origin checks use the public host forwarded by nginx.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' http://localhost:8081/auth/code)" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: https://evil.example' http://localhost:8081/api/live-token)" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: http://localhost:8081' --data '{"line":"dictation grok: 10 ms after stop, 6 chars"}' http://localhost:8081/api/speech-log)" = 204
           # Groq pass-through reaches api.groq.com (no key, so Groq itself answers 401)
           curl -s -b "$C" http://localhost:8081/api/groq/openai/v1/models | grep -qi 'api key'
           # One upload reaches the relay, which tries both engines

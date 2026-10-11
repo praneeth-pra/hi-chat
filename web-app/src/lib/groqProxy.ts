@@ -16,8 +16,15 @@ export function viaGroqProxy(
   url: string | undefined,
   enabled = !isPlatformTauri() && typeof window !== 'undefined'
 ): string | undefined {
-  if (!enabled || !url?.startsWith(GROQ_ORIGIN)) return url
-  return `${window.location.origin}${GROQ_PROXY_PATH}${url.slice(GROQ_ORIGIN.length)}`
+  if (!enabled || !url) return url
+  try {
+    const parsed = new URL(url)
+    if (parsed.origin !== GROQ_ORIGIN || parsed.username || parsed.password)
+      return url
+    return `${window.location.origin}${GROQ_PROXY_PATH}${parsed.pathname}${parsed.search}`
+  } catch {
+    return url
+  }
 }
 
 /** How long the direct route gets to start replying before the server joins. */
@@ -64,48 +71,106 @@ export function groqFetch(
     const controllers: AbortController[] = []
     let settled = false
     let running = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let failedResponse:
+      | { res: Response; route: GroqRoute; own: AbortController }
+      | undefined
+    const discard = (res: Response) => {
+      res.body?.cancel().catch(() => {})
+    }
+    const abort = () => {
+      clearTimeout(timer)
+      controllers.forEach((controller) => controller.abort(outer?.reason))
+      outer?.removeEventListener('abort', abort)
+      if (settled) return
+      settled = true
+      if (failedResponse) discard(failedResponse.res)
+      reject(outer?.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    if (outer?.aborted) {
+      abort()
+      return
+    }
+    outer?.addEventListener('abort', abort, { once: true })
+    const finish = (res: Response, route: GroqRoute, own: AbortController) => {
+      settled = true
+      clearTimeout(timer)
+      controllers.forEach((controller) => {
+        if (controller !== own) controller.abort()
+      })
+      if (failedResponse && failedResponse.res !== res)
+        discard(failedResponse.res)
+      routes.set(res, route)
+      // Keep abort linked after headers: Stop must still cancel the winning body.
+      resolve(res)
+    }
 
     const start = (route: GroqRoute) => {
       const own = new AbortController()
       controllers.push(own)
       running++
-      if (outer?.aborted) own.abort(outer.reason)
-      outer?.addEventListener('abort', () => own.abort(outer.reason), {
-        once: true,
-      })
-      base(routeUrls[route], { ...init, signal: own.signal }).then(
-        (res) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          controllers.forEach((c) => c !== own && c.abort())
-          routes.set(res, route)
-          resolve(res)
-        },
-        (err) => {
-          running--
-          if (settled) return
-          // The direct route failed before the server joined: join now
-          if (
-            route === 'direct' &&
-            controllers.length === 1 &&
-            !outer?.aborted
-          ) {
-            clearTimeout(timer)
-            start('server')
-            return
+      Promise.resolve()
+        .then(() => {
+          if (own.signal.aborted) throw own.signal.reason
+          return base(routeUrls[route], { ...init, signal: own.signal })
+        })
+        .then(
+          (res) => {
+            running--
+            if (settled) {
+              discard(res)
+              return
+            }
+            if (res.ok) {
+              finish(res, route, own)
+              return
+            }
+            if (!failedResponse) failedResponse = { res, route, own }
+            else discard(res)
+            if (route === 'direct' && controllers.length === 1) {
+              clearTimeout(timer)
+              start('server')
+            } else if (running === 0)
+              finish(
+                failedResponse.res,
+                failedResponse.route,
+                failedResponse.own
+              )
+          },
+          (err) => {
+            running--
+            if (settled) return
+            // The direct route failed before the server joined: join now
+            if (
+              route === 'direct' &&
+              controllers.length === 1 &&
+              !outer?.aborted
+            ) {
+              clearTimeout(timer)
+              start('server')
+              return
+            }
+            if (running === 0) {
+              if (failedResponse) {
+                finish(
+                  failedResponse.res,
+                  failedResponse.route,
+                  failedResponse.own
+                )
+                return
+              }
+              settled = true
+              clearTimeout(timer)
+              outer?.removeEventListener('abort', abort)
+              reject(err)
+            }
           }
-          if (running === 0) {
-            settled = true
-            reject(err)
-          }
-        }
-      )
+        )
     }
 
     start('direct')
     // Only read by the callbacks above, which run after this line
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       if (!settled && controllers.length === 1) start('server')
     }, hedgeMs)
   })
