@@ -163,6 +163,49 @@ describe('startSpeakerCapture', () => {
     session.stop()
     localStorage.removeItem('speaker-live-mode')
   })
+  it('delivers finalized text without waiting for an advisory Smart Turn check', async () => {
+    localStorage.setItem('speaker-live-mode', 'off')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              results: [
+                {
+                  name: 'elevenlabs',
+                  ok: true,
+                  ms: 1,
+                  text: 'How do we recover?',
+                },
+              ],
+            })
+          )
+      )
+    )
+    let resolve!: (turn: null) => void
+    const accept = vi.fn(async (_texts: string[]) => null)
+    const session = startSpeakerCapture({
+      onStatus: () => {},
+      onText: () => {},
+      accept,
+      checkTurn: () =>
+        new Promise((r) => {
+          resolve = r
+        }),
+    })
+    for (let i = 0; i < 10; i++) await flush()
+    for (let i = 0; i < 4; i++)
+      taps[0].port.onmessage?.({ data: new Float32Array(2400).fill(0.1) })
+    for (let i = 0; i < 20; i++)
+      taps[0].port.onmessage?.({ data: new Float32Array(2400) })
+    for (let i = 0; i < 5; i++) await flush()
+    expect(accept).toHaveBeenCalledTimes(1)
+    expect(accept.mock.calls[0][0]).toEqual(['How do we recover?'])
+    resolve(null)
+    session.stop()
+    localStorage.removeItem('speaker-live-mode')
+  })
   it('ignores an old transcript after restarting capture for another chat', async () => {
     let resolveOld!: (response: Response) => void
     const reply = (text: string) =>

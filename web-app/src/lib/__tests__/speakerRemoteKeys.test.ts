@@ -96,6 +96,7 @@ describe('speaker remote keys', () => {
       manual: false,
       reason: 'scenario',
     })
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     const sendNow = vi.fn(),
       discard = vi.fn()
     const unregister = setQuestionControls({
@@ -121,7 +122,7 @@ describe('speaker remote keys', () => {
     useSpeakerTranscription.getState().resetTurns()
     useSpeakerTranscription.getState().setComposerReviewVisible(true)
   })
-  it('cannot send a complete review question after its card expired', () => {
+  it('can approve a persistent complete question after long pauses', () => {
     useSpeakerTranscription.getState().resetTurns()
     useSpeakerTranscription.getState().setComposerReviewVisible(true)
     useSpeakerTranscription.getState().setPendingQuestion({
@@ -130,9 +131,9 @@ describe('speaker remote keys', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() - 1,
       reason: 'follow-up',
     })
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     const sendNow = vi.fn()
     const unregister = setQuestionControls({
       sendNow,
@@ -143,11 +144,45 @@ describe('speaker remote keys', () => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
     )
-    expect(sendNow).not.toHaveBeenCalled()
+    expect(sendNow).toHaveBeenCalledTimes(1)
     stop()
     unregister()
     useSpeakerTranscription.getState().resetTurns()
     useSpeakerTranscription.getState().setComposerReviewVisible(true)
+  })
+  it('cannot approve a changed draft before it renders in the composer', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    const draft = {
+      id: 'q',
+      text: 'Explain DNS.',
+      complete: true,
+      manual: false,
+      reason: 'question',
+    }
+    useSpeakerTranscription.getState().setPendingQuestion(draft)
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
+    const sendNow = vi.fn()
+    const unregister = setQuestionControls({
+      sendNow,
+      discard: vi.fn(),
+      keepListening: vi.fn(),
+    })
+    const stop = listenForSpeakerKeys()
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({ ...draft, text: 'Explain DNS. And caching?' })
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
+    )
+    expect(sendNow).not.toHaveBeenCalled()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
+    )
+    expect(sendNow).toHaveBeenCalledTimes(1)
+    stop()
+    unregister()
+    useSpeakerTranscription.getState().resetTurns()
   })
   it('fn arrows never send or discard a hidden proposal while typing a draft', () => {
     useSpeakerTranscription.getState().resetTurns()

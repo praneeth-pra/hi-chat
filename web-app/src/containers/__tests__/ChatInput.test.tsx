@@ -377,7 +377,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {
@@ -410,7 +409,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {
@@ -432,7 +430,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {

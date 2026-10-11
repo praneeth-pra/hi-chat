@@ -33,7 +33,7 @@ type QuestionControls = {
   sendNow: () => void
   keepListening: () => void
   discard: () => void
-  expireReview?: (id: string, text: string) => void
+  next?: () => void
 }
 let questionControls: QuestionControls | null = null
 export function setQuestionControls(controls: QuestionControls) {
@@ -51,7 +51,9 @@ type SpeakerTranscriptionState = {
   sendPendingQuestion: () => void
   keepListening: () => void
   discardPendingQuestion: () => void
-  expirePendingReview: (id: string, text: string) => void
+  nextPendingQuestion: () => void
+  preview: { clipId: number; text: string } | null
+  setPreview: (preview: { clipId: number; text: string } | null) => void
   turnQueue: SpeakerTurnDelivery[]
   deliveryEpoch: number
   turnVersions: Record<string, number>
@@ -130,12 +132,29 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
       setComposerReviewVisible: (composerReviewVisible) =>
         set({ composerReviewVisible }),
       pendingQuestion: null,
-      setPendingQuestion: (pendingQuestion) => set({ pendingQuestion }),
+      setPendingQuestion: (pendingQuestion) =>
+        set((state) => ({
+          pendingQuestion,
+          composerReviewVisible:
+            state.pendingQuestion?.id === pendingQuestion?.id &&
+            state.pendingQuestion?.text === pendingQuestion?.text
+              ? state.composerReviewVisible
+              : false,
+        })),
       sendPendingQuestion: () => questionControls?.sendNow(),
       keepListening: () => questionControls?.keepListening(),
       discardPendingQuestion: () => questionControls?.discard(),
-      expirePendingReview: (id, text) =>
-        questionControls?.expireReview?.(id, text),
+      nextPendingQuestion: () => questionControls?.next?.(),
+      preview: null,
+      setPreview: (preview) =>
+        set((state) => ({
+          preview,
+          composerReviewVisible:
+            state.preview?.clipId === preview?.clipId &&
+            state.preview?.text === preview?.text
+              ? state.composerReviewVisible
+              : false,
+        })),
       turnQueue: [],
       deliveryEpoch: 0,
       turnVersions: {},
@@ -169,6 +188,7 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
           turnVersions: {},
           sendingTurn: null,
           pendingQuestion: null,
+          preview: null,
           composerReviewVisible: false,
           queue: [],
           revision: null,

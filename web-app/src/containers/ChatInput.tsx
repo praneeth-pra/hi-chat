@@ -1429,6 +1429,16 @@ const ChatInput = ({
                       Review question
                     </button>
                   )}
+                  {!!speakerReview.queuedQuestions && (
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-accent"
+                      onClick={speakerReview.next}
+                      title="Review another held question"
+                    >
+                      {speakerReview.queuedQuestions} more
+                    </button>
+                  )}
                   {speakerReview.showing && prompt && (
                     <button
                       type="button"
@@ -1647,7 +1657,11 @@ const ChatInput = ({
                 <Button
                   variant={!composerText.trim() ? null : 'default'}
                   size="icon"
-                  disabled={!composerText.trim() || ingestingAny}
+                  disabled={
+                    !composerText.trim() ||
+                    ingestingAny ||
+                    (speakerReview.showing && !speakerReview.canSend)
+                  }
                   data-test-id="send-message-button"
                   aria-label="Send"
                   title={

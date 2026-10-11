@@ -31,15 +31,13 @@ yarn dev:web-app        # http://localhost:3001
 
 ## Speaker questions
 
-The speaker uses a conversation buffer, not one prompt per audio clip. The
-judge receives the accumulated interviewer turn and the active question, then
-returns `ignore`, `hold`, or `question` with a current/new topic relation. Only
-accepted interviewer speech enters the conversation history. Unanchored
-declarative clips cannot become scenario background merely because the judge
-returned hold; explicit setup or a related continuation is required. A clear
-answer beginning after a question mark is excluded from the selected question. Candidate answers
-and chatter are rejected; technical vocabulary alone cannot authorize sending.
-The judge selects original transcript words by index, without rewriting them.
+The speaker uses a conversation buffer rather than one prompt per audio clip.
+Finalized transcription enters an unsent review draft immediately. The judge runs
+in the background with the accumulated turn and previous sent question, advising
+on completeness and current/new topic relation. Its original-word selection and
+non-question checks remain available for classification, but cannot silently
+delete or rewrite the speech you are reviewing. This review flow assumes question,
+scenario and follow-up audio; approval determines exactly what is sent.
 
 Every question requires approval, including the first. Speaker proposals appear
 in the existing prompt box with Send and Discard controls in its toolbar; there
@@ -52,7 +50,7 @@ never appends speech to a sent question or replaces its answer. The previous
 question remains context for the judge, not text copied into the new prompt.
 Incomplete scenarios survive pauses and accumulate without displaying background
 cards. A final fragment can complete a question begun in an earlier clip.
-Bare “What do you think?” needs surrounding context before it can send.
+Short questions retain preceding unsent scenario context.
 
 Approval sends immediately without an additional settling timer.
 A valid primary decision needs no second
@@ -63,20 +61,22 @@ ready transcripts for up to 300 ms. If none arrive within 1.5 seconds, batch
 fallback starts without waiting for the live timeout. Batch transcription starts
 at each clip endpoint, independently of earlier questions being judged. Logs
 separate clip-finalized, engine-ready, fallback-start, transcripts-ready,
-capture-queue-ready and turn-check-ready stages.
+capture-queue-ready and turn-check-observed stages.
 
-Only the latest proposal appears. **Send**, Enter or fn + Right approves it;
-**Discard**, Escape or fn + Left removes it. fn shortcuts act only on a proposal
-visible in the prompt box, leaving ordinary arrows free for navigation. Proposals
-hide after three seconds without sending or deleting accumulated context. Later
-relevant speech can complete a hidden draft. An uncertain standalone
-recommendation is also sent as a separate question after approval.
+One persistent unsent draft accumulates scenario fragments across pauses, without
+expiring. **Send**, Enter or fn + Right approves the finalized text; **Discard**,
+Escape or fn + Left removes that draft. Separate topics are retained in a review
+queue; the composer shows a small “more” control when another question is held.
+fn shortcuts act only on the visible proposal, leaving ordinary arrows free for
+navigation. Streaming text appears as “Listening…” until finalized; approval does
+not wait for the judge. The judge advises on topic and readiness, never deletes
+speech or sends it. Approval always creates a separate prompt; later speech cannot
+change a sent question. The user's typed draft stays separate.
 
-Speaker logs record `conversation-v4`, endpoint configuration, invalid fields,
+Speaker logs record `conversation-v5`, endpoint configuration, invalid fields,
 provider finish reason and recovery outcome. Stage timestamps distinguish clip
 finalization, transcript readiness, decision readiness, settling, queueing,
-sending and first answer content. Commit origin distinguishes Send now and clicked recommendations. Recommendation creation/suppression and
-review hiding are logged. Capture end is the audio endpoint, not the last word.
+sending and first answer content. Commit origin distinguishes Send now and clicked recommendations. Review discards and background judge failures are logged. Capture end is the audio endpoint, not the last word.
 No raw judge replies or credentials are logged.
 
 Speaker sends retain all earlier questions and answers.
@@ -96,7 +96,7 @@ optional; a stalled model load cannot block text decisions.
 The updated version of the supplied Mac script is
 `scripts/hammerspoon/jan-remote.lua`. Replace the corresponding script on your
 Mac with this file and reload Hammerspoon. **fn + Right** accepts the visible
-card (Send as new or Send now); **fn + Left** discards it. Plain Left/Right arrows remain
+draft; **fn + Left** discards it. Plain Left/Right arrows remain
 normal navigation. The script tracks the physical fn press because macOS can
 mark plain arrow events with a secondary fn flag. These commands use
 Shift + F15 / Shift + F18 and do not submit a typed draft or toggle coding.
@@ -142,3 +142,8 @@ Run `lua scripts/hammerspoon/test-recommendation-shortcuts.lua` from the repo
 root to exercise the actual shortcut callback, including plain-arrow rejection,
 fn release, repeats and conflicting modifiers. Native Mac loading still needs
 verification on the user's machine.
+
+The dummy cursor uses macOS’s native arrow image, logical dimensions and hotspot,
+with Accessibility cursor scaling. Update the Mac script and reload Hammerspoon
+to apply this change. Run `lua scripts/hammerspoon/test-native-cursor.lua` for the
+portable cursor sizing checks; actual rendering needs a Mac.

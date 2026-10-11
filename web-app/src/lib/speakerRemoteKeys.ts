@@ -1,4 +1,3 @@
-import { hasQuestionCue } from './speakerTurnJudge'
 import { toast } from 'sonner'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import { stopDictation, toggleDictation } from '@/lib/dictation'
@@ -209,18 +208,12 @@ export function handleSpeakerKey(key: string): boolean {
     }
     if (state.enabled && state.pendingQuestion) {
       if (
-        ((!state.pendingQuestion.complete ||
-          state.pendingQuestion.requiresReview) &&
-          state.pendingQuestion.reviewUntil !== undefined &&
-          Date.now() >= state.pendingQuestion.reviewUntil) ||
-        (!state.pendingQuestion.complete &&
-          !state.pendingQuestion.manual &&
-          !state.pendingQuestion.uncertain &&
-          !state.pendingQuestion.requiresReview &&
-          state.pendingQuestion.relation !== 'update' &&
-          !hasQuestionCue(state.pendingQuestion.text))
+        key === RECOMMENDATION_SEND_KEY &&
+        state.preview &&
+        !state.pendingQuestion.complete &&
+        !state.pendingQuestion.queuedQuestions
       ) {
-        toast('No speaker card to review')
+        toast('Finishing transcription…')
         return true
       }
       if (key === RECOMMENDATION_SEND_KEY) {
@@ -230,6 +223,11 @@ export function handleSpeakerKey(key: string): boolean {
         state.discardPendingQuestion()
         toast('Question discarded')
       }
+      return true
+    }
+    if (state.enabled && state.preview) {
+      if (key === RECOMMENDATION_DISCARD_KEY) state.discardPendingQuestion()
+      else toast('Finishing transcription…')
       return true
     }
     const [newest] = state.suggestions
@@ -252,6 +250,10 @@ export function handleSpeakerKey(key: string): boolean {
     )
     if (send && !send.disabled) {
       send.click()
+      return true
+    }
+    if (state.enabled && state.preview) {
+      toast('Finishing transcription…')
       return true
     }
     const [newest] = state.suggestions

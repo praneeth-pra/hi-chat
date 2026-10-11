@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=conversation-v4',
+        'protocol=conversation-v5',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
@@ -190,7 +190,7 @@ export function SpeakerTranscriptionProvider() {
     })
     const unregisterControls = setQuestionControls({
       sendNow: turns.sendNow,
-      expireReview: turns.expireReview,
+      next: turns.next,
       keepListening: turns.keepListening,
       discard: () => {
         turns.discard()
@@ -201,7 +201,7 @@ export function SpeakerTranscriptionProvider() {
     const unregisterEpoch = useSpeakerTranscription.subscribe((state) => {
       if (state.deliveryEpoch !== deliveryEpoch) {
         deliveryEpoch = state.deliveryEpoch
-        turns.discard()
+        turns.reset()
         turns.endTurn()
         session.restart()
       }
@@ -221,13 +221,15 @@ export function SpeakerTranscriptionProvider() {
           state.currentThreadId
       threadId = state.currentThreadId
       if (!createdBySpeaker) {
-        turns.discard()
+        turns.reset()
         turns.endTurn()
         useSpeakerTranscription.getState().resetTurns()
       }
     })
     const session = startSpeakerCapture({
       onTrace: reportClip,
+      onPreview: (preview) =>
+        useSpeakerTranscription.getState().setPreview(preview),
       onStatus: (status) => {
         setStatus(status)
         turns.audioActivity(status === 'hearing')
@@ -243,7 +245,7 @@ export function SpeakerTranscriptionProvider() {
         check = undefined
         words = engineWords
         turnCheck = turn
-        await turns.accept(
+        const judgement = turns.accept(
           texts,
           !!(
             getSmartTurn() &&
@@ -252,14 +254,18 @@ export function SpeakerTranscriptionProvider() {
           ),
           capture
         )
-        const info = check as CheckInfo | undefined
-        log({
-          text: texts[0],
-          sent: false,
-          engines,
-          check: info,
-          note: info?.note ?? 'Added to question turn',
-        })
+        void judgement
+          .then(() => {
+            const info = check as CheckInfo | undefined
+            log({
+              text: texts[0],
+              sent: false,
+              engines,
+              check: info,
+              note: info?.note ?? 'Added to question turn',
+            })
+          })
+          .catch(() => {})
         // Only the coordinator may send, never an individual capture clip.
         return null
       },

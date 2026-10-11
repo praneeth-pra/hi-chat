@@ -329,11 +329,39 @@ end
 -- Set DUMMY_CURSOR = false to turn it off.
 local DUMMY_CURSOR = true
 local cursorScale = 1
-do -- match the cursor size set in System Settings > Accessibility > Display
+do -- Accessibility scaling is in screen points, independent of Retina pixels.
   local out = hs.execute("defaults read com.apple.universalaccess mouseDriverCursorSize 2>/dev/null")
-  cursorScale = tonumber(out) or 1
+  cursorScale = math.max(1, tonumber(out) or 1)
 end
 local dummy -- the canvas, while it is showing
+local cursorImage, cursorInfo
+-- Read the native arrow once. Keep its logical size and hotspot; do not stretch
+-- a hand-drawn polygon or add a second outline/shadow to the system artwork.
+do
+  local path = os.tmpname() .. ".tiff"
+  local ok, result = hs.osascript.javascript(string.format([[
+    ObjC.import('AppKit');
+    const cursor = $.NSCursor.arrowCursor;
+    const image = cursor.image;
+    const size = image.size;
+    const hotspot = cursor.hotSpot;
+    if (!image.TIFFRepresentation.writeToFileAtomically(%q, true))
+      throw new Error('Could not export native cursor');
+    JSON.stringify({w: size.width, h: size.height, x: hotspot.x, y: hotspot.y});
+  ]], path))
+  if ok and type(result) == "string" then
+    local decoded, info = pcall(hs.json.decode, result)
+    if decoded and type(info) == "table" and tonumber(info.w) and tonumber(info.h)
+      and tonumber(info.x) and tonumber(info.y) and info.w > 0 and info.h > 0 then
+      cursorImage = hs.image.imageFromPath(path)
+      if cursorImage then cursorInfo = info end
+    end
+  end
+  os.remove(path)
+  if not cursorImage then
+    hs.printf("Jan remote: native cursor unavailable; dummy cursor disabled.")
+  end
+end
 
 local function hideDummy()
   if dummy then dummy:delete() dummy = nil end
@@ -341,20 +369,16 @@ end
 
 local function showDummy(at)
   hideDummy()
-  if not DUMMY_CURSOR then return end
+  if not DUMMY_CURSOR or not cursorImage then return end
   local k = cursorScale
-  local pad = 3
-  local pts = { {0,0}, {0,16.5}, {4,12.6}, {6.7,18.8}, {9.4,17.6}, {6.8,11.6}, {12,11.6} }
-  local coords = {}
-  for i, pt in ipairs(pts) do coords[i] = { x = pad + pt[1] * k, y = pad + pt[2] * k } end
-  dummy = hs.canvas.new({ x = at.x - pad, y = at.y - pad, w = 13 * k + 2 * pad, h = 20 * k + 2 * pad })
+  dummy = hs.canvas.new({
+    x = at.x - cursorInfo.x * k, y = at.y - cursorInfo.y * k,
+    w = cursorInfo.w * k, h = cursorInfo.h * k,
+  })
   dummy:appendElements({
-    type = "segments", closed = true, coordinates = coords,
-    action = "strokeAndFill",
-    fillColor = { black = 1, alpha = 1 },
-    strokeColor = { white = 1, alpha = 1 }, strokeWidth = 1.2 * k,
-    withShadow = true,
-    shadow = { blurRadius = 2, color = { alpha = 0.35 }, offset = { h = -1, w = 0 } },
+    type = "image", image = cursorImage,
+    imageScaling = "scaleToFit", imageAlignment = "center",
+    frame = { x = 0, y = 0, w = cursorInfo.w * k, h = cursorInfo.h * k },
   })
   dummy:level(hs.canvas.windowLevels.cursor or hs.canvas.windowLevels.overlay)
   dummy:behavior({ "canJoinAllSpaces", "stationary" })

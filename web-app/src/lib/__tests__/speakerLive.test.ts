@@ -76,6 +76,81 @@ describe('speakerLive', () => {
     expect(socket.closed).toBe(true)
   })
 
+  it('previews live speech including earlier committed pieces, without finalizing it', async () => {
+    let socket!: FakeSocket
+    const live = new LiveTranscriber(Promise.resolve('t'), (url) => {
+      socket = new FakeSocket(url)
+      return socket as unknown as WebSocket
+    })
+    const preview = vi.fn()
+    live.setPreviewListener(preview)
+    await tick()
+    socket.open()
+    socket.reply({
+      message_type: 'partial_transcript',
+      text: 'Suppose payment',
+    })
+    expect(preview).toHaveBeenLastCalledWith('Suppose payment')
+    socket.reply({
+      message_type: 'committed_transcript',
+      text: 'Suppose payment succeeds.',
+    })
+    socket.reply({
+      message_type: 'partial_transcript',
+      text: 'How do we recover?',
+    })
+    expect(preview).toHaveBeenLastCalledWith(
+      'Suppose payment succeeds. How do we recover?'
+    )
+    const final = live.finish()
+    socket.reply({
+      message_type: 'committed_transcript',
+      text: 'How do we recover?',
+    })
+    await expect(final).resolves.toBe(
+      'Suppose payment succeeds. How do we recover?'
+    )
+  })
+  it.each(['soniox', 'cartesia'] as const)(
+    'previews %s replacement partials without duplicating words',
+    async (engine) => {
+      let socket!: FakeSocket
+      const makeSocket = (url: string) => {
+        socket = new FakeSocket(url)
+        return socket as unknown as WebSocket
+      }
+      const key = Promise.resolve({ token: 't', terms: [] })
+      const live =
+        engine === 'soniox'
+          ? new SonioxLiveTranscriber(key, makeSocket)
+          : new CartesiaLiveTranscriber(key, makeSocket)
+      const preview = vi.fn()
+      live.setPreviewListener(preview)
+      await tick()
+      socket.open()
+      if (engine === 'soniox') {
+        socket.reply({
+          tokens: [
+            { text: 'Suppose ', is_final: true },
+            { text: 'payment', is_final: false },
+          ],
+        })
+        socket.reply({
+          tokens: [{ text: 'payment succeeds.', is_final: false }],
+        })
+      } else {
+        socket.reply({ type: 'transcript', text: 'Suppose ', is_final: true })
+        socket.reply({ type: 'transcript', text: 'payment', is_final: false })
+        socket.reply({
+          type: 'transcript',
+          text: 'payment succeeds.',
+          is_final: false,
+        })
+      }
+      expect(preview).toHaveBeenLastCalledWith('Suppose payment succeeds.')
+      live.abort()
+    }
+  )
   it('keeps segments ElevenLabs committed by itself before the pause', async () => {
     let socket!: FakeSocket
     const live = new LiveTranscriber(Promise.resolve('t'), (url) => {

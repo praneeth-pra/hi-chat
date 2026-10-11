@@ -129,7 +129,7 @@ describe('speaker intent protocol', () => {
       ).text
     ).toBe('Why do you think ECS is cheaper?')
   })
-  it('does not prepend the candidate answer to the next explicit scenario question', async () => {
+  it('explicit discard prevents held speech from joining the next scenario question', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)
       .mockResolvedValueOnce(reply('hold'))
@@ -143,6 +143,8 @@ describe('speaker intent protocol', () => {
       onSuggest: vi.fn(),
     })
     await turns.accept(['EKS supports our workload better.'])
+    // Review owns deletion now; the advisory judge cannot silently remove speech.
+    turns.discard()
     await turns.accept([
       'Can you tell me a scenario where ECS will be better suited?',
     ])
