@@ -30,7 +30,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 describe('pending question controls', () => {
-  it('shows the scenario with only two shortcut controls', () => {
+  it('accumulates scenario background without displaying another review card', () => {
     useSpeakerTranscription.getState().setPendingQuestion({
       id: 'q',
       text: 'Suppose three services fail.',
@@ -39,15 +39,13 @@ describe('pending question controls', () => {
       reason: 'scenario',
     })
     render(<SpeakerPendingQuestion />)
-    expect(screen.getByText('Building question…')).toBeInTheDocument()
-    expect(screen.getByText('Suppose three services fail.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Send now/ }))
-    expect(sendNow).toHaveBeenCalledTimes(1)
     expect(
-      screen.queryByRole('button', { name: 'Keep listening' })
+      screen.queryByTestId('speaker-pending-question')
     ).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Discard/ }))
-    expect(discard).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(useSpeakerTranscription.getState().pendingQuestion?.text).toBe(
+      'Suppose three services fail.'
+    )
   })
   it('keeps manual holds explicit and hides controls when disabled', () => {
     useSpeakerTranscription.getState().setPendingQuestion({
@@ -105,60 +103,54 @@ describe('pending question controls', () => {
     useSpeakerTranscription
       .getState()
       .suggest('What is DNS?', 'Earlier failure')
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'Suppose services fail.',
-        complete: false,
-        manual: false,
-        reason: 'scenario',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'Suppose services fail.',
+      complete: false,
+      manual: false,
+      reason: 'scenario',
+    })
     render(
       <>
         <SpeakerPendingQuestion />
         <SpeakerSuggestions />
       </>
     )
-    expect(screen.getByText('Building question…')).toBeInTheDocument()
+    expect(screen.queryByText('New question?')).not.toBeInTheDocument()
     expect(
       screen.queryByRole('region', { name: 'Speaker recommendations' })
     ).not.toBeInTheDocument()
   })
   it('expires review cards after three seconds without sending or losing a new scenario', () => {
     vi.useFakeTimers()
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'Suppose services fail.',
-        complete: false,
-        manual: false,
-        relation: 'new',
-        reason: 'scenario',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'Suppose services fail.',
+      complete: false,
+      manual: false,
+      relation: 'new',
+      reason: 'scenario',
+    })
     render(<SpeakerPendingQuestion />)
     act(() => vi.advanceTimersByTime(3000))
-    expect(screen.queryByText('Building question…')).not.toBeInTheDocument()
+    expect(screen.queryByText('New question?')).not.toBeInTheDocument()
     expect(sendNow).not.toHaveBeenCalled()
     expect(discard).not.toHaveBeenCalled()
     expect(useSpeakerTranscription.getState().pendingQuestion?.text).toBe(
       'Suppose services fail.'
     )
   })
-  it('expires an unaccepted addition and never appends it', () => {
+  it('hides an unaccepted addition without sending or discarding it', () => {
     vi.useFakeTimers()
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'How does DNS work? With caching.',
-        addition: 'With caching.',
-        complete: false,
-        manual: false,
-        relation: 'update',
-        reason: 'follow-up',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'How does DNS work? With caching.',
+      addition: 'With caching.',
+      complete: false,
+      manual: false,
+      relation: 'update',
+      reason: 'follow-up',
+    })
     render(<SpeakerPendingQuestion />)
     expect(screen.getByText('Add to this question?')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Add/ })).toBeInTheDocument()
@@ -169,6 +161,9 @@ describe('pending question controls', () => {
     )
     expect(discard).not.toHaveBeenCalled()
     expect(sendNow).not.toHaveBeenCalled()
+    expect(useSpeakerTranscription.getState().pendingQuestion?.addition).toBe(
+      'With caching.'
+    )
   })
   it('dismisses a new-question recommendation after three seconds', () => {
     vi.useFakeTimers()

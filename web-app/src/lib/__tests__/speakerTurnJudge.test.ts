@@ -16,7 +16,7 @@ const reply = (
   intent: string,
   relation = 'new',
   transcript = 0,
-  span: string | null = null
+  span: { start: number; end: number } | string | null = null
 ) => ({
   reply: JSON.stringify({ intent, relation, transcript, span }),
   model: 'test',
@@ -28,6 +28,36 @@ afterEach(() => {
   vi.useRealTimers()
 })
 describe('speaker intent protocol', () => {
+  it('judges the accumulated question when the final clip has no question cue', async () => {
+    const context = { ...empty, pending: 'How would you migrate the database' }
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(
+      reply('question', 'current')
+    )
+    const d = await judgeSpeakerTurn(['with zero downtime?'], context, {
+      apiKey: 'test',
+    })
+    expect(d).toMatchObject({
+      action: 'question',
+      complete: true,
+      text: 'with zero downtime?',
+    })
+    const payload = JSON.parse(vi.mocked(requestSpeakerJudge).mock.calls[0][1])
+    expect(payload.conversation.pending).toBe(context.pending)
+    expect(
+      parseTurnDecision(
+        reply('question', 'current').reply,
+        ['using replication'],
+        context
+      )
+    ).toMatchObject({ action: 'question', complete: true })
+    expect(
+      parseTurnDecision(
+        reply('question', 'current').reply,
+        ['I maintain pipelines.'],
+        context
+      )
+    ).toMatchObject({ action: 'skip' })
+  })
   it('asks for three intents with no model-generated explanation or completeness field', async () => {
     vi.mocked(requestSpeakerJudge).mockResolvedValue(
       reply('question', 'current', 1)
@@ -45,7 +75,7 @@ describe('speaker intent protocol', () => {
     const [, user, fullUser, config] =
       vi.mocked(requestSpeakerJudge).mock.calls[0]
     expect(user).toBe(fullUser)
-    expect(JSON.parse(user).pending).toBe(scenario.pending)
+    expect(JSON.parse(user).conversation.pending).toBe(scenario.pending)
     expect(config.jsonSchema).toEqual(turnDecisionSchema(2))
     expect(turnDecisionSchema(2).required).toEqual([
       'intent',
@@ -93,14 +123,16 @@ describe('speaker intent protocol', () => {
   })
   it('retains only a verified question span from mixed speech', () => {
     expect(
-      parseTurnDecision(reply('question', 'new', 0, 'How do we recover?').reply, [
-        'How do we recover? We restart the service.',
-      ]).text
+      parseTurnDecision(
+        reply('question', 'new', 0, { start: 0, end: 4 }).reply,
+        ['How do we recover? We restart the service.']
+      ).text
     ).toBe('How do we recover?')
     expect(
-      parseTurnDecision(reply('question', 'new', 0, 'Invented question').reply, [
-        'How do we recover?',
-      ]).action
+      parseTurnDecision(
+        reply('question', 'new', 0, 'Invented question').reply,
+        ['How do we recover?']
+      ).action
     ).toBe('suggest')
   })
   it('rejects unknown intents, relations, wrong index types and unavailable transcripts with field diagnostics', () => {
@@ -257,11 +289,24 @@ describe('speaker intent protocol', () => {
   })
   it('retains first-person scenario setup rather than rejecting it as a candidate answer', async () => {
     vi.mocked(requestSpeakerJudge).mockResolvedValue(reply('hold'))
-    expect(await judgeSpeakerTurn(['I have a list of integers with duplicates.'], empty, { apiKey: 'test' })).toMatchObject({ action: 'new-question', complete: false, text: 'I have a list of integers with duplicates.' })
+    expect(
+      await judgeSpeakerTurn(
+        ['I have a list of integers with duplicates.'],
+        empty,
+        { apiKey: 'test' }
+      )
+    ).toMatchObject({
+      action: 'new-question',
+      complete: false,
+      text: 'I have a list of integers with duplicates.',
+    })
     expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
   })
   it('does not interpret the old ambiguous answer label as an automatic question', () => {
-    expect(parseTurnDecision(reply('answer').reply, ['How does DNS work?'], empty).action).toBe('suggest')
+    expect(
+      parseTurnDecision(reply('answer').reply, ['How does DNS work?'], empty)
+        .action
+    ).toBe('suggest')
   })
   it('rejects the exact live candidate passages even when the model calls them answerable', () => {
     for (const text of [
@@ -292,12 +337,12 @@ describe('speaker intent protocol', () => {
   it('requires extraction of the question from a mixed candidate/question clip', () => {
     const text =
       'I maintain the pipelines. How do you rotate their credentials?'
-    expect(parseTurnDecision(reply('question').reply, [text], empty).action).toBe(
-      'suggest'
-    )
+    expect(
+      parseTurnDecision(reply('question').reply, [text], empty).action
+    ).toBe('suggest')
     expect(
       parseTurnDecision(
-        reply('question', 'new', 0, 'How do you rotate their credentials?').reply,
+        reply('question', 'new', 0, { start: 4, end: 10 }).reply,
         [text],
         empty
       )
@@ -306,6 +351,105 @@ describe('speaker intent protocol', () => {
       complete: true,
       text: 'How do you rotate their credentials?',
     })
+  })
+  it('recognizes the complete live comparisons as updates even when the judge holds a new clip', () => {
+    const context = {
+      ...empty,
+      active: 'Compare ECS and EKS for this workload.',
+    }
+    for (const text of [
+      'And what do you think which one is cheaper as compared to each other?',
+      "Don't you think that ECS also provides that kind of stuff which EKS does?",
+    ]) {
+      expect(
+        parseTurnDecision(reply('hold').reply, [text], context)
+      ).toMatchObject({ action: 'followup', complete: true })
+    }
+    expect(
+      parseTurnDecision(
+        reply('hold').reply,
+        ['Which one is cheaper if?'],
+        context
+      ).complete
+    ).toBe(false)
+    expect(
+      parseTurnDecision(
+        reply('question').reply,
+        [
+          "Don't you think that ECS also provides that kind of stuff which EKS does?",
+        ],
+        { ...empty, active: 'How does DNS work?' }
+      ).action
+    ).toBe('new-question')
+  })
+  it('keeps a short question attached to its setup and holds it when no context exists', () => {
+    expect(
+      parseTurnDecision(reply('question').reply, ['What do you think?'], {
+        ...empty,
+        active: 'Compare ECS and EKS.',
+      })
+    ).toMatchObject({ action: 'followup', complete: true })
+    expect(
+      parseTurnDecision(
+        reply('question').reply,
+        ['What do you think?'],
+        scenario
+      )
+    ).toMatchObject({ action: 'question', complete: true })
+    expect(
+      parseTurnDecision(reply('question').reply, ['What do you think?'], empty)
+        .complete
+    ).toBe(false)
+  })
+  it('selects source words faithfully and rejects invalid or generated-text selections', () => {
+    const text =
+      'I maintain pipelines. Don’t you think that ECS also provides that kind of stuff which EKS does?'
+    expect(
+      parseTurnDecision(
+        reply('question', 'current', 0, { start: 3, end: 17 }).reply,
+        [text],
+        { ...empty, active: 'Compare ECS and EKS.' }
+      ).text
+    ).toBe(
+      'Don’t you think that ECS also provides that kind of stuff which EKS does?'
+    )
+    for (const span of [
+      { start: -1, end: 4 },
+      { start: 5, end: 3 },
+      { start: 0, end: 100 },
+    ]) {
+      expect(
+        parseTurnDecision(reply('question', 'new', 0, span).reply, [text])
+          .action
+      ).toBe('suggest')
+    }
+  })
+  it('automatically updates the active ECS/EKS question after a mislabelled held comparison', async () => {
+    vi.useFakeTimers()
+    vi.mocked(requestSpeakerJudge)
+      .mockResolvedValueOnce(reply('question'))
+      .mockResolvedValueOnce(reply('hold'))
+    const onCommit = vi.fn()
+    const turns = createQuestionTurns({
+      judge: (texts, context) =>
+        judgeSpeakerTurn(texts, context, { apiKey: 'test' }),
+      onCommit,
+      onDraft: () => {},
+      onSuggest: vi.fn(),
+    })
+    await turns.accept(['Compare ECS and EKS for this workload.'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept([
+      'And what do you think which one is cheaper as compared to each other?',
+    ])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit).toHaveBeenCalledTimes(2)
+    expect(onCommit.mock.calls[1][0]).toMatchObject({
+      id: onCommit.mock.calls[0][0].id,
+      relation: 'update',
+      origin: 'automatic',
+    })
+    turns.stop()
   })
   it('automatically sends the reported question, updates its real follow-up and excludes the candidate answer', async () => {
     vi.useFakeTimers()

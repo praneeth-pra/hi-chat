@@ -31,52 +31,53 @@ yarn dev:web-app        # http://localhost:3001
 
 ## Automatic speaker questions
 
-The speaker uses an intent protocol with three outcomes: ignore non-question
-speech, hold an unfinished scenario, or answer a complete interviewer request.
-A separate current/new topic relation lets the app assemble scenario fragments
-and update genuine follow-ups in the existing question and answer. The model
-selects a transcript or an exact question span; it does not rewrite the question
-or produce a separate completeness flag or explanatory text.
+The speaker uses a conversation buffer, not one prompt per audio clip. The
+judge receives the accumulated interviewer turn and the active question, then
+returns `ignore`, `hold`, or `question` with a current/new topic relation. Only
+accepted interviewer speech enters the conversation history. Candidate answers
+and chatter are rejected; technical vocabulary alone cannot authorize sending.
+The judge selects original transcript words by index, without rewriting them.
 
-Clear questions send automatically. Incomplete scenarios survive long pauses.
-The 500 ms settling window overlaps transcription and judgement; optional Smart
-Turn can extend it to one second for unfinished intonation. Audio endpointing
-and provider processing still add latency. Smart Turn runs on WASM, reports
-readiness/failure, and becomes unavailable after a 30-second stalled load without
-blocking text decisions.
+Complete questions send automatically. Related follow-ups revise the same
+question ID and answer; a genuinely separate topic creates a new question.
+Incomplete scenarios survive pauses and accumulate without background review
+cards. A final fragment can complete a question begun in an earlier clip.
+Bare “What do you think?” needs surrounding context before it can send.
 
-Use **Send now** (or F16) for a pending question, **Keep listening** for an
-explicit manual hold, or **Discard**. A clicked recommendation is labelled
-**Send as new** and always starts a separate question; it cannot silently append
-older speech or a candidate answer to an existing answer. Unsent scenario
-context is preserved as a recommendation when necessary.
+The 500 ms settling window overlaps transcription and judgement, measured from
+that contribution's immutable clip endpoint. Smart Turn can extend it to one
+second for unfinished intonation. Later capture or queued judgement does not
+block an already complete question. A valid primary decision needs no second
+model; failed/invalid decisions get at most one recovery attempt. Endpointing,
+transcription, provider processing and answer generation still add latency.
 
-Automatic assembly needs a configured judgement provider. OpenAI-compatible
-providers receive a strict response schema, with cached JSON-object fallback
-only when a provider explicitly rejects schema support. Malformed decisions
-get at most one recovery attempt; invalid intent/topic/transcript selection
-never becomes automatic sending. Failures produce recommendations with reasons.
-A valid primary intent requires no second-model wait. The optional second model
-can recover an invalid or failed primary decision.
+Only the latest review card appears. **Add** updates the current question;
+**Send now** explicitly sends a new draft. Cards hide after three seconds;
+hiding never deletes accumulated context. Later relevant speech can complete a
+hidden draft. **Discard** explicitly removes it. An uncertain standalone
+recommendation uses **Send as new**, preserving its separate question boundary.
 
-Speaker logs record protocol version, endpoint configuration, invalid fields,
-provider finish reason and recovery outcome. Stage timestamps distinguish
-capture end, transcript readiness, decision readiness, settling, queueing,
+Speaker logs record `conversation-v1`, endpoint configuration, invalid fields,
+provider finish reason and recovery outcome. Stage timestamps distinguish clip
+finalization, transcript readiness, decision readiness, settling, queueing,
 sending and first answer content. Commit origin distinguishes automatic sends,
-Send now and clicked recommendations. Capture-end timestamps refer to the audio
-endpoint boundary, not the last audible word. No raw judge replies or credentials
-are logged. Legacy clip benchmarks remain comparison tools for the old filter.
+Send now and clicked recommendations. Recommendation creation/suppression and
+review hiding are logged. Capture end is the audio endpoint, not the last word.
+No raw judge replies or credentials are logged.
 
 Related updates retain the previous answer until a replacement is ready.
 Switching chats, typing a question or disabling Speaker cancels stale automatic
-work. Dictation retains its separate microphone flow.
+work. Dictation retains its separate microphone flow. Smart Turn remains
+optional; a stalled model load cannot block text decisions.
 
 ## Hammerspoon speaker shortcuts
 
 The updated version of the supplied Mac script is
 `scripts/hammerspoon/jan-remote.lua`. Replace the corresponding script on your
-Mac with this file and reload Hammerspoon. **fn + Right** sends the newest
-recommendation as a new question; **fn + Left** discards it. These commands use
+Mac with this file and reload Hammerspoon. **fn + Right** accepts the visible
+card (Add or Send); **fn + Left** discards it. Plain Left/Right arrows remain
+normal navigation. The script tracks the physical fn press because macOS can
+mark plain arrow events with a secondary fn flag. These commands use
 Shift + F15 / Shift + F18 and do not submit a typed draft or toggle coding.
 The script retains scrolling, code navigation, dictation, fn + Return, Z/X and
 speaker toggling. No Mac-side changes are applied by a Railway deployment.
@@ -112,8 +113,11 @@ the app under Model Providers.
 
 Apache 2.0, see [LICENSE](LICENSE).
 
-Speaker review cards show only the latest item and disappear after three seconds. fn + Right accepts the visible pending card first (Add revises the current question; Send now submits a new setup), and fn + Left discards it. Unaccepted additions are dropped without restarting capture. New scenario background is retained silently after its card hides, so a later complete question can use the setup. Provider failures produce a recommendation only when there is question/task evidence; candidate-style statements are rejected before judging. Complete, validated questions still send automatically.
+The word-range protocol uses `span: {start, end}` (zero-based, end exclusive)
+or `null` for the whole selected transcript. Out-of-bounds or invented spans
+cannot automatically send. The optional secondary judge is recovery only.
 
-Automatic speaker decisions additionally require question/task evidence; plain declarative candidate answers cannot auto-send solely because a judge returned `question`. Dependent references such as “out of all of these things” and “do you have it…” stay with the current question. A completed question is preserved when a later clip is unfinished, and repeated `new` labels on unfinished setup cannot split the scenario. Clip timing now snapshots the audio clip’s finalization timestamp before transcription; `captureEndKind=clip-finalized` identifies that endpoint (including endpoint silence), not a guessed speech-end time. Recommendation creation/suppression and expired additions are logged explicitly. Smart Turn’s download/initialization failure is a separate unresolved issue; the speaker path continues without it.
-
-The intent-v3 wire labels are `ignore`, `hold`, and `question`: `question` describes interviewer speech, not a candidate answer.
+Run `lua scripts/hammerspoon/test-recommendation-shortcuts.lua` from the repo
+root to exercise the actual shortcut callback, including plain-arrow rejection,
+fn release, repeats and conflicting modifiers. Native Mac loading still needs
+verification on the user's machine.
