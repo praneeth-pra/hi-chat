@@ -19,6 +19,9 @@ export const SCENARIO_KEY = 'F16'
  * suggestion chip (a clip the two judges disagreed on).
  */
 export const SUGGESTION_KEY = 'F15'
+/** Hammerspoon fn + Right / Left; recommendation-only, independent of the typed draft. */
+export const RECOMMENDATION_SEND_KEY = 'Shift+F15'
+export const RECOMMENDATION_DISCARD_KEY = 'Shift+F18'
 /**
  * F14 starts dictating your own voice and, pressed again, stops and
  * sends the text; F13 only stops. Hammerspoon sends F14 on a tap of Left
@@ -198,6 +201,21 @@ export function handleSpeakerKey(key: string): boolean {
     return true
   }
   const state = useSpeakerTranscription.getState()
+  if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
+    const [newest] = state.suggestions
+    if (!state.enabled || !newest) {
+      toast('No speaker recommendation')
+      return true
+    }
+    if (key === RECOMMENDATION_SEND_KEY) {
+      state.acceptSuggestion(newest)
+      toast('Sending recommendation as a new question')
+    } else {
+      state.dismissSuggestion(newest)
+      toast('Recommendation discarded')
+    }
+    return true
+  }
   if (key === SUGGESTION_KEY) {
     const send = document.querySelector<HTMLButtonElement>(
       '[data-test-id="send-message-button"]'

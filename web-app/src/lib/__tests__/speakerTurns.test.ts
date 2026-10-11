@@ -202,9 +202,8 @@ describe('question-turn coordination', () => {
     expect(onCommit).not.toHaveBeenCalled()
     expect(onSuggest).toHaveBeenCalledWith('Unclear follow-up.', 'test')
     turns.confirm('What about caching?')
-    expect(onCommit.mock.calls[0][0].text).toBe(
-      'How does DNS work? What about caching?'
-    )
+    expect(onCommit.mock.calls[0][0].text).toBe('What about caching?')
+    expect(onCommit.mock.calls[0][0].origin).toBe('suggestion')
   })
   it('retains an incomplete scenario as a suggestion when a new topic begins', async () => {
     const { turns, judge, onCommit, onSuggest } = setup()
@@ -314,5 +313,40 @@ describe('question-turn coordination', () => {
     expect(onCommit).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('never appends an older recommendation or candidate answer to the active question', async () => {
+    const { turns, judge, onCommit } = setup()
+    judge.mockResolvedValue(
+      decision(
+        'question',
+        'Out of all of these things, what do you work regularly on?',
+        true
+      )
+    )
+    await turns.accept([
+      'Out of all of these things, what do you work regularly on?',
+    ])
+    await vi.advanceTimersByTimeAsync(500)
+    const first = onCommit.mock.calls[0][0]
+    turns.confirm('What is your strong zone?')
+    const second = onCommit.mock.calls[1][0]
+    expect(second.id).not.toBe(first.id)
+    expect(second.text).toBe('What is your strong zone?')
+    expect(second.origin).toBe('suggestion')
+    turns.confirm('I work on tasks and automation.')
+    expect(onCommit.mock.calls[2][0].text).toBe(
+      'I work on tasks and automation.'
+    )
+    expect(onCommit.mock.calls[2][0].relation).toBe('new')
+  })
+  it('distinguishes automatic and explicit Send now commits', async () => {
+    const { turns, judge, onCommit } = setup()
+    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
+    await turns.accept(['How does DNS work?'])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit.mock.calls[0][0].origin).toBe('automatic')
+    await turns.accept(['Explain garbage collection.'])
+    turns.sendNow()
+    expect(onCommit.mock.calls[1][0].origin).toBe('send-now')
   })
 })

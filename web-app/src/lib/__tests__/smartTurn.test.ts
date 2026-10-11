@@ -56,4 +56,31 @@ describe('createTurnListener', () => {
     await broken.ready
     expect(await broken.check()).toBeNull()
   })
+  it('reports a stalled load and ignores a model that arrives after the readiness deadline', async () => {
+    vi.useFakeTimers()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let finish!: (m: ReturnType<typeof fakeModel>) => void
+    const onState = vi.fn()
+    const turn = createTurnListener(
+      () =>
+        new Promise((r) => {
+          finish = r
+        }),
+      500,
+      { loadTimeoutMs: 30, onState }
+    )
+    await vi.advanceTimersByTimeAsync(30)
+    await turn.ready
+    expect(turn.state()).toBe('unavailable')
+    expect(onState).toHaveBeenCalledWith(
+      'unavailable',
+      expect.stringContaining('readiness budget')
+    )
+    finish(fakeModel(async () => ({ probability: 1, duration: 1 })))
+    await Promise.resolve()
+    expect(turn.state()).toBe('unavailable')
+    turn.dispose()
+    warning.mockRestore()
+    vi.useRealTimers()
+  })
 })

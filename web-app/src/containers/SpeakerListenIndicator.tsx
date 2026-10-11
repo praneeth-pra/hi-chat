@@ -3,7 +3,6 @@ import {
   IconCode,
   IconHeadphones,
   IconHeadphonesOff,
-  IconX,
 } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import {
@@ -20,7 +19,12 @@ import {
   startSpeakerCapture,
 } from '@/lib/speakerCaptureSession'
 import { getLiveMode } from '@/lib/speakerLive'
-import { CheckInfo, getJudgeModel, getSecondJudge } from '@/lib/speakerFilter'
+import {
+  CheckInfo,
+  getJudgeModel,
+  getSecondJudge,
+  getWaitMode,
+} from '@/lib/speakerFilter'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { anthropicConfig } from '@/lib/anthropicProvider'
 import { useAssistant } from '@/hooks/useAssistant'
@@ -115,7 +119,14 @@ export function SpeakerTranscriptionProvider() {
     let words: { name: string; text: string }[] = []
     let turnCheck: TurnCheck | null = null
     // Hears from the interviewer's voice whether they have finished
-    let turnListener = getSmartTurn() ? createTurnListener() : null
+    const newTurnListener = () =>
+      createTurnListener(undefined, undefined, {
+        onState: (state, reason) =>
+          reportClip(
+            `stage=smartturn state=${state}${reason ? ` reason=${reason}` : ''}`
+          ),
+      })
+    let turnListener = getSmartTurn() ? newTurnListener() : null
     const log = (clip: ClipLog) => {
       const line = `${clip.sent ? 'sent' : clip.check?.type === 'skip' ? 'skipped' : 'buffered'} "${clip.text}" | ${describeClip(clip)}${clip.note ? ` | ${clip.note}` : ''}`
       // Each engine's own words, so their accuracy can be compared
@@ -127,6 +138,8 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
+        'protocol=intent-v2',
+        `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
         `engines=${getTranscribeMode()}`,
@@ -156,6 +169,8 @@ export function SpeakerTranscriptionProvider() {
       }
     }
     const turns = createQuestionTurns({
+      onTrace: (event, fields) =>
+        reportClip(`stage=${event} ${JSON.stringify(fields)}`),
       judge: (texts, context) =>
         judgeSpeakerTurn(texts, context, getConfig(), (info) => {
           check = info
@@ -169,7 +184,7 @@ export function SpeakerTranscriptionProvider() {
           .getState()
           .queueTurn(turn, useThreads.getState().currentThreadId)
         reportClip(
-          `sent "${turn.text}" | turn=${turn.id} version=${turn.version} relation=${turn.relation}`
+          `sent "${turn.text}" | turn=${turn.id} version=${turn.version} relation=${turn.relation} origin=${turn.origin ?? 'unknown'} queuedAt=${Date.now()}`
         )
       },
     })
@@ -238,7 +253,7 @@ export function SpeakerTranscriptionProvider() {
       onText: () => {},
       onAudio: (samples) => {
         if (getSmartTurn()) {
-          turnListener ??= createTurnListener()
+          turnListener ??= newTurnListener()
           turnListener.push(samples)
         }
       },
@@ -250,6 +265,7 @@ export function SpeakerTranscriptionProvider() {
     return () => {
       session.stop()
       turns.stop()
+      turnListener?.dispose()
       unregisterControls()
       unregisterEpoch()
       unregisterThread()
@@ -324,11 +340,7 @@ export function SpeakerPendingQuestion() {
   )
 }
 
-/**
- * Clips the two judges disagreed on, each sent with a click. A row of its own
- * above the prompt, so a narrow window wraps them instead of squeezing the
- * model picker.
- */
+/** Manual fallback cards are separate from automatically delivered questions. */
 export function SpeakerSuggestions() {
   const {
     enabled,
@@ -337,38 +349,81 @@ export function SpeakerSuggestions() {
     acceptSuggestion,
     dismissSuggestion,
   } = useSpeakerTranscription()
-  if (isPlatformTauri() || !enabled || suggestions.length === 0) return null
-
-  return (
-    <div className="flex flex-wrap gap-1 p-2 pb-0">
-      {suggestions.map((text) => (
-        <div
-          key={text}
-          data-test-id="speaker-suggestion"
-          className="min-h-7 max-w-full flex items-center rounded-sm text-xs bg-accent/10 text-accent"
+  if (isPlatformTauri() || !enabled || !suggestions.length) return null
+  const card = (text: string, newest = false) => (
+    <article
+      key={text}
+      aria-label={
+        newest
+          ? 'Latest speaker recommendation'
+          : 'Earlier speaker recommendation'
+      }
+      data-test-id="speaker-suggestion"
+      className="rounded-lg border border-main-view-fg/15 bg-main-view-fg/5 p-3"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-main-view-fg/70">
+          {newest ? 'Latest recommendation' : 'Earlier recommendation'}
+        </span>
+        <span className="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent">
+          Needs review
+        </span>
+      </div>
+      <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">
+        {text}
+      </p>
+      <p className="mt-2 break-words text-xs text-main-view-fg/60">
+        {suggestionReasons[text] ?? 'Speech needs clarification'}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => acceptSuggestion(text)}
+          className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         >
-          <button
-            type="button"
-            title={`${suggestionReasons[text] ?? 'Speech needs clarification'}: ${text}`}
-            onClick={() => acceptSuggestion(text)}
-            className="h-full min-w-0 px-2 truncate hover:bg-accent/15 rounded-l-sm"
-          >
-            {text}
-          </button>
-          <span className="px-2 text-main-view-fg/60">
-            {suggestionReasons[text] ?? 'Speech needs clarification'}
-          </span>
-          <button
-            type="button"
-            aria-label="Dismiss suggestion"
-            onClick={() => dismissSuggestion(text)}
-            className="h-full px-1 shrink-0 hover:bg-accent/15 rounded-r-sm"
-          >
-            <IconX size={12} />
-          </button>
-        </div>
-      ))}
-    </div>
+          Send as new
+          {newest && <kbd className="ml-2 text-xs opacity-75">fn + →</kbd>}
+        </button>
+        <button
+          type="button"
+          aria-label="Discard recommendation"
+          onClick={() => dismissSuggestion(text)}
+          className="rounded-md border border-main-view-fg/15 px-3 py-2 text-sm hover:bg-main-view-fg/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          Discard
+          {newest && (
+            <kbd className="ml-2 text-xs text-main-view-fg/60">fn + ←</kbd>
+          )}
+        </button>
+        <span className="text-xs text-main-view-fg/50">
+          Starts a separate question
+        </span>
+      </div>
+    </article>
+  )
+  return (
+    <section aria-label="Speaker recommendations" className="space-y-2 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-1 px-1">
+        <span className="text-xs font-medium text-main-view-fg/70">
+          Speaker recommendations
+        </span>
+        <span className="text-xs text-main-view-fg/50">
+          Clear questions send automatically
+        </span>
+      </div>
+      {card(suggestions[0], true)}
+      {suggestions.length > 1 && (
+        <details className="rounded-md px-1">
+          <summary className="cursor-pointer py-1 text-xs text-main-view-fg/60">
+            {suggestions.length - 1} earlier recommendation
+            {suggestions.length > 2 ? 's' : ''}
+          </summary>
+          <div className="mt-2 space-y-2">
+            {suggestions.slice(1).map((text) => card(text))}
+          </div>
+        </details>
+      )}
+    </section>
   )
 }
 

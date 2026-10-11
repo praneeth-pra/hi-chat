@@ -144,13 +144,15 @@ const processStreamingCompletion = async (
   continueFromMessageId?: string,
   updateMessage?: (message: ThreadMessage) => void,
   continueFromMessage?: ThreadMessage,
-  timing?: StreamTiming
+  timing?: StreamTiming,
+  onAnswerStart?: () => void
 ) => {
   // High-throughput scheduler: batch UI updates on rAF (requestAnimationFrame)
   let rafScheduled = false
   let rafHandle: number | undefined
   let pendingDeltaCount = 0
   const reasoningProcessor = new ReasoningProcessor()
+  let answerStarted = false
 
   const flushStreamingContent = () => {
     const currentContent = createThreadContent(
@@ -258,6 +260,10 @@ const processStreamingCompletion = async (
       }
       const deltaContent = part.choices[0]?.delta?.content || ''
       if (deltaContent) {
+        if (!answerStarted) {
+          answerStarted = true
+          onAnswerStart?.()
+        }
         if (timing) timing.firstAnswerAt ??= Date.now()
         accumulatedTextRef.value += deltaContent
         pendingDeltaCount += 1
@@ -1112,6 +1118,7 @@ export const useChat = () => {
             if (isCompletionResponse(completion)) {
               const message = completion.choices[0]?.message
               const newContent = (message?.content as string) || ''
+              if (newContent) speakerRequest?.onAnswerStart?.()
               if (
                 continueFromMessageId &&
                 accumulatedTextRef.value.length > 0
@@ -1151,7 +1158,8 @@ export const useChat = () => {
                 continueFromMessageId,
                 updateMessage,
                 continueFromMessage,
-                streamTiming
+                streamTiming,
+                speakerRequest?.onAnswerStart
               )
               tokenUsage = tokenUsageRef.current
             }

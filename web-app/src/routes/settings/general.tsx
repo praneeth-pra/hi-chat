@@ -901,7 +901,7 @@ function General() {
               />
               <CardItem
                 title="Judgement model"
-                description="Decides whether a clip is a question worth sending. Cerebras is fastest. Claude needs an Anthropic key in Model Providers."
+                description="Identifies interviewer speech as ignore, keep building, or answer now. The app assembles scenarios and related follow-ups. Cerebras is fastest. Claude needs an Anthropic key in Model Providers."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -967,12 +967,12 @@ function General() {
                 }
               />
               <CardItem
-                title="Question turns"
-                description="Scenario fragments stay pending across pauses. Complete questions send automatically; settling overlaps transcription and judgement. Related follow-ups update the same question. Use Send now, Keep listening or Discard above the chat box."
+                title="Automatic speaker questions"
+                description="Scenario fragments stay pending across pauses. Complete questions send automatically; settling overlaps transcription and judgement. Related follow-ups update the same question. No approval is needed for clear questions. Manual recommendations send as new questions; they never silently append to an existing answer."
               />
               <CardItem
                 title="Smart turn detection"
-                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn uses up to 1 s of settling for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled."
+                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn uses up to 1 s of settling for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
                 actions={
                   <Switch
                     checked={smartTurn}
