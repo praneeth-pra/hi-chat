@@ -24,6 +24,7 @@ import { useThreads } from '@/hooks/useThreads'
 import { useThreadManagement } from '@/hooks/useThreadManagement'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
 import { useMessages } from '@/hooks/useMessages'
+import { useAppState } from '@/hooks/useAppState'
 import { cn, extractThinkingContent } from '@/lib/utils'
 import { useSmallScreen } from '@/hooks/useMediaQuery'
 import { PlatformFeatures } from '@/lib/platform/const'
@@ -107,6 +108,21 @@ const SortableItem = memo(
         match.params.threadId === thread.id
     )
     const projectsEnabled = PlatformFeatures[PlatformFeature.PROJECTS]
+
+    const handleDelete = () => {
+      setOpenDropdown(false)
+      if (variant === 'project') {
+        setDeleteConfirmOpen(true)
+        return
+      }
+      useAppState.getState().abortControllers[thread.id]?.abort()
+      deleteThread(thread.id)
+      toast.success(t('common:toast.deleteThread.title'), {
+        id: 'delete-thread',
+        description: t('common:toast.deleteThread.description'),
+      })
+      if (isActive) navigate({ to: route.home })
+    }
 
     const handleClick = (e: MouseEvent<HTMLDivElement>) => {
       if (openDropdown) {
@@ -230,7 +246,7 @@ const SortableItem = memo(
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              setDeleteConfirmOpen(true)
+              handleDelete()
             }}
           >
             <IconTrash size={14} />
@@ -342,8 +358,7 @@ const SortableItem = memo(
                 onSelect={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
-                  setDeleteConfirmOpen(true)
-                  setOpenDropdown(false)
+                  handleDelete()
                 }}
               >
                 <IconTrash />

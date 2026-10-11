@@ -58,7 +58,8 @@ Answers default to a useful medium length, mostly bullet points, with no tabular
 layouts. Structure adapts to the question instead of repeating fixed sections;
 interview answers favor first-person phrasing without inventing past experience.
 Use the header list icon to extract a copyable question list from that
-chat's prompts on demand. Trash icons in the header/sidebar open confirmation.
+chat's prompts on demand. Sidebar trash buttons delete immediately; the header
+trash button opens confirmation.
 
 ## Hammerspoon shortcuts
 
