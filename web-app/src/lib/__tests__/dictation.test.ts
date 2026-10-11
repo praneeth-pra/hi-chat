@@ -25,19 +25,16 @@ import {
 } from '../dictation'
 import {
   DICTATION_MIC_STORAGE_KEY,
-  MIC_DEVICE_STORAGE_KEY,
   setDictationMic,
-  setMicDevice,
 } from '@/lib/micActivity'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useDictationDelivery } from '../dictationDelivery'
 
 vi.mock('sonner', () => ({ toast: vi.fn() }))
-const reportClip = vi.hoisted(() => vi.fn())
-vi.mock('@/lib/speakerCaptureSession', async (orig) => ({
+const reportSpeech = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/speechServices', async (orig) => ({
   ...(await orig<object>()),
-  reportClip,
+  reportSpeech,
   // The fake live streams below never use their token
   fetchLiveToken: () => new Promise(() => {}),
   fetchLiveKeyWithTerms: () => new Promise(() => {}),
@@ -46,7 +43,7 @@ vi.mock('@/lib/speakerCaptureSession', async (orig) => ({
 const liveResult = vi.hoisted(() => ({
   finish: (): Promise<string> => Promise.resolve(''),
 }))
-vi.mock('@/lib/speakerLive', async (orig) => {
+vi.mock('@/lib/speechLive', async (orig) => {
   class FakeLive {
     push() {}
     abort() {}
@@ -424,7 +421,7 @@ describe('dictation', () => {
     )
     lateGrok('What is EKS? ')
     await done
-    const line = reportClip.mock.calls.at(-1)?.[0] as string
+    const line = reportSpeech.mock.calls.at(-1)?.[0] as string
     expect(line).toContain('sent=soniox total=310ms')
     expect(line).toContain('grok: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
@@ -536,12 +533,6 @@ describe('dictation', () => {
     expect(tracks[0].stop).toHaveBeenCalled()
     expect(deviceOf(1)).toBe('usb')
 
-    // Speaker's mic is its own setting: dictation stays on USB
-    setMicDevice('MacBook Mic')
-    await startDictation()
-    expect(getUserMedia).toHaveBeenCalledTimes(2)
-    cancelDictation()
-
     // Changed elsewhere (another tab): the next dictation reopens
     setDictationMic('MacBook Mic')
     await startDictation()
@@ -552,19 +543,14 @@ describe('dictation', () => {
 
     setKeepMicReady(false)
     localStorage.removeItem('dictation-keep-mic')
-    localStorage.removeItem(MIC_DEVICE_STORAGE_KEY)
     localStorage.removeItem(DICTATION_MIC_STORAGE_KEY)
     vi.unstubAllGlobals()
   })
 
   describe('when the live engines lose a dictation', () => {
-    const enqueue = vi.fn()
     beforeEach(() => {
-      enqueue.mockReset()
       usePrompt.getState().resetPrompt()
       useDictationDelivery.setState({ pending: [] })
-      useSpeakerTranscription.getState().setEnabled(false)
-      useSpeakerTranscription.setState({ enqueue })
     })
     afterEach(() => {
       liveResult.finish = () => Promise.resolve('')
@@ -582,7 +568,6 @@ describe('dictation', () => {
       await dictate('elevenlabs')
       expect(usePrompt.getState().prompt).toBe('What is EKS?')
       expect(useDictationDelivery.getState().pending).toEqual(['What is EKS?'])
-      expect(enqueue).not.toHaveBeenCalled()
       expect(fetchMock).not.toHaveBeenCalled()
     })
 
@@ -640,7 +625,6 @@ describe('dictation', () => {
       liveResult.finish = () => Promise.reject(new Error('offline'))
       relay({ error: 'ElevenLabs failed (500)' })
       await dictate('elevenlabs')
-      expect(enqueue).not.toHaveBeenCalled()
       expect(useDictation.getState()).toMatchObject({
         status: 'idle',
         failed: 'offline; ElevenLabs failed (500)',
@@ -650,7 +634,6 @@ describe('dictation', () => {
       await retryDictation()
       expect(usePrompt.getState().prompt).toBe('What is EKS?')
       expect(useDictationDelivery.getState().pending).toEqual(['What is EKS?'])
-      expect(enqueue).not.toHaveBeenCalled()
       expect(
         (fetchMock.mock.calls[0][1].body as FormData).get('file')
       ).toBeTruthy()

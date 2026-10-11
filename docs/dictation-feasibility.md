@@ -77,7 +77,7 @@ ship delivery safety and critical-word checks, followed by deadline-based fallba
 behind a setting. Compare accuracy and latency before changing Auto's defaults.
 
 Relevant code: `web-app/src/lib/dictation.ts`, `dictationJudge.ts`,
-`dictationFixes.ts`, `dictationDelivery.ts`, `speakerLive.ts`,
+`dictationFixes.ts`, `dictationDelivery.ts`, `speechLive.ts`,
 `web-app/src/containers/ChatInput.tsx`, `DictationIndicator.tsx`, and
 `relay/server.mjs`. Existing dictation tests cover recording, consensus, judge
 fallback, retries and prompt delivery; they do not benchmark real device latency

@@ -125,7 +125,7 @@ export function DictationBanner() {
   )
 }
 
-/** Mic button next to the speaker: click to dictate, click again to send. */
+/** Mic button in the chat toolbar: click to dictate, click again to send. */
 export function DictationButton() {
   const status = useDictation((s) => s.status)
   useEffect(() => {

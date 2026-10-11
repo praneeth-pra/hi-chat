@@ -18,3 +18,11 @@ export function deliverDictation(text: string) {
         : [...state.pending, combined],
   }))
 }
+
+/** Explicit external dictation paste is sent as-is, preserving any typed draft. */
+export function deliverDictationPaste(text: string) {
+  if (!text.trim()) return
+  useDictationDelivery.setState((state) => ({
+    pending: [...state.pending, text.trim()],
+  }))
+}

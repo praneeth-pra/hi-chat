@@ -10,7 +10,7 @@ import {
   SonioxLiveTranscriber,
   sonioxTerms,
   toPcm16Base64,
-} from '../speakerLive'
+} from '../speechLive'
 
 class FakeSocket {
   readyState = 0
@@ -38,7 +38,7 @@ class FakeSocket {
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-describe('speakerLive', () => {
+describe('speechLive', () => {
   it('encodes float samples as 16-bit little-endian PCM', () => {
     const bytes = atob(toPcm16Base64(new Float32Array([0, 1, -1])))
     const codes = [...bytes].map((c) => c.charCodeAt(0))

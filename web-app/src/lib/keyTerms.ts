@@ -88,7 +88,7 @@ export const dictionaryTerms = () =>
   parseKeyTerms(getDictionary(), MAX_DICTIONARY_TERMS)
 
 /**
- * The terms in use for speaker clips: the assistant's own, or else the start
+ * The terms in use for dictation: the assistant's own, or else the start
  * of the dictionary.
  */
 export function activeKeyTerms(assistantTerms?: string[]): string[] {

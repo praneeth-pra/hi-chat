@@ -22,11 +22,7 @@ import { CompletionMessagesBuilder } from '@/lib/messages'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
-import {
-  speakerQuestionTarget,
-  type SpeakerChatRequest,
-} from '@/lib/speakerTurnDelivery'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import { useCodingMode } from '@/hooks/useCodingMode'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
   ChatCompletionMessageToolCall,
@@ -144,15 +140,13 @@ const processStreamingCompletion = async (
   continueFromMessageId?: string,
   updateMessage?: (message: ThreadMessage) => void,
   continueFromMessage?: ThreadMessage,
-  timing?: StreamTiming,
-  onAnswerStart?: () => void
+  timing?: StreamTiming
 ) => {
   // High-throughput scheduler: batch UI updates on rAF (requestAnimationFrame)
   let rafScheduled = false
   let rafHandle: number | undefined
   let pendingDeltaCount = 0
   const reasoningProcessor = new ReasoningProcessor()
-  let answerStarted = false
 
   const flushStreamingContent = () => {
     const currentContent = createThreadContent(
@@ -260,10 +254,6 @@ const processStreamingCompletion = async (
       }
       const deltaContent = part.choices[0]?.delta?.content || ''
       if (deltaContent) {
-        if (!answerStarted) {
-          answerStarted = true
-          onAnswerStart?.()
-        }
         if (timing) timing.firstAnswerAt ??= Date.now()
         accumulatedTextRef.value += deltaContent
         pendingDeltaCount += 1
@@ -338,11 +328,7 @@ export const useChat = () => {
   const setActiveModels = useAppState((state) => state.setActiveModels)
 
   const getCurrentThread = useCallback(
-    async (
-      projectId?: string,
-      firstMessage?: string,
-      speakerRequest?: SpeakerChatRequest
-    ) => {
+    async (projectId?: string, firstMessage?: string) => {
       let currentThread = retrieveThread()
 
       // Check if we're in temporary chat mode
@@ -381,27 +367,14 @@ export const useChat = () => {
             id: selectedModel?.id ?? defaultModel(selectedProvider),
             provider: selectedProvider,
           },
-          // Name the chat after the message being sent. The prompt box can
-          // be empty (speaker questions are sent without it) or hold an
-          // unrelated draft, so it is not used here.
           isTemporaryMode ? 'Temporary Chat' : titleFromMessage(firstMessage),
           withoutDocuments(
             assistants.find((a) => a.id === currentAssistant?.id) ||
               assistants[0]
           ),
           projectMetadata,
-          isTemporaryMode, // pass temporary flag
-          ...(speakerRequest
-            ? [
-                {
-                  isCurrent: speakerRequest.isCurrent,
-                  onActivate: speakerRequest.onThread,
-                },
-              ]
-            : [])
+          isTemporaryMode // pass temporary flag
         )
-
-        if (speakerRequest && !speakerRequest.isCurrent()) return undefined
 
         // Clear messages for temporary chat to ensure fresh start on reload
         if (isTemporaryMode && currentThread?.id === TEMPORARY_CHAT_ID) {
@@ -563,18 +536,9 @@ export const useChat = () => {
         status: 'processing' | 'done' | 'error' | 'clear_all',
         updatedAttachment?: Partial<Attachment>
       ) => void,
-      continueFromMessageId?: string,
-      speakerRequest?: SpeakerChatRequest
+      continueFromMessageId?: string
     ) => {
-      if (speakerRequest && !speakerRequest.isCurrent()) return
-      const activeThread = await getCurrentThread(
-        projectId,
-        message,
-        speakerRequest
-      )
-      if (speakerRequest && activeThread)
-        speakerRequest.onThread(activeThread.id)
-      if (speakerRequest && !speakerRequest.isCurrent()) return
+      const activeThread = await getCurrentThread(projectId, message)
       const selectedProvider = useModelProvider.getState().selectedProvider
       let selectedModel = useModelProvider.getState().selectedModel
       let activeProvider = getProviderByName(selectedProvider)
@@ -728,23 +692,8 @@ export const useChat = () => {
 
       // All attachments prepared successfully
 
-      if (speakerRequest && !speakerRequest.isCurrent()) return
       const messages = getMessages(activeThread.id)
-      const speakerTarget =
-        speakerRequest?.turn.relation === 'update'
-          ? speakerQuestionTarget(messages, speakerRequest.turn.id)
-          : null
       const abortController = new AbortController()
-      const cancelStaleSpeaker = () => {
-        if (speakerRequest && !speakerRequest.isCurrent())
-          abortController.abort()
-      }
-      const unregisterSpeaker = speakerRequest
-        ? useSpeakerTranscription.subscribe(cancelStaleSpeaker)
-        : () => {}
-      const unregisterSpeakerThread = speakerRequest
-        ? useThreads.subscribe(cancelStaleSpeaker)
-        : () => {}
       setAbortController(activeThread.id, abortController)
       updateStreamingContent(emptyThreadContent)
       updatePromptProgress(undefined)
@@ -764,41 +713,7 @@ export const useChat = () => {
         message,
         processedAttachments
       )
-      if (speakerRequest) {
-        userContent.metadata = {
-          ...userContent.metadata,
-          speakerTurnId: speakerRequest.turn.id,
-          speakerTurnVersion: speakerRequest.turn.version,
-        }
-        if (speakerTarget) userContent.id = speakerTarget.user.id
-      }
-      // Updates retain the previous question and answer until a fresh answer arrives.
-      const persistAnswer = (answer: ThreadMessage) => {
-        if (speakerRequest && !speakerRequest.isCurrent()) return
-        if (speakerTarget)
-          updateMessage({
-            ...speakerTarget.user,
-            content: userContent.content,
-            metadata: {
-              ...speakerTarget.user.metadata,
-              ...userContent.metadata,
-            },
-          })
-        const tagged = speakerRequest
-          ? {
-              ...answer,
-              metadata: {
-                ...answer.metadata,
-                speakerTurnId: speakerRequest.turn.id,
-                speakerTurnVersion: speakerRequest.turn.version,
-              },
-            }
-          : answer
-        if (speakerTarget?.answer)
-          updateMessage({ ...tagged, id: speakerTarget.answer.id })
-        else addMessage(tagged)
-      }
-      if (troubleshooting && !continueFromMessageId && !speakerTarget) {
+      if (troubleshooting && !continueFromMessageId) {
         addMessage(userContent)
       }
       updateThreadTimestamp(activeThread.id)
@@ -830,11 +745,9 @@ export const useChat = () => {
         currentAssistant = useAssistant.getState().currentAssistant
 
         // Filter out the stopped message from context if continuing
-        const contextMessages = speakerTarget
-          ? speakerTarget.context
-          : continueFromMessageId
-            ? messages.filter((m) => m.id !== continueFromMessageId)
-            : messages
+        const contextMessages = continueFromMessageId
+          ? messages.filter((m) => m.id !== continueFromMessageId)
+          : messages
 
         // Code questions get a rule asking for the shortest working version
         const builder = new CompletionMessagesBuilder(
@@ -847,7 +760,7 @@ export const useChat = () => {
                 )
               : undefined,
             message,
-            useSpeakerTranscription.getState().coding
+            useCodingMode.getState().coding
           )
         )
         // Using addUserMessage to respect legacy code. Should be using the userContent above.
@@ -1111,14 +1024,9 @@ export const useChat = () => {
           let tokenUsage: CompletionUsage | undefined = undefined
           const tokenUsageRef = { current: tokenUsage }
           try {
-            if (speakerRequest && !speakerRequest.isCurrent()) {
-              abortController.abort()
-              break
-            }
             if (isCompletionResponse(completion)) {
               const message = completion.choices[0]?.message
               const newContent = (message?.content as string) || ''
-              if (newContent) speakerRequest?.onAnswerStart?.()
               if (
                 continueFromMessageId &&
                 accumulatedTextRef.value.length > 0
@@ -1158,8 +1066,7 @@ export const useChat = () => {
                 continueFromMessageId,
                 updateMessage,
                 continueFromMessage,
-                streamTiming,
-                speakerRequest?.onAnswerStart
+                streamTiming
               )
               tokenUsage = tokenUsageRef.current
             }
@@ -1264,11 +1171,6 @@ export const useChat = () => {
           const isProactiveModeForPostProcessing =
             mcpSettings.proactiveMode &&
             hasRequiredCapabilitiesForPostProcessing
-
-          if (speakerRequest && !speakerRequest.isCurrent()) {
-            abortController.abort()
-            break
-          }
           const updatedMessage = await postMessageProcessing(
             toolCalls,
             builder,
@@ -1279,14 +1181,9 @@ export const useChat = () => {
             allowAllMCPPermissions,
             isProactiveModeForPostProcessing
           )
-          if (
-            speakerRequest &&
-            (!speakerRequest.isCurrent() || abortController.signal.aborted)
-          )
-            break
           finalizeMessage(
             updatedMessage ?? finalContent,
-            persistAnswer,
+            addMessage,
             updateStreamingContent,
             updatePromptProgress,
             updateThreadTimestamp,
@@ -1310,8 +1207,7 @@ export const useChat = () => {
         if (
           abortController.signal.aborted &&
           accumulatedTextRef.value.length > 0 &&
-          activeProvider?.provider === 'llamacpp' &&
-          !speakerRequest
+          activeProvider?.provider === 'llamacpp'
         ) {
           // If continuing, update the existing message; otherwise add new
           if (continueFromMessageId && continueFromMessage) {
@@ -1365,8 +1261,7 @@ export const useChat = () => {
         if (
           abortController.signal.aborted &&
           hasPartialContent &&
-          activeProvider?.provider === 'llamacpp' &&
-          !speakerRequest
+          activeProvider?.provider === 'llamacpp'
         ) {
           // Use streaming content if available, otherwise use accumulatedTextRef
           const contentText =
@@ -1417,8 +1312,6 @@ export const useChat = () => {
           }
         }
       } finally {
-        unregisterSpeaker()
-        unregisterSpeakerThread()
         updateLoadingModel(false)
         updateStreamingContent(undefined)
         updatePromptProgress(undefined)
