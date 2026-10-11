@@ -23,7 +23,7 @@ export type TurnContext = { pending: string; active: string; recent: string[] }
 
 /** Conservative evidence for a manual fallback, never authority to auto-send. */
 export function hasQuestionCue(text: string): boolean {
-  return /\b(what|why|how|when|where|which|who|whose)\b|\b(can|could|would|will|do|did|have|are)\s+you\b|(?:^|[.!?]\s*)(?:(?:okay|so|please)[, ]+)*(explain|describe|compare|design|implement|write|build|calculate|solve|demonstrate)\b|\b(tell me|walk me through)\b/i.test(
+  return /\?|(?:^|[.!?]\s*)(is|are|does|do|did|can|could|would|should|have|has)\b|\b(what|why|how|when|where|which|who|whose)\b|\b(can|could|would|will|do|did|have|are)\s+you\b|(?:^|[.!?]\s*)(?:(?:okay|so|please)[, ]+)*(explain|describe|compare|design|implement|write|build|calculate|solve|demonstrate|find|swap|reverse|sort|return|print|create|show|list)\b|\b(tell me|walk me through)\b/i.test(
     text
   )
 }
@@ -60,6 +60,15 @@ answer: a complete, answerable interviewer question or technical request. Do not
 relation is current or new. current means it belongs to the pending scenario or is a genuine same-topic follow-up/constraint to the active question. new means a separate topic/task. The first standalone question is new. Another question mark alone does not make a new topic.
 transcript is a zero-based index of one supplied transcript. span is null to select its whole text; for a mixed question/answer clip, span must copy only an EXACT contiguous questioner passage from that transcript. No rewriting, answering, invented words, or copying pending/active text. If you cannot safely separate mixed speech, hold. Compare the available transcripts; choose the clearest faithful one.
 Examples: "Suppose payment succeeds but delivery fails" => hold. "How do we keep those services consistent?" => answer/current. "And what if we retry?" => answer/current. "What is your strong zone?" => answer/new. "Out of all of these things, what do you work regularly on?" => answer/current if following a skills question. "I work on tasks and automation" => ignore.
+The default for a candidate's declarative explanation is ignore, NOT answer or hold. Do not treat the presence of technical words (CI/CD, tasks, containers, Vault) as evidence of a question.
+A question with alternative choices is answerable; an absent spoken "on" or filler between alternatives does not make it unfinished.
+relation=new requires a genuinely different topic, not a new audio clip. With a pending scenario, continuation is current. With an active question, pronouns such as "it", "these things", "that integration" refer to that question and are current.
+Exact examples:
+"So I generally do have mostly like CI/CD tasks. We do get tasks." => ignore.
+"That is actually maintained by another team." => ignore.
+active="What is your strong zone?", clip="Out of all of these things, what do you work regularly on?" => answer/current.
+active="How did you integrate Vault?", clip="Do you have it running in a container or on EC2?" => answer/current.
+"I maintain the pipelines. How do you rotate their credentials?" => answer, span="How do you rotate their credentials?"; never select the candidate sentence.
 Return the four keys shown above. Do not return explanations or completeness booleans.`
 
 export const turnDecisionSchema = (count: number): Record<string, unknown> => ({
@@ -132,6 +141,15 @@ export function parseTurnDecision(
       return uncertain(
         'Judge wording was not present in the selected transcript'
       )
+    if (
+      d.intent === 'answer' &&
+      typeof d.span !== 'string' &&
+      text.split(/(?<=[.!?])\s+/).some(candidateStatement) &&
+      hasQuestionCue(text)
+    )
+      return uncertain(
+        'Judge wording mixed a candidate answer with a question; select only the exact question span'
+      )
     if (candidateStatement(text))
       return {
         action: 'skip',
@@ -139,8 +157,22 @@ export function parseTurnDecision(
         text: '',
         reason: 'Candidate statement',
       }
+    // A valid schema is not evidence that declarative speech is answerable.
+    if (d.intent === 'answer' && !hasQuestionCue(text))
+      return {
+        action: 'skip',
+        complete: false,
+        text: '',
+        reason: 'No explicit question or task in an automatic decision',
+      }
     const complete = d.intent === 'answer'
-    const related = d.relation === 'current'
+    const connected =
+      /^(?:out of all of (?:these|those)|(?:and )?what about|(?:and )?what if|(?:and )?(?:do|did|can|could|would|is|does) (?:you have it|it|that)|(?:and )?how (?:does|did|would) (?:that|it))\b/i.test(
+        text
+      )
+    const related =
+      d.relation === 'current' ||
+      (!!(context.pending || context.active) && connected)
     const action: TurnAction = related
       ? context.pending
         ? complete
@@ -173,18 +205,30 @@ export async function judgeSpeakerTurn(
   if (
     !distinct.length ||
     distinct.every((t) => chatterReason(t) || candidateStatement(t))
-  )
-    return { action: 'skip', complete: false, text: '', reason: 'Chatter' }
-  if (!config.apiKey && !config.cerebras?.apiKey && !config.anthropic?.apiKey) {
+  ) {
+    const reason = distinct.some(candidateStatement)
+      ? 'Candidate statement'
+      : 'Chatter'
     onCheck?.({
-      model: 'manual confirmation',
+      model: 'local speech filter',
       ms: 0,
-      note: 'No judgement provider configured',
+      type: 'skip',
+      note: reason,
     })
-    return manualFallback(
+    return { action: 'skip', complete: false, text: '', reason }
+  }
+  if (!config.apiKey && !config.cerebras?.apiKey && !config.anthropic?.apiKey) {
+    const decision = manualFallback(
       distinct,
       'Set up a judgement provider or send manually'
     )
+    onCheck?.({
+      model: 'manual confirmation',
+      ms: 0,
+      type: decision.action,
+      note: 'No judgement provider configured',
+    })
+    return decision
   }
   const user = JSON.stringify({
     pending: context.pending,

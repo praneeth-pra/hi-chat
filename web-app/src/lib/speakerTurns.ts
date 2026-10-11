@@ -18,6 +18,8 @@ export type QuestionDraft = {
   relation?: 'new' | 'update'
   addition?: string
   reviewUntil?: number
+  captureEnd?: number | null
+  clip?: number
   reason: string
 }
 export type QuestionCommit = {
@@ -26,6 +28,8 @@ export type QuestionCommit = {
   text: string
   relation: 'new' | 'update'
   origin?: 'automatic' | 'send-now' | 'suggestion'
+  captureEnd?: number | null
+  clip?: number
 }
 type Options = {
   judge: (texts: string[], context: TurnContext) => Promise<TurnDecision>
@@ -68,9 +72,9 @@ export function createQuestionTurns(options: Options) {
     timer = undefined
   }
   const publish = () => options.onDraft(draft ? { ...draft } : null)
-  const commit = () => {
+  const emitDraft = () => {
     cancelTimer()
-    if (!draft || stopped || processing || busy) return
+    if (!draft || stopped) return
     const relation = active?.id === draft.id ? 'update' : 'new'
     active = {
       id: draft.id,
@@ -78,6 +82,8 @@ export function createQuestionTurns(options: Options) {
       version: relation === 'update' ? active!.version + 1 : 1,
       relation,
       origin: manualRequested ? manualOrigin : 'automatic',
+      captureEnd: draft.captureEnd,
+      clip: draft.clip,
     }
     draft = null
     manualRequested = false
@@ -87,10 +93,16 @@ export function createQuestionTurns(options: Options) {
       turn: active.id,
       version: active.version,
       origin: active.origin,
-      captureEnd: quietSince,
-      afterCaptureMs: quietSince === null ? null : Date.now() - quietSince,
+      clip: active.clip,
+      captureEnd: active.captureEnd,
+      afterCaptureMs:
+        active.captureEnd == null ? null : Date.now() - active.captureEnd,
     })
     options.onCommit({ ...active })
+  }
+  const commit = () => {
+    if (!draft || stopped || processing || busy) return
+    emitDraft()
   }
   const schedule = () => {
     cancelTimer()
@@ -103,18 +115,28 @@ export function createQuestionTurns(options: Options) {
       options.onTrace?.('settling', {
         at: Date.now(),
         waitMs,
-        captureEnd: quietSince,
+        clip: draft.clip,
+        captureEnd: draft.captureEnd,
       })
       timer = setTimeout(commit, waitMs)
     }
   }
   const suggestQuestion = (text: string, reason?: string) => {
-    if (hasQuestionCue(text)) options.onSuggest(text, reason)
+    if (hasQuestionCue(text)) {
+      options.onTrace?.('recommendation', { at: Date.now(), reason, text })
+      options.onSuggest(text, reason)
+    } else
+      options.onTrace?.('recommendation-suppressed', {
+        at: Date.now(),
+        reason: 'No question evidence',
+      })
   }
   const apply = (decision: TurnDecision) => {
-    const { action, text, complete, reason } = decision
+    const { text, complete, reason } = decision
+    let action = decision.action
     if (action === 'skip' || !text.trim()) return
     if (action === 'suggest') {
+      if (draft?.complete && !draft.manual) emitDraft()
       // An uncertain continuation must not let an earlier partial question escape.
       if (draft) {
         draft.uncertain = true
@@ -125,19 +147,22 @@ export function createQuestionTurns(options: Options) {
       suggestQuestion(text, reason)
       return
     }
+    // A clip boundary cannot erase an answerable question or split unfinished setup.
+    if (
+      draft &&
+      !draft.complete &&
+      draft.relation !== 'update' &&
+      action === 'new-question' &&
+      !complete
+    )
+      action = 'context'
+    if (draft && draft.complete && !draft.manual && !complete) {
+      emitDraft()
+      if (action === 'context' || action === 'question') action = 'followup'
+    }
     if (draft && action === 'new-question') {
       if (draft.complete && !draft.manual) {
-        // Explicit topic change is a boundary, even before the settling timer.
-        const previous = draft
-        const relation = active?.id === previous.id ? 'update' : 'new'
-        active = {
-          id: previous.id,
-          text: previous.text,
-          version: relation === 'update' ? active!.version + 1 : 1,
-          relation,
-          origin: 'automatic',
-        }
-        options.onCommit({ ...active })
+        emitDraft()
       } else suggestQuestion(draft.text, draft.reason)
       draft = null
     }
@@ -169,12 +194,18 @@ export function createQuestionTurns(options: Options) {
     publish()
   }
   return {
-    accept(texts: string[], unfinishedTurn = false): Promise<void> {
-      const clip = ++clipSequence
+    accept(
+      texts: string[],
+      unfinishedTurn = false,
+      capture?: { clipId: number; captureEnd: number }
+    ): Promise<void> {
+      const clip = capture?.clipId ?? ++clipSequence
+      const captureEnd = capture?.captureEnd ?? quietSince
       options.onTrace?.('transcript-ready', {
         clip,
         at: Date.now(),
-        captureEnd: quietSince,
+        captureEnd,
+        captureEndKind: capture ? 'clip-finalized' : 'quiet-state-snapshot',
       })
       const acceptedEpoch = epoch
       processing++
@@ -197,8 +228,16 @@ export function createQuestionTurns(options: Options) {
             at: Date.now(),
             action: decision.action,
             complete: decision.complete,
+            reason: decision.reason,
+            hadPending: !!context.pending,
+            hadActive: !!context.active,
           })
           apply(decision)
+          if (draft && decision.action !== 'skip') {
+            draft.captureEnd = captureEnd
+            draft.clip = clip
+            publish()
+          }
           recent = [...recent, texts[0] ?? ''].slice(-6)
         })
         .finally(() => {
@@ -243,6 +282,12 @@ export function createQuestionTurns(options: Options) {
         draft.relation !== 'update'
       )
         return
+      options.onTrace?.('review-expired', {
+        at: Date.now(),
+        turn: draft.id,
+        clip: draft.clip,
+        relation: draft.relation,
+      })
       cancelTimer()
       manualRequested = false
       draft = null

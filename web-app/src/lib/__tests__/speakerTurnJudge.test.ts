@@ -255,6 +255,50 @@ describe('speaker intent protocol', () => {
     ).toBe('skip')
     expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
   })
+  it('rejects the exact live candidate passages even when the model calls them answerable', () => {
+    for (const text of [
+      'So I generally do have mostly like CI/CD tasks. We do get tasks.',
+      'That is actually … maintained by another team…',
+    ]) {
+      expect(
+        parseTurnDecision(reply('answer').reply, [text], empty).action
+      ).toBe('skip')
+    }
+  })
+  it('keeps dependent live follow-ups on the current question despite a new label', () => {
+    expect(
+      parseTurnDecision(
+        reply('answer').reply,
+        ['Out of all of these things, what do you work regularly on?'],
+        { ...empty, active: 'What is your strong zone?' }
+      ).action
+    ).toBe('followup')
+    expect(
+      parseTurnDecision(
+        reply('answer').reply,
+        ['Do you have it running in a container or on EC2?'],
+        { ...empty, active: 'How did you integrate Vault?' }
+      )
+    ).toMatchObject({ action: 'followup', complete: true })
+  })
+  it('requires extraction of the question from a mixed candidate/question clip', () => {
+    const text =
+      'I maintain the pipelines. How do you rotate their credentials?'
+    expect(parseTurnDecision(reply('answer').reply, [text], empty).action).toBe(
+      'suggest'
+    )
+    expect(
+      parseTurnDecision(
+        reply('answer', 'new', 0, 'How do you rotate their credentials?').reply,
+        [text],
+        empty
+      )
+    ).toMatchObject({
+      action: 'new-question',
+      complete: true,
+      text: 'How do you rotate their credentials?',
+    })
+  })
   it('automatically sends the reported question, updates its real follow-up and excludes the candidate answer', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)

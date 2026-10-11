@@ -232,13 +232,24 @@ export function SpeakerTranscriptionProvider() {
         turns.audioActivity(status === 'hearing')
         turns.activity(status === 'hearing' || status === 'transcribing')
       },
-      accept: async (texts, engines, engineWords = [], turn = null) => {
+      accept: async (
+        texts,
+        engines,
+        engineWords = [],
+        turn = null,
+        capture
+      ) => {
         check = undefined
         words = engineWords
         turnCheck = turn
         await turns.accept(
           texts,
-          !!(getSmartTurn() && turn && turn.probability < SMART_TURN_HOLD_BELOW)
+          !!(
+            getSmartTurn() &&
+            turn &&
+            turn.probability < SMART_TURN_HOLD_BELOW
+          ),
+          capture
         )
         const info = check as CheckInfo | undefined
         log({
