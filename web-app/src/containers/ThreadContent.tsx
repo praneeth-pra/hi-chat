@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ThreadMessage } from '@janhq/core'
-import { getTablesAsLists, tablesToLists } from '@/lib/tablesToLists'
 import { RenderMarkdown } from './RenderMarkdown'
 import React, { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import {
@@ -453,11 +452,7 @@ export const ThreadContent = memo(
             )}
 
             <RenderMarkdown
-              content={
-                getTablesAsLists()
-                  ? tablesToLists(textSegment.replace('</think>', ''))
-                  : textSegment.replace('</think>', '')
-              }
+              content={textSegment.replace('</think>', '')}
               components={linkComponents}
             />
 

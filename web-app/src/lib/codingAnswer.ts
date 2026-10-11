@@ -13,7 +13,7 @@ export function asksForCode(text: string): boolean {
   return CODE_ASK.test(text)
 }
 
-export const CODING_ANSWER_RULE = `If this question asks you to write code, a command, a query or a config, keep the code itself short: only the logic that was asked for, in one code block. No boilerplate, imports, setup, error handling, logging or extra features unless the question needs them, and no alternative versions. Then explain what it does, walk through the key lines, and show how to use it or give a small example when helpful. Keep the code minimal while making the explanation sufficiently developed to understand and apply it.`
+export const CODING_ANSWER_RULE = `If this question asks you to write code, a command, a query or a config, keep the code itself short: only the logic that was asked for, in one code block. No boilerplate, imports, setup, error handling, logging or extra features unless the question needs them, and no alternative versions. Then use focused bullet points to explain what it does, walk through the key lines, and show how to use it or give a small example when helpful. Keep the code minimal while making the explanation sufficiently developed to understand and apply it.`
 
 /** The assistant's instructions, plus the short-code rule when it applies. */
 export function withCodingRule(

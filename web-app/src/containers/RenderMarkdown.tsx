@@ -15,6 +15,7 @@ import { IconCopy, IconCopyCheck } from '@tabler/icons-react'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import type { PluggableList } from 'unified'
+import { remarkTablesAsLists } from '@/lib/tablesToLists'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
 interface MarkdownProps {
@@ -232,9 +233,17 @@ function RenderMarkdownComponent({
   const normalizedContent = useMemo(() => normalizeLatex(content), [content])
 
   // Stable remarkPlugins reference
-  const remarkPlugins = useMemo(() => {
-    return [remarkGfm, remarkMath, remarkEmoji, remarkBreaks]
-  }, [])
+  const remarkPlugins = useMemo<PluggableList>(() => {
+    const plugins: PluggableList = [
+      remarkGfm,
+      remarkMath,
+      remarkEmoji,
+      remarkBreaks,
+    ]
+    // User input and external HTML documents retain their original format.
+    if (!isUser && !enableRawHtml) plugins.push(remarkTablesAsLists)
+    return plugins
+  }, [isUser, enableRawHtml])
 
   // Stable rehypePlugins reference
   const rehypePlugins = useMemo<PluggableList>(() => {
