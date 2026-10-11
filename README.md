@@ -79,7 +79,11 @@ No raw judge replies or credentials are logged.
 
 Speaker sends retain all earlier questions and answers.
 Switching chats, typing a question or disabling Speaker cancels stale speaker
-work. Dictation retains its separate microphone flow. Recognized dictation
+work. Dictation retains its separate microphone flow. Playback suppression is off by
+default so the selected microphone can capture played speech as well as your voice.
+Settings > Dictation offers an opt-in suppression switch and a microphone selector.
+Dictation batch fallback requires nonempty speech before ending the engine race.
+Recognized dictation
 appends to the prompt box and automatically sends through its own queue even
 when Speaker is disabled. While an answer is streaming, the text stays visible
 until it can send; a delivery error restores the text for retry. Smart Turn remains

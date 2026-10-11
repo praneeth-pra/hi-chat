@@ -71,6 +71,71 @@ test('reports failures and skips engines with no key', async () => {
   assert.equal(out[1].off, true)
 })
 
+test('dictation race ignores an empty result and does not start the slower-engine cap until speech arrives', async () => {
+  const out = await transcribeAll(file, {
+    env,
+    need: 1,
+    requireText: true,
+    waitMs: 1,
+    engines: [
+      engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, '  '),
+      engine('grok', 'XAI_API_KEY', 30, 'usable speech'),
+    ],
+  })
+  assert.equal(out[1].text, 'usable speech')
+  assert.equal(out[1].ok, true)
+})
+test('dictation race resolves when all engines hear nothing', async () => {
+  const out = await transcribeAll(file, {
+    env,
+    need: 1,
+    requireText: true,
+    engines: [
+      engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
+      engine('grok', 'XAI_API_KEY', 10, ''),
+    ],
+  })
+  assert.equal(out.length, 2)
+  assert.ok(out.every((r) => r.ok && r.text === ''))
+})
+test('legacy transcription race behavior is unchanged without the dictation option', async () => {
+  const out = await transcribeAll(file, {
+    env,
+    need: 1,
+    engines: [
+      engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
+      engine('grok', 'XAI_API_KEY', 100, 'later'),
+    ],
+  })
+  assert.equal(out[0].text, '')
+  assert.equal(out[1].error, 'Too slow')
+})
+test('HTTP: dictation require_text option waits for nonempty speech', async () => {
+  const server = createRelay({
+    env,
+    waitMs: 1,
+    engines: [
+      engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
+      engine('grok', 'XAI_API_KEY', 30, 'usable speech'),
+    ],
+  }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const form = new FormData()
+    form.append('file', file, 'dictation.wav')
+    form.append('need', '1')
+    form.append('require_text', '1')
+    const res = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/transcribe`,
+      { method: 'POST', body: form }
+    )
+    assert.equal(res.status, 200)
+    assert.equal((await res.json()).results[1].text, 'usable speech')
+  } finally {
+    server.close()
+  }
+})
+
 test('HTTP: one upload reaches every engine with its key', async () => {
   const calls = []
   const fetchImpl = async (url, init) => {

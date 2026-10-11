@@ -35,6 +35,8 @@ import { getLiveMode, setLiveMode } from '@/lib/speakerLive'
 import {
   DICTATION_ENGINES,
   getDictationEngine,
+  getDictationReduceEcho,
+  setDictationReduceEcho,
   getKeepMicReady,
   setDictationEngine,
   setKeepMicReady,
@@ -148,6 +150,8 @@ function General() {
   const [liveMode, setLiveModeState] = useState(getLiveMode)
   const [dictationEngine, setDictationEngineState] =
     useState(getDictationEngine)
+  const [reduceDictationEcho, setReduceDictationEchoState] =
+    useState(getDictationReduceEcho)
   const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [judgeModel, setJudgeModelState] = useState<JudgeModel>(getJudgeModel)
   const [secondJudge, setSecondJudgeState] = useState<JudgeModel | undefined>(
@@ -827,6 +831,19 @@ function General() {
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                }
+              />
+              <CardItem
+                title="Suppress playback through the microphone"
+                description="Off captures spoken audio played near your microphone as well as your voice. Turn on to reduce speaker echo and background noise. Choose MacBook Microphone above to use its built-in mic."
+                actions={
+                  <Switch
+                    checked={reduceDictationEcho}
+                    onCheckedChange={(on) => {
+                      setDictationReduceEcho(on)
+                      setReduceDictationEchoState(on)
+                    }}
+                  />
                 }
               />
               <CardItem
