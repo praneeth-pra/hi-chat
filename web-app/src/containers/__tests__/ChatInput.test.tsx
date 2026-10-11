@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createRouter, createRootRoute, createMemoryHistory } from '@tanstack/react-router'
 import ChatInput from '../ChatInput'
+import { useDictationDelivery } from '@/lib/dictationDelivery'
+import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useAppState } from '@/hooks/useAppState'
@@ -18,9 +20,7 @@ let mockPromptState = {
 }
 
 vi.mock('@/hooks/usePrompt', () => ({
-  usePrompt: (selector: any) => {
-    return selector ? selector(mockPromptState) : mockPromptState
-  },
+  usePrompt: Object.assign((selector: any) => selector ? selector(mockPromptState) : mockPromptState, {getState: () => mockPromptState}),
 }))
 
 vi.mock('@/hooks/useThreads', () => ({
@@ -238,6 +238,7 @@ describe('ChatInput', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useDictationDelivery.setState({pending: []})
 
     // Reset mock states
     mockPromptState.prompt = ''
@@ -305,6 +306,20 @@ describe('ChatInput', () => {
     // setPrompt is called for each character typed
     expect(mockPromptState.setPrompt).toHaveBeenCalledTimes(5)
     expect(mockPromptState.setPrompt).toHaveBeenLastCalledWith('o')
+  })
+
+  it('automatically sends dictation even when Speaker is disabled', async () => {
+    const send = vi.fn(async () => {})
+    vi.mocked(useChat).mockReturnValue(send)
+    useSpeakerTranscription.getState().setEnabled(false)
+    mockPromptState.prompt = 'Describe ECS pricing.'
+    useDictationDelivery.setState({pending: ['Describe ECS pricing.']})
+    await act(async () => {renderWithRouter()})
+    await waitFor(() => expect(send).toHaveBeenCalledWith('Describe ECS pricing.', true, undefined, undefined))
+    expect(mockPromptState.setPrompt).toHaveBeenCalledWith('')
+    expect(useDictationDelivery.getState().pending).toEqual([])
+    useSpeakerTranscription.getState().setEnabled(true)
+    vi.mocked(useChat).mockImplementation(() => vi.fn())
   })
 
   it('calls sendMessage when send button is clicked', async () => {

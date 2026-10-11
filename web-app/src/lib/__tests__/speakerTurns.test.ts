@@ -93,6 +93,25 @@ describe('question-turn coordination', () => {
       active: 'How does DNS work?',
     })
   })
+  it('does not recommend the old question when a held addition is superseded by a new topic', async () => {
+    const { turns, judge, onCommit, onSuggest } = setup()
+    judge
+      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
+      .mockResolvedValueOnce(decision('followup', 'With caching'))
+      .mockResolvedValueOnce(
+        decision('new-question', 'Explain garbage collection.', true)
+      )
+    await turns.accept(['How does DNS work?'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept(['With caching'])
+    await turns.accept(['Explain garbage collection.'])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onSuggest).not.toHaveBeenCalled()
+    expect(onCommit.mock.calls[1][0]).toMatchObject({
+      text: 'Explain garbage collection.',
+      relation: 'new',
+    })
+  })
   it('uses a different turn for a clearly separate topic', async () => {
     const { turns, judge, onCommit } = setup()
     judge

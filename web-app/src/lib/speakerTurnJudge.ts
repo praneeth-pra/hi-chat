@@ -32,18 +32,41 @@ function candidateStatement(text: string): boolean {
   return (
     !hasQuestionCue(text) &&
     !text.includes('?') &&
-    !/\b(?:suppose|imagine|assume|given|let['’]s say)\b/i.test(text) &&
-    (/\b(?:maintained|managed|handled|owned) by (?:another|the other|our|the) team\b/i.test(
-      text
-    ) ||
-      /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:(?:i|we)\s+(?:(?:generally|usually|typically|mostly|currently|regularly|actually)\s+)*(?:work|worked|do|did|use|used|maintain|maintained|handle|handled|manage|managed|build|built|get|got)\b|(?:my|our)\s+(?:responsibilities|tasks|work|experience|background)\b)/i.test(
+    !scenarioSetup(text) &&
+    (/^(?:i['’]m|i am)\s+(?:not able|unable)\b/i.test(text.trim()) ||
+      /\b(?:maintained|managed|handled|owned) by (?:another|the other|our|the) team\b/i.test(
+        text
+      ) ||
+      /^(?:(?:yes|yeah|okay|ok|so|well|actually)[, .]+)*(?:(?:i|we)\s+(?:(?:generally|usually|typically|mostly|currently|regularly|actually)\s+)*(?:work|worked|do|did|use|used|maintain|maintained|handle|handled|manage|managed|build|built|get|got|think|thought|choose|chose|prefer|decided|would|have|am|can|cannot)\b|(?:my|our)\s+(?:responsibilities|tasks|work|experience|background)\b)/i.test(
         text.trim()
       ))
   )
 }
 
+/** Remove an explicit answer following a completed question, preserving source words. */
+function questionOnly(text: string): string {
+  const boundary = text.indexOf('?')
+  if (
+    boundary >= 0 &&
+    hasQuestionCue(text.slice(0, boundary + 1)) &&
+    /^(?:because\b|(?:so |well |actually )?(?:i|we|my|our)\b)/i.test(
+      text.slice(boundary + 1).trim()
+    )
+  )
+    return text.slice(0, boundary + 1).trim()
+  return text
+}
+
+function scenarioSetup(text: string): boolean {
+  return /^(?:(?:okay|so|and)[, ]+)*(?:suppose|imagine|assume|given|consider|let['’]s say|i have (?:a|an|the) (?:list|array|string|matrix|tree|graph|problem|scenario))\b/i.test(
+    text.trim()
+  )
+}
+
 function manualFallback(texts: string[], reason: string): TurnDecision {
-  const text = texts.find((t) => hasQuestionCue(t) && !chatterReason(t))
+  const text = texts
+    .map(questionOnly)
+    .find((t) => hasQuestionCue(t) && !chatterReason(t))
   return text
     ? { action: 'suggest', complete: false, text, reason }
     : {
@@ -59,10 +82,10 @@ Return only one JSON object, for example:
 {"intent":"question","relation":"new","transcript":0,"span":null}
 intent has exactly three values:
 ignore: candidate answers, confirmations, filler, repetitions, greetings, rhetorical questions and screen/call logistics. First-person descriptions of the candidate's tasks/experience are answers, not questions. Never append them to the interviewer's question.
-hold: scenario/background, a lead-in, unfinished wording, missing essential constraints or unclear relevant speech. Keep building across any length of pause. Silence does not complete a scenario.
+hold: explicit interviewer scenario/background, a lead-in, unfinished wording or missing essential constraints. Do not use hold as a catch-all for unclear speaker ownership. Candidate explanations about choosing EKS, project descriptions, "I am not able to think", and "No worries" are ignore. A new explicit scenario question must not inherit a preceding candidate explanation. Keep building across any length of pause. Silence does not complete a scenario.
 question: a complete, answerable interviewer question or technical request. Do not wait for hypothetical extra parts or user approval. Judge answerability of the accumulated interviewer turn (pending plus this contribution), not the isolated clip. A final fragment such as "with zero downtime" can complete "How would you migrate it". Never use the active question alone to turn a candidate answer into a question.
 relation is current or new. current means it belongs to the pending scenario or is a genuine same-topic follow-up/constraint to the active question. new means a separate topic/task. The first standalone question is new. Another question mark alone does not make a new topic.
-transcript is a zero-based index of one supplied transcript. span is null to select the whole transcript. For mixed question/answer speech, span is {"start":4,"end":10}: zero-based word indices, start inclusive and end exclusive, taken from indexedWords for that transcript. Never copy or rewrite text into span. Select only the contiguous questioner words. No rewriting, answering, invented words, or copying pending/active text. If you cannot safely separate mixed speech, hold. Compare the available transcripts; choose the clearest faithful one.
+transcript is a zero-based index of one supplied transcript. span is null to select the whole transcript. For mixed question/answer speech, span is {"start":4,"end":10}: zero-based word indices, start inclusive and end exclusive, taken from indexedWords for that transcript. Never copy or rewrite text into span. Select only the contiguous questioner words. No rewriting, answering, invented words, or copying pending/active text. For "Why do you think ECS is cheaper? Because...", select only words through the question mark. If you cannot safely separate mixed speech, ignore. Compare the available transcripts; choose the clearest faithful one.
 Examples: "Suppose payment succeeds but delivery fails" => hold. "How do we keep those services consistent?" => question/current. "And what if we retry?" => question/current. "What is your strong zone?" => question/new. "Out of all of these things, what do you work regularly on?" => question/current if following a skills question. "I work on tasks and automation" => ignore.
 The default for a candidate's declarative explanation is ignore, NOT question or hold. Do not treat the presence of technical words (CI/CD, tasks, containers, Vault) as evidence of a question.
 A question with alternative choices is answerable; an absent spoken "on" or filler between alternatives does not make it unfinished.
@@ -172,6 +195,7 @@ export function parseTurnDecision(
         return uncertain('Invalid judge word range')
       text = words.slice(span.start as number, span.end as number).join(' ')
     }
+    text = questionOnly(text)
     if (!text)
       return uncertain(
         'Judge wording was not present in the selected transcript'
@@ -185,12 +209,33 @@ export function parseTurnDecision(
       return uncertain(
         'Judge wording mixed a candidate answer with a question; select only the question word range'
       )
-    if (candidateStatement(text))
+    if (candidateStatement(text) || chatterReason(text))
       return {
         action: 'skip',
         complete: false,
         text: '',
         reason: 'Candidate statement',
+      }
+    // A model's hold label cannot establish interviewer ownership by itself.
+    // Unanchored explanations must not become background for the next question.
+    if (
+      d.intent === 'hold' &&
+      !hasQuestionCue(text) &&
+      !scenarioSetup(text) &&
+      !(d.relation === 'current' && context.pending) &&
+      !(
+        d.relation === 'current' &&
+        context.active &&
+        /^(?:and |but )?(?:with|without|using|for|if|when|where|assuming)\b/i.test(
+          text
+        )
+      )
+    )
+      return {
+        action: 'skip',
+        complete: false,
+        text: '',
+        reason: 'Unanchored declarative speech',
       }
     // A valid schema is not evidence that declarative speech is answerable.
     if (

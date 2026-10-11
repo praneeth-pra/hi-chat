@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=conversation-v1',
+        'protocol=conversation-v2',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
@@ -227,6 +227,7 @@ export function SpeakerTranscriptionProvider() {
       }
     })
     const session = startSpeakerCapture({
+      onTrace: reportClip,
       onStatus: (status) => {
         setStatus(status)
         turns.audioActivity(status === 'hearing')

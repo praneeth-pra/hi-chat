@@ -92,6 +92,66 @@ describe('speaker intent protocol', () => {
       text: words,
     })
   })
+  it('does not buffer candidate explanations or reassurance as scenario context', () => {
+    const context = { ...empty, active: 'Why did you choose EKS?' }
+    for (const text of [
+      'I chose EKS because it supports our workload.',
+      'EKS supports our workload better.',
+      'Main project here is billable',
+      'I’m not able to think of one',
+      'No worries',
+    ]) {
+      expect(
+        parseTurnDecision(reply('hold', 'current').reply, [text], context)
+      ).toMatchObject({ action: 'skip' })
+    }
+    expect(
+      parseTurnDecision(
+        reply('hold').reply,
+        ['Suppose ECS has fewer tasks'],
+        context
+      )
+    ).toMatchObject({ action: 'new-question', complete: false })
+  })
+  it('extracts only the question when the model includes an explicit answer after it', () => {
+    const text =
+      'Why do you think ECS is cheaper? Because there is no control plane fee.'
+    expect(parseTurnDecision(reply('question').reply, [text])).toMatchObject({
+      action: 'new-question',
+      complete: true,
+      text: 'Why do you think ECS is cheaper?',
+    })
+    expect(
+      parseTurnDecision(
+        reply('question', 'new', 0, { start: 0, end: text.split(/\s+/).length })
+          .reply,
+        [text]
+      ).text
+    ).toBe('Why do you think ECS is cheaper?')
+  })
+  it('does not prepend the candidate answer to the next explicit scenario question', async () => {
+    vi.useFakeTimers()
+    vi.mocked(requestSpeakerJudge)
+      .mockResolvedValueOnce(reply('hold'))
+      .mockResolvedValueOnce(reply('question'))
+    const onCommit = vi.fn()
+    const turns = createQuestionTurns({
+      judge: (texts, context) =>
+        judgeSpeakerTurn(texts, context, { apiKey: 'test' }),
+      onCommit,
+      onDraft: vi.fn(),
+      onSuggest: vi.fn(),
+    })
+    await turns.accept(['EKS supports our workload better.'])
+    await turns.accept([
+      'Can you tell me a scenario where ECS will be better suited?',
+    ])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit.mock.calls[0][0].text).toBe(
+      'Can you tell me a scenario where ECS will be better suited?'
+    )
+    turns.stop()
+  })
   it('holds a paused scenario without inventing a question', () => {
     expect(
       parseTurnDecision(reply('hold').reply, ['Suppose three services fail.'])
