@@ -61,6 +61,9 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: http://localhost:8081' --data '{"line":"dictation grok: 10 ms after stop, 6 chars"}' http://localhost:8081/api/speech-log)" = 204
           # Groq pass-through reaches api.groq.com (no key, so Groq itself answers 401)
           curl -s -b "$C" http://localhost:8081/api/groq/openai/v1/models | grep -qi 'api key'
+          # Search stays behind login, and an unset Exa key is explicitly reported.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/search)" = 401
+          curl -sf -b "$C" -H 'Content-Type: application/json' --data '{"query":"What is AWS ECS?"}' http://localhost:8081/api/search | grep -q '"status":"unconfigured"'
           # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac

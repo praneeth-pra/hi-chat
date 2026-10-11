@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 
 import HeaderPage from '@/containers/HeaderPage'
+import { ThreadActions } from '@/containers/ThreadActions'
 import { useThreads } from '@/hooks/useThreads'
 import ChatInput from '@/containers/ChatInput'
 import { useShallow } from 'zustand/react/shallow'
@@ -236,7 +237,7 @@ function ThreadDetail() {
           <div className="flex-1 flex justify-center">
             {threadId === TEMPORARY_CHAT_ID && <TemporaryChatIndicator t={t} />}
           </div>
-          <div></div>
+          {thread && <ThreadActions key={thread.id} thread={thread} />}
         </div>
       </HeaderPage>
       <div className="flex flex-col h-[calc(100%-40px)]">

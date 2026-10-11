@@ -1,0 +1,31 @@
+import { useState } from 'react'
+import { IconTrash } from '@tabler/icons-react'
+import { useThreads } from '@/hooks/useThreads'
+import { DeleteThreadDialog } from './dialogs/DeleteThreadDialog'
+import { ChatQuestionsDialog } from './dialogs/ChatQuestionsDialog'
+
+export function ThreadActions({ thread }: { thread: Thread }) {
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const deleteThread = useThreads((state) => state.deleteThread)
+  return (
+    <div className="flex items-center gap-1">
+      <ChatQuestionsDialog key={thread.id} thread={thread} />
+      <button
+        type="button"
+        title="Delete this chat"
+        aria-label="Delete this chat"
+        onClick={() => setDeleteOpen(true)}
+        className="size-8 flex items-center justify-center rounded hover:bg-main-view-fg/10 hover:text-destructive cursor-pointer"
+      >
+        <IconTrash size={18} />
+      </button>
+      <DeleteThreadDialog
+        thread={thread}
+        onDelete={deleteThread}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        withoutTrigger
+      />
+    </div>
+  )
+}

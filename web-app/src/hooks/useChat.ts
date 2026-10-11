@@ -1,4 +1,11 @@
 import { raceAutoAnswers } from '@/lib/autoRace'
+import {
+  getWebEvidence,
+  buildAccuracyQuery,
+  verifyAccuracyCompletion,
+  type WebEvidence,
+  type AccuracyReview,
+} from '@/lib/accuracyReview'
 import { useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { usePrompt } from './usePrompt'
@@ -663,6 +670,7 @@ export const useChat = () => {
 
       const messages = getMessages(activeThread.id)
       const abortController = new AbortController()
+      let accuracyRequested = false
       setAbortController(activeThread.id, abortController)
       updateStreamingContent(emptyThreadContent)
       updatePromptProgress(undefined)
@@ -821,6 +829,7 @@ export const useChat = () => {
         }
 
         // let assistantLoopSteps = 0
+        let webEvidence: Promise<WebEvidence> | undefined
 
         while (
           !isCompleted &&
@@ -862,6 +871,21 @@ export const useChat = () => {
           }
           const autoState = useChatAuto.getState()
           if (autoState.auto) streamTiming.autoMode = autoState.mode
+          if (autoState.auto && autoState.mode === 'accuracy') {
+            accuracyRequested = true
+            useAppState.getState().setAccuracyStatus({
+              threadId: activeThread.id,
+              phase: 'drafting',
+            })
+            if (!webEvidence) {
+              webEvidence = getWebEvidence(
+                buildAccuracyQuery(message, getMessages(activeThread.id)),
+                abortController.signal
+              )
+              // Search overlaps drafting; cancellation must not reject unobserved.
+              void webEvidence.catch(() => {})
+            }
+          }
           // Auto's first-answer race requires streaming; manual models retain their setting.
           const streamReply =
             autoState.auto || currentAssistant?.parameters?.stream !== false
@@ -957,7 +981,7 @@ export const useChat = () => {
             return res as unknown as AsyncIterable<chatCompletionChunk>
           }
           let winnerIndex = 0
-          const completion =
+          let completion =
             autoState.auto &&
             streamReply &&
             tries.some(
@@ -1025,11 +1049,39 @@ export const useChat = () => {
 
           if (!completion) throw new Error('No completion received')
           const winner = tries[winnerIndex]
+          let accuracyReview: AccuracyReview | undefined
+          if (autoState.auto && autoState.mode === 'accuracy') {
+            const checked = await verifyAccuracyCompletion(
+              completion,
+              activeThread,
+              requestMessages,
+              useModelProvider.getState().providers,
+              winner?.provider.provider ?? activeProvider.provider,
+              abortController.signal,
+              webEvidence!,
+              (phase) =>
+                useAppState
+                  .getState()
+                  .setAccuracyStatus({ threadId: activeThread.id, phase })
+            )
+            completion = checked.completion
+            accuracyReview = checked.review
+            // Draft readiness is not the time the verified answer becomes visible.
+            if (accuracyReview) {
+              streamTiming.firstChunkAt = undefined
+              streamTiming.firstAnswerAt = undefined
+              streamTiming.hiddenAtFirstChunk = undefined
+            }
+            useAppState.getState().setAccuracyStatus(undefined)
+          }
           const winnerTrack = winner
             ? attemptTracks.get(`${winner.provider.provider}:${winner.model}`)
             : undefined
           if (winnerTrack?.sent) track.sent = winnerTrack.sent
-          const answered = track.sent?.model ?? winner?.model
+          const answered =
+            accuracyReview && accuracyReview.verdict !== 'approved'
+              ? accuracyReview.model
+              : (track.sent?.model ?? winner?.model)
           const currentCall: ChatCompletionMessageToolCall | null = null
           const toolCalls: ChatCompletionMessageToolCall[] = []
           const timeToFirstToken = Date.now()
@@ -1143,7 +1195,24 @@ export const useChat = () => {
               model: answered,
             }
           )
-          console.info('[chat] reply timings', timings)
+          console.info(
+            '[chat] reply timings',
+            timings,
+            ...(accuracyReview
+              ? [
+                  {
+                    accuracy_review: {
+                      verifier: accuracyReview.verifier,
+                      verdict: accuracyReview.verdict,
+                      draft_ms: accuracyReview.draftMs,
+                      review_ms: accuracyReview.reviewMs,
+                      web_status: accuracyReview.webStatus,
+                      source_count: accuracyReview.sources.length,
+                    },
+                  },
+                ]
+              : [])
+          )
 
           // Create a final content object for adding to the thread
           let finalContent = newAssistantThreadContent(
@@ -1154,6 +1223,7 @@ export const useChat = () => {
               assistant: withoutDocuments(currentAssistant),
               modelId: answered ?? selectedModel?.id,
               timings,
+              ...(accuracyReview ? { accuracyReview } : {}),
             }
           )
 
@@ -1324,6 +1394,12 @@ export const useChat = () => {
           }
         }
       } finally {
+        if (
+          useAppState.getState().accuracyStatus?.threadId === activeThread.id
+        ) {
+          useAppState.getState().setAccuracyStatus(undefined)
+        }
+        if (accuracyRequested) abortController.abort()
         updateLoadingModel(false)
         updateStreamingContent(undefined)
         updatePromptProgress(undefined)

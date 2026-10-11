@@ -11,18 +11,18 @@
 --   X                       jump back: the pointer returns to where it was last
 --                           seen off Jan, and the window there gets focus
 --                           (Z and X work independently)
---   fn + Return             send in Jan without leaving the app you're in:
+--   fn + Right              send in Jan without leaving the app you're in:
 --                           what's typed in the prompt box
 --   tap Left Control        dictate in Jan: starts recording your mic; tap
 --                           again to stop, transcribe and send it. Control held with
 --                           another key or a click works as usual.
 --   tap Left Option         toggle background typing into Jan's prompt box;
 --                           the main app stays active. Escape also turns it off.
---                           Enter adds a line; fn + Return sends the prompt.
+--                           Enter adds a line; fn + Right sends the prompt.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
--- arrows and fn + Left / Right remain available to the app in front.
+-- arrows and fn + Left remain available to the app in front.
 -- Option held with another key retains its normal modifier behavior.
 --
 -- Settings you may want to change:
@@ -88,7 +88,7 @@ local function start(dir, speed, tap)
   if active then stop(active) end
   local win = chatWindow()
   if not win then
-    hs.alert.show("Jan window not found")
+    print("[jan remote] Jan window not found")
     return
   end
   local f = win:frame()
@@ -128,7 +128,7 @@ bind({ "shift" }, "pageup", 1, FAST_SPEED, FAST_TAP)
 local function toggle(key, mods)
   local win = typingTarget and typingTarget.win or chatWindow()
   if not win then
-    hs.alert.show("Jan window not found")
+    print("[jan remote] Jan window not found")
     return
   end
   hs.eventtap.keyStroke(mods or {}, key, 20000, win:application())
@@ -138,21 +138,31 @@ end
 hs.hotkey.bind({}, "pageup", function() toggle("f16", { "shift" }) end)
 hs.hotkey.bind({}, "pagedown", function() toggle("f17", { "shift" }) end)
 
--- fn + Return: sends F15 to Jan, the same way as the toggles. Jan sends the
--- typed text in the prompt box. The key
--- is swallowed, so the app in front never sees it. Most Macs send fn + Return
--- as the keypad Enter key.
+-- fn + Right sends F15 to Jan. Track the physical fn modifier separately:
+-- an arrow/End event's function flag alone must never turn plain arrows into hotkeys.
 local RETURN, PAD_ENTER = hs.keycodes.map["return"], hs.keycodes.map["padenter"]
+local FN_KEY = hs.keycodes.map["fn"] or 63
+local RIGHT, END_KEY = hs.keycodes.map["right"], hs.keycodes.map["end"]
+local sendFnDown, sendKeyHeld = false, nil
 
--- Global for the same reason as scrollTap below
-enterTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
-  local key = e:getKeyCode()
-  if not e:getFlags().fn or (key ~= RETURN and key ~= PAD_ENTER) then return false end
-  if e:getProperty(hs.eventtap.event.properties.keyboardEventAutorepeat) ~= 0 then return true end
+sendTap = hs.eventtap.new({ hs.eventtap.event.types.flagsChanged, hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp }, function(e)
+  local kind, key, flags = e:getType(), e:getKeyCode(), e:getFlags()
+  if kind == hs.eventtap.event.types.flagsChanged then
+    if key == FN_KEY then sendFnDown = flags.fn == true end
+    return false
+  end
+  if kind == hs.eventtap.event.types.keyUp then
+    if key == sendKeyHeld then sendKeyHeld = nil return true end
+    return false
+  end
+  if not sendFnDown or (key ~= RIGHT and key ~= END_KEY)
+      or flags.cmd or flags.ctrl or flags.alt or flags.shift then return false end
+  if sendKeyHeld or e:getProperty(hs.eventtap.event.properties.keyboardEventAutorepeat) ~= 0 then return true end
+  sendKeyHeld = key
   hs.timer.doAfter(0, function() toggle("f15") end)
   return true
 end)
-enterTap:start()
+sendTap:start()
 
 -- Left Control on its own, pressed and let go within TAP_SECONDS: sends F14
 -- to Jan, which starts dictation, or stops it and sends the text. Control
@@ -287,7 +297,7 @@ typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
     stopTyping("Jan typing stopped — select Hi-chat again")
     return true -- do not leak this character into the main app
   end
-  if flags.fn or passKeys[key] then return false end -- keep existing fn helpers
+  if flags.fn or passKeys[key] or (sendFnDown and (key == RIGHT or key == END_KEY)) then return false end -- keep fn helpers
   if key == typingKeys.tab or flags.ctrl or (flags.cmd and not editCommands[key]) then
     stopTyping("Jan typing OFF")
     return false -- system/app commands still reach the main window
@@ -476,7 +486,6 @@ local function jumpToJan()
   local win = chatWindow()
   if not win then
     print("[jan jump] Z: no Jan window found (is the Jan app open?)")
-    hs.alert.show("Jan window not found")
     return
   end
   local here = hs.mouse.absolutePosition()
@@ -568,7 +577,7 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, enterTap, dictateTap, typingTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()
