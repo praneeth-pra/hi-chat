@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
 import {
-  jumpToCode,
+  stepCode,
   listenForSpeakerKeys,
   stripFunctionKeyChars,
   takeDictationPaste,
@@ -195,31 +195,47 @@ describe('speaker remote keys', () => {
     box.remove()
   })
 
-  it('Shift + F16 jumps to the last code block, then to earlier ones', () => {
+  it('Shift + F16 / F17 step to the code block above / below', () => {
     const scrolled: string[] = []
     Element.prototype.scrollIntoView = function (this: Element) {
       scrolled.push(this.id)
     }
-    for (const id of ['one', 'two', 'three']) {
+    // Blocks at 100, 300 and 500 px; the chat's top line is at 16 px
+    const tops: Record<string, number> = { one: 100, two: 300, three: 500 }
+    let offset = 0
+    for (const id of Object.keys(tops)) {
       const block = document.createElement('div')
       block.id = id
       block.setAttribute('data-code-block', '')
+      block.getBoundingClientRect = () =>
+        ({ top: tops[id] - offset }) as DOMRect
       document.body.appendChild(block)
     }
     const stop = listenForSpeakerKeys()
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'F16', shiftKey: true })
-    )
+    const press = (key: string) =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key, shiftKey: true })
+      )
+
+    // Scrolled to the bottom: everything is above
+    offset = 1000
+    press('F16')
     expect(scrolled).toEqual(['three'])
     stop()
 
-    jumpToCode(100_000)
-    jumpToCode(101_000)
-    jumpToCode(102_000)
-    jumpToCode(103_000)
-    // Later on, it starts from the last one again
-    jumpToCode(200_000)
-    expect(scrolled).toEqual(['three', 'three', 'two', 'one', 'one', 'three'])
+    // Quick presses keep stepping from where it was heading
+    stepCode(-1, 10_000)
+    stepCode(-1, 10_500)
+    stepCode(-1, 10_900)
+    expect(scrolled).toEqual(['three', 'three', 'two', 'one'])
+
+    // Later on, from the screen: block two at the top, so down goes to three
+    offset = 284
+    stepCode(1, 20_000)
+    expect(scrolled.at(-1)).toBe('three')
+    offset = 284
+    stepCode(-1, 30_000)
+    expect(scrolled.at(-1)).toBe('one')
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
   })
 })

@@ -27,10 +27,12 @@ export const SUGGESTION_KEY = 'F15'
 export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
 /**
- * Shift + F16 scrolls to the last code block in the chat; pressed again
- * within a few seconds, to the one before it. Hammerspoon sends it on a tap of Right Option.
+ * Shift + F16 scrolls to the code block above, Shift + F17 to the one below,
+ * so pressing one again steps on through the chat's code. Hammerspoon sends
+ * them on fn + Up and fn + Down.
  */
-export const LAST_CODE_KEY = 'Shift+F16'
+export const CODE_UP_KEY = 'Shift+F16'
+export const CODE_DOWN_KEY = 'Shift+F17'
 
 let scenarioSender: (() => string | null) | null = null
 
@@ -57,11 +59,28 @@ function sendScenario(): boolean {
   return true
 }
 
-const CODE_AGAIN_MS = 5000
-let codeJump = { at: 0, index: -1 }
+/** A press within this long of the last continues from where it was going. */
+const CODE_STEP_MS = 1000
+let codeStep: { at: number; target: HTMLElement } | null = null
 
-/** Scrolls to the last code block, or the one before the last jump's. */
-export function jumpToCode(now = Date.now()): boolean {
+/** Top of the area the chat scrolls in, as on screen. */
+function scrollerTop(el: HTMLElement): number {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p)
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      p.scrollHeight > p.clientHeight
+    )
+      return p.getBoundingClientRect().top
+  }
+  return 0
+}
+
+/**
+ * Scrolls to the next code block above (-1) or below (1) the one at the top
+ * of the chat; returns true.
+ */
+export function stepCode(dir: -1 | 1, now = Date.now()): boolean {
   const blocks = Array.from(
     document.querySelectorAll<HTMLElement>('[data-code-block]')
   )
@@ -69,13 +88,29 @@ export function jumpToCode(now = Date.now()): boolean {
     toast('No code in this chat')
     return true
   }
-  const since = now - codeJump.at
-  const again =
-    since >= 0 && since < CODE_AGAIN_MS && codeJump.index < blocks.length
-  const index = again ? Math.max(0, codeJump.index - 1) : blocks.length - 1
-  if (again && index === codeJump.index) toast('This is the first code block')
-  codeJump = { at: now, index }
-  blocks[index].scrollIntoView({ block: 'start', behavior: 'smooth' })
+  // Pressed again while still scrolling: step from where it was heading
+  const from =
+    codeStep && now >= codeStep.at && now - codeStep.at < CODE_STEP_MS
+      ? blocks.indexOf(codeStep.target)
+      : -1
+  let target: HTMLElement | undefined
+  if (from >= 0) {
+    target = blocks[from + dir]
+  } else {
+    // Where a block sits once scrolled to (scroll-mt-4 leaves 16 px above)
+    const line = scrollerTop(blocks[0]) + 16
+    const top = (b: HTMLElement) => b.getBoundingClientRect().top
+    target =
+      dir < 0
+        ? blocks.filter((b) => top(b) < line - 4).pop()
+        : blocks.find((b) => top(b) > line + 4)
+  }
+  if (!target) {
+    toast(dir < 0 ? 'No code above' : 'No code below')
+    return true
+  }
+  codeStep = { at: now, target }
+  target.scrollIntoView({ block: 'start', behavior: 'smooth' })
   return true
 }
 
@@ -142,7 +177,8 @@ export function handleSpeakerKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === SCENARIO_KEY) return sendScenario()
-  if (key === LAST_CODE_KEY) return jumpToCode()
+  if (key === CODE_UP_KEY) return stepCode(-1)
+  if (key === CODE_DOWN_KEY) return stepCode(1)
   if (key === DICTATION_TOGGLE_KEY) {
     toggleDictation()
     return true
