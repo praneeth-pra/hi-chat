@@ -71,10 +71,60 @@ describe('structured turn judgement', () => {
       ).complete
     ).toBe(false)
   })
-  it('disagreements and a failed second judge require confirmation', async () => {
+  it('sends a valid primary decision without asking or waiting for a second judge', async () => {
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(
+      result('question', 'How do we recover?')
+    )
+    const d = await judgeSpeakerTurn(['How do we recover?'], context, {
+      apiKey: 'test',
+      judge: 'groq-20b',
+      secondJudge: 'groq-120b',
+    })
+    expect(d.action).toBe('question')
+    expect(d.complete).toBe(true)
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
+  it('uses the second judge to recover an unclear primary decision', async () => {
     vi.mocked(requestSpeakerJudge)
+      .mockResolvedValueOnce(result('suggest', 'How do we recover?', false))
       .mockResolvedValueOnce(result('question', 'How do we recover?'))
-      .mockResolvedValueOnce(result('skip', ''))
+    const d = await judgeSpeakerTurn(['How do we recover?'], context, {
+      apiKey: 'test',
+      judge: 'groq-20b',
+      secondJudge: 'groq-120b',
+    })
+    expect(d.action).toBe('question')
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(2)
+  })
+  it('does not promote a skip when a second judge is configured', async () => {
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(result('skip', ''))
+    expect(
+      (
+        await judgeSpeakerTurn(['Can you open a compiler?'], context, {
+          apiKey: 'test',
+          judge: 'groq-20b',
+          secondJudge: 'groq-120b',
+        })
+      ).action
+    ).toBe('skip')
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
+  it('routes to an available provider when the saved selection has no key', async () => {
+    vi.mocked(requestSpeakerJudge).mockResolvedValue(
+      result('question', 'How do we recover?')
+    )
+    await judgeSpeakerTurn(['How do we recover?'], context, {
+      judge: 'cerebras-120b',
+      anthropic: { apiKey: 'test' },
+    })
+    expect(vi.mocked(requestSpeakerJudge).mock.calls[0][3].judge).toBe(
+      'claude-haiku'
+    )
+  })
+  it('can recover a failed primary request through a configured second judge', async () => {
+    vi.mocked(requestSpeakerJudge)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(result('question', 'How do we recover?'))
     expect(
       (
         await judgeSpeakerTurn(['How do we recover?'], context, {
@@ -83,17 +133,29 @@ describe('structured turn judgement', () => {
           secondJudge: 'groq-120b',
         })
       ).action
-    ).toBe('suggest')
-    vi.mocked(requestSpeakerJudge)
-      .mockResolvedValueOnce(result('question', 'How do we recover?'))
-      .mockRejectedValueOnce(new Error('offline'))
+    ).toBe('question')
+  })
+  it('selects a whole transcript without asking the model to repeat it', () => {
     expect(
-      (
-        await judgeSpeakerTurn(['How do we recover?'], context, {
-          apiKey: 'test',
-          judge: 'groq-20b',
-          secondJudge: 'groq-120b',
-        })
+      parseTurnDecision(
+        JSON.stringify({
+          action: 'question',
+          complete: true,
+          transcript: 1,
+          reason: 'complete',
+        }),
+        ['How we cover?', 'How do we recover?']
+      ).text
+    ).toBe('How do we recover?')
+    expect(
+      parseTurnDecision(
+        JSON.stringify({
+          action: 'question',
+          complete: true,
+          transcript: 5,
+          reason: 'complete',
+        }),
+        ['How do we recover?']
       ).action
     ).toBe('suggest')
   })
@@ -113,5 +175,20 @@ describe('structured turn judgement', () => {
         })
       ).action
     ).toBe('suggest')
+  })
+  it('does not retry an unclear secondary after a failed primary', async () => {
+    vi.mocked(requestSpeakerJudge)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(result('suggest', 'How do we recover?', false))
+    expect(
+      (
+        await judgeSpeakerTurn(['How do we recover?'], context, {
+          apiKey: 'test',
+          judge: 'groq-20b',
+          secondJudge: 'groq-120b',
+        })
+      ).action
+    ).toBe('suggest')
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(2)
   })
 })

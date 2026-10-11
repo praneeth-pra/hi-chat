@@ -27,6 +27,8 @@ export function looksLikeQuestion(text: string): boolean {
 export type GroqConfig = {
   apiKey?: string
   baseUrl?: string
+  /** Structured speaker-turn decisions; legacy clip checks remain plain text. */
+  json?: boolean
   /** With a key, the check runs on Cerebras first and Groq is the fallback. */
   cerebras?: { apiKey?: string; baseUrl?: string }
   /** For the Claude judges; Settings > Model Providers > Anthropic. */
@@ -537,6 +539,7 @@ export async function requestSpeakerJudge(
       body: JSON.stringify({
         model,
         temperature: 0,
+        ...(groq.json ? { response_format: { type: 'json_object' } } : {}),
         max_tokens:
           // Room for a joined question ("YES: ...") and the reasoning
           outputTokens +
