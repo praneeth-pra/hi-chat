@@ -162,7 +162,8 @@ export function SpeakerTranscriptionProvider() {
         }),
       onDraft: (draft) =>
         useSpeakerTranscription.getState().setPendingQuestion(draft),
-      onSuggest: (text) => useSpeakerTranscription.getState().suggest(text),
+      onSuggest: (text, reason) =>
+        useSpeakerTranscription.getState().suggest(text, reason),
       onCommit: (turn) => {
         useSpeakerTranscription
           .getState()
@@ -212,6 +213,7 @@ export function SpeakerTranscriptionProvider() {
     const session = startSpeakerCapture({
       onStatus: (status) => {
         setStatus(status)
+        turns.audioActivity(status === 'hearing')
         turns.activity(status === 'hearing' || status === 'transcribing')
       },
       accept: async (texts, engines, engineWords = [], turn = null) => {
@@ -240,7 +242,10 @@ export function SpeakerTranscriptionProvider() {
           turnListener.push(samples)
         }
       },
-      checkTurn: () => getSmartTurn() ? turnListener?.check() ?? Promise.resolve(null) : Promise.resolve(null),
+      checkTurn: () =>
+        getSmartTurn()
+          ? (turnListener?.check() ?? Promise.resolve(null))
+          : Promise.resolve(null),
     })
     return () => {
       session.stop()
@@ -284,13 +289,18 @@ export function SpeakerPendingQuestion() {
       <div className="font-medium">
         {pendingQuestion.manual
           ? 'Waiting for you to send'
-          : pendingQuestion.complete
-            ? 'Question ready'
-            : 'Building question…'}
+          : pendingQuestion.uncertain
+            ? 'Waiting for clearer speech…'
+            : pendingQuestion.complete
+              ? 'Sending automatically…'
+              : 'Building question…'}
       </div>
       <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">
         {pendingQuestion.text}
       </p>
+      {pendingQuestion.uncertain && (
+        <p className="mt-1 text-main-view-fg/60">{pendingQuestion.reason}</p>
+      )}
       <div className="mt-2 flex gap-3">
         <button
           type="button"
@@ -320,8 +330,13 @@ export function SpeakerPendingQuestion() {
  * model picker.
  */
 export function SpeakerSuggestions() {
-  const { enabled, suggestions, acceptSuggestion, dismissSuggestion } =
-    useSpeakerTranscription()
+  const {
+    enabled,
+    suggestions,
+    suggestionReasons,
+    acceptSuggestion,
+    dismissSuggestion,
+  } = useSpeakerTranscription()
   if (isPlatformTauri() || !enabled || suggestions.length === 0) return null
 
   return (
@@ -330,16 +345,19 @@ export function SpeakerSuggestions() {
         <div
           key={text}
           data-test-id="speaker-suggestion"
-          className="h-7 max-w-full flex items-center rounded-sm text-xs bg-accent/10 text-accent"
+          className="min-h-7 max-w-full flex items-center rounded-sm text-xs bg-accent/10 text-accent"
         >
           <button
             type="button"
-            title={text}
+            title={`${suggestionReasons[text] ?? 'Speech needs clarification'}: ${text}`}
             onClick={() => acceptSuggestion(text)}
             className="h-full min-w-0 px-2 truncate hover:bg-accent/15 rounded-l-sm"
           >
             {text}
           </button>
+          <span className="px-2 text-main-view-fg/60">
+            {suggestionReasons[text] ?? 'Speech needs clarification'}
+          </span>
           <button
             type="button"
             aria-label="Dismiss suggestion"

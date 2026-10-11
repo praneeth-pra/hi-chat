@@ -33,9 +33,10 @@ yarn dev:web-app        # http://localhost:3001
 
 Speaker capture assembles a question before sending it. Scenario/background
 clips remain in a pending preview across pauses, including long pauses. A
-complete question waits 500 ms after transcription and judgement finish and
-capture becomes idle, so an immediate continuation can join it. Optional Smart
-turn detection extends this settling period to 5 seconds when the audio sounds
+complete question sends automatically once processing finishes and capture is
+idle. Its 500 ms settling window overlaps transcription and judgement instead
+of adding another delay after them, so an immediate continuation can join it.
+Optional Smart turn detection extends this settling period to 1 second when the audio sounds
 unfinished; it does not make incomplete scenarios expire into automatic sends.
 
 Use **Send now** (or F16) to commit the pending question, **Keep listening** to
@@ -47,9 +48,11 @@ starts a new question. Typing a question, switching chats or disabling Speaker
 clears pending automatic work. Dictation retains its separate microphone flow.
 
 Automatic assembly needs a configured judgement provider. Missing credentials,
-provider failures, conflicting judges or malformed decisions produce manual
-suggestions rather than guessed questions. The turn judge uses up to three
-transcripts in one request and keeps conversation context consistent across
+provider failures or malformed decisions produce manual suggestions with visible reasons rather than guessed questions. The primary
+judge controls automatic sending; an optional second judge is used only to
+recover an unclear decision. Temporary uncertainty is reassessed when clearer
+speech completes the question; only Keep listening creates an explicit hold.
+The turn judge uses up to three transcripts in one request and keeps conversation context consistent across
 provider fallbacks. The old clip-filter benchmarks in Settings are labelled as
 legacy comparisons; they do not measure the new turn coordinator or audio.
 

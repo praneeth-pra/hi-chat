@@ -934,7 +934,7 @@ function General() {
               />
               <CardItem
                 title="Second judge"
-                description="Asks a second model about every clip at the same time. When they agree, that decides; when one would send it and the other wouldn't, the clip shows as a chip next to the speaker button, to send with one click (or F15). Off sends what the first judge decides."
+                description="Automatic questions use the primary judge immediately. The second judge is consulted only when its decision is unclear; it does not delay or veto a clear question. Legacy clip benchmarks still compare both judges."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -968,11 +968,11 @@ function General() {
               />
               <CardItem
                 title="Question turns"
-                description="Scenario fragments stay pending across pauses. Complete questions settle briefly before sending; related follow-ups update the same question. Use Send now, Keep listening or Discard above the chat box."
+                description="Scenario fragments stay pending across pauses. Complete questions send automatically; settling overlaps transcription and judgement. Related follow-ups update the same question. Use Send now, Keep listening or Discard above the chat box."
               />
               <CardItem
                 title="Smart turn detection"
-                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn waits up to 5 s for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled."
+                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn uses up to 1 s of settling for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled."
                 actions={
                   <Switch
                     checked={smartTurn}

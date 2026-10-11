@@ -90,7 +90,8 @@ type SpeakerTranscriptionState = {
    * with one tap. Not kept after a reload.
    */
   suggestions: string[]
-  suggest: (text: string) => void
+  suggestionReasons: Record<string, string>
+  suggest: (text: string, reason?: string) => void
   /** Sends the suggestion (through the listener, so it counts as sent). */
   acceptSuggestion: (text: string) => void
   dismissSuggestion: (text: string) => void
@@ -163,6 +164,7 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
           revision: null,
           lastSent: null,
           suggestions: [],
+          suggestionReasons: {},
           deliveryEpoch: state.deliveryEpoch + 1,
         })),
       coding: false,
@@ -193,8 +195,14 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
       lastSent: null,
       setLastSent: (lastSent) => set({ lastSent }),
       suggestions: [],
-      suggest: (text) =>
+      suggestionReasons: {},
+      suggest: (text, reason = 'Speech needs clarification') =>
         set((state) => ({
+          suggestionReasons: Object.fromEntries(
+            [text, ...state.suggestions.filter((t) => t !== text)]
+              .slice(0, MAX_SUGGESTIONS)
+              .map((t) => [t, t === text ? reason : state.suggestionReasons[t]])
+          ),
           suggestions: [
             text,
             ...state.suggestions.filter((t) => t !== text),
@@ -208,6 +216,9 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
       dismissSuggestion: (text) =>
         set((state) => ({
           suggestions: state.suggestions.filter((t) => t !== text),
+          suggestionReasons: Object.fromEntries(
+            Object.entries(state.suggestionReasons).filter(([t]) => t !== text)
+          ),
         })),
     }),
     {

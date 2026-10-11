@@ -89,4 +89,17 @@ describe('speaker turn delivery state', () => {
     expect([sends, holds, discards]).toEqual([1, 1, 1])
     cleanup()
   })
+  it('bounds suggestion reasons and removes them with their suggestions', () => {
+    const store = useSpeakerTranscription.getState()
+    for (let i = 0; i < 5; i++) store.suggest(`question ${i}`, `reason ${i}`)
+    expect(
+      Object.keys(useSpeakerTranscription.getState().suggestionReasons)
+    ).toHaveLength(3)
+    store.dismissSuggestion('question 4')
+    expect(
+      useSpeakerTranscription.getState().suggestionReasons['question 4']
+    ).toBeUndefined()
+    store.resetTurns()
+    expect(useSpeakerTranscription.getState().suggestionReasons).toEqual({})
+  })
 })

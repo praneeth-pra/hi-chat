@@ -4,7 +4,10 @@ import {
   setQuestionControls,
   useSpeakerTranscription,
 } from '@/hooks/useSpeakerTranscription'
-import { SpeakerPendingQuestion } from '../SpeakerListenIndicator'
+import {
+  SpeakerPendingQuestion,
+  SpeakerSuggestions,
+} from '../SpeakerListenIndicator'
 vi.mock('@/lib/platform/utils', () => ({ isPlatformTauri: () => false }))
 const sendNow = vi.fn(),
   keepListening = vi.fn(),
@@ -19,15 +22,13 @@ beforeEach(() => {
 afterEach(() => unregister())
 describe('pending question controls', () => {
   it('previews scenario text and exposes all three controls', () => {
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'Suppose three services fail.',
-        complete: false,
-        manual: false,
-        reason: 'scenario',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'Suppose three services fail.',
+      complete: false,
+      manual: false,
+      reason: 'scenario',
+    })
     render(<SpeakerPendingQuestion />)
     expect(screen.getByText('Building question…')).toBeInTheDocument()
     expect(screen.getByText('Suppose three services fail.')).toBeInTheDocument()
@@ -39,15 +40,13 @@ describe('pending question controls', () => {
     expect(discard).toHaveBeenCalledTimes(1)
   })
   it('keeps manual holds explicit and hides controls when disabled', () => {
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'q',
-        text: 'Scenario',
-        complete: true,
-        manual: true,
-        reason: 'manual',
-      })
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'Scenario',
+      complete: true,
+      manual: true,
+      reason: 'manual',
+    })
     const { rerender } = render(<SpeakerPendingQuestion />)
     expect(screen.getByText('Waiting for you to send')).toBeInTheDocument()
     expect(
@@ -56,5 +55,43 @@ describe('pending question controls', () => {
     act(() => useSpeakerTranscription.getState().setEnabled(false))
     rerender(<SpeakerPendingQuestion />)
     expect(screen.queryByText('Scenario')).not.toBeInTheDocument()
+  })
+  it('makes automatic sending explicit and distinguishes temporary uncertainty from a user hold', () => {
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'q',
+      text: 'How does DNS work?',
+      complete: true,
+      manual: false,
+      reason: 'complete',
+    })
+    const { rerender } = render(<SpeakerPendingQuestion />)
+    expect(screen.getByText('Sending automatically…')).toBeInTheDocument()
+    act(() =>
+      useSpeakerTranscription.getState().setPendingQuestion({
+        id: 'q',
+        text: 'How does DNS work?',
+        complete: false,
+        manual: false,
+        uncertain: true,
+        reason: 'Could not understand the judge decision',
+      })
+    )
+    rerender(<SpeakerPendingQuestion />)
+    expect(screen.getByText('Waiting for clearer speech…')).toBeInTheDocument()
+    expect(
+      screen.getByText('Could not understand the judge decision')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Keep listening' })
+    ).not.toBeDisabled()
+  })
+  it('shows why a transcript requires manual sending', () => {
+    useSpeakerTranscription
+      .getState()
+      .suggest('How does DNS work?', 'No judgement provider configured')
+    render(<SpeakerSuggestions />)
+    expect(
+      screen.getByText('No judgement provider configured')
+    ).toBeInTheDocument()
   })
 })

@@ -1,7 +1,7 @@
 import type { TurnContext, TurnDecision } from './speakerTurnJudge'
 
 export const QUESTION_SETTLE_MS = 500
-export const UNFINISHED_TURN_SETTLE_MS = 5000
+export const UNFINISHED_TURN_SETTLE_MS = 1000
 const MAX_DRAFT_CHARS = 24000
 
 export type QuestionDraft = {
@@ -9,6 +9,7 @@ export type QuestionDraft = {
   text: string
   complete: boolean
   manual: boolean
+  uncertain?: boolean
   reason: string
 }
 export type QuestionCommit = {
@@ -21,7 +22,7 @@ type Options = {
   judge: (texts: string[], context: TurnContext) => Promise<TurnDecision>
   onDraft: (draft: QuestionDraft | null) => void
   onCommit: (turn: QuestionCommit) => void
-  onSuggest: (text: string) => void
+  onSuggest: (text: string, reason?: string) => void
   settleMs?: number
 }
 const normalize = (t: string) =>
@@ -40,6 +41,8 @@ export function createQuestionTurns(options: Options) {
   let recent: string[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   let processing = 0
+  let hearing = false
+  let quietSince: number | null = null
   let busy = false
   let stopped = false
   let epoch = 0
@@ -72,7 +75,11 @@ export function createQuestionTurns(options: Options) {
     cancelTimer()
     if (!draft || stopped || processing || busy) return
     if (manualRequested) return commit()
-    if (draft.complete && !draft.manual) timer = setTimeout(commit, delay)
+    if (draft.complete && !draft.manual && !draft.uncertain) {
+      // Count the quiet interval while transcription/judgement are running.
+      const elapsed = quietSince === null ? 0 : Date.now() - quietSince
+      timer = setTimeout(commit, Math.max(0, delay - elapsed))
+    }
   }
   const apply = (decision: TurnDecision) => {
     const { action, text, complete, reason } = decision
@@ -80,11 +87,12 @@ export function createQuestionTurns(options: Options) {
     if (action === 'suggest') {
       // An uncertain continuation must not let an earlier partial question escape.
       if (draft) {
-        draft.manual = true
+        draft.uncertain = true
+        draft.complete = false
         draft.reason = reason
         publish()
       }
-      options.onSuggest(text)
+      options.onSuggest(text, reason)
       return
     }
     if (draft && action === 'new-question') {
@@ -99,7 +107,7 @@ export function createQuestionTurns(options: Options) {
           relation,
         }
         options.onCommit({ ...active })
-      } else options.onSuggest(draft.text)
+      } else options.onSuggest(draft.text, draft.reason)
       draft = null
     }
     if (!draft) {
@@ -114,9 +122,10 @@ export function createQuestionTurns(options: Options) {
     }
     draft.text = append(draft.text, text)
     draft.complete = complete && action !== 'context'
+    if (draft.complete) draft.uncertain = false
     draft.reason = reason
     if (draft.text.length > MAX_DRAFT_CHARS) {
-      options.onSuggest(draft.text)
+      options.onSuggest(draft.text, draft.reason)
       draft = null
       manualRequested = false
     }
@@ -150,6 +159,12 @@ export function createQuestionTurns(options: Options) {
       queue = run.catch(() => {})
       return run
     },
+    audioActivity(isHearing: boolean) {
+      if (isHearing !== hearing) {
+        hearing = isHearing
+        quietSince = hearing ? null : Date.now()
+      }
+    },
     activity(isBusy: boolean) {
       busy = isBusy
       schedule()
@@ -171,6 +186,7 @@ export function createQuestionTurns(options: Options) {
     discard() {
       epoch++
       manualRequested = false
+      quietSince = null
       cancelTimer()
       draft = null
       publish()
