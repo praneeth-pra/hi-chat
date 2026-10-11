@@ -47,7 +47,7 @@ also uses the dictation queue. Ordinary text pastes remain drafts.
 The model picker offers **Auto · Speed** and **Auto · Accuracy**, using Groq 20B,
 Groq 120B and Cerebras 120B. Speed races all three with Low reasoning. Accuracy
 races the two 120B models with Medium reasoning (20B is draft recovery), requires
-Exa web evidence, then checks the full draft with a 120B reviewer before showing
+Exa Fast web evidence, then checks the full draft with a 120B reviewer before showing
 it. Set `EXA_API_KEY` securely in Railway for Accuracy; missing sources or failed
 review produces an error rather than an unchecked answer. Speed streams the
 first useful winner immediately. Manual model choices remain available. Parallel
@@ -55,7 +55,9 @@ requests and review increase API usage; checking does not guarantee correctness.
 See [Auto modes](docs/auto-modes.md) and [Accuracy setup](docs/accuracy-mode.md).
 
 Answers default to a useful medium length, mostly bullet points, with no tabular
-layouts. Use the header list icon to extract a copyable question list from that
+layouts. Structure adapts to the question instead of repeating fixed sections;
+interview answers favor first-person phrasing without inventing past experience.
+Use the header list icon to extract a copyable question list from that
 chat's prompts on demand. Trash icons in the header/sidebar open confirmation.
 
 ## Hammerspoon shortcuts
