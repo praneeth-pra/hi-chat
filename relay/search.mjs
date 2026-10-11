@@ -1,4 +1,4 @@
-// Optional web evidence. The Exa key is used only here, never returned to clients.
+// Web evidence for Accuracy mode. The Exa key stays here, never in clients.
 export async function searchWeb(
   query,
   { env = process.env, fetchImpl = fetch, signal, timeoutMs = 4500 } = {}
@@ -35,7 +35,7 @@ export async function searchWeb(
         signal: controller.signal,
         body: JSON.stringify({
           query: query.trim(),
-          type: 'auto',
+          type: 'fast',
           numResults: 5,
           contents: { text: { maxCharacters: 2500 } },
         }),

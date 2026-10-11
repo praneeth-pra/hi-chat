@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { searchWeb } from './search.mjs'
 import { createRelay } from './server.mjs'
 
-test('Exa keeps the key server-side, bounds content and rejects unsafe/empty sources', async () => {
+test('Exa uses Fast search, keeps the key server-side and bounds safe source content', async () => {
   let request
   const result = await searchWeb('Which AWS service is cheaper?', {
     env: { EXA_API_KEY: 'private-test-key' },
@@ -25,6 +25,7 @@ test('Exa keeps the key server-side, bounds content and rejects unsafe/empty sou
   })
   assert.equal(request.url, 'https://api.exa.ai/search')
   assert.equal(request.init.headers['x-api-key'], 'private-test-key')
+  assert.equal(JSON.parse(request.init.body).type, 'fast')
   assert.equal(JSON.parse(request.init.body).numResults, 5)
   assert.equal(result.status, 'ready')
   assert.equal(result.sources.length, 1)
