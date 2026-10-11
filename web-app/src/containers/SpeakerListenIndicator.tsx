@@ -342,7 +342,9 @@ export function SpeakerPendingQuestion() {
           : pendingQuestion.uncertain
             ? 'Waiting for clearer speech…'
             : pendingQuestion.complete
-              ? 'Sending automatically…'
+              ? pendingQuestion.relation === 'new'
+                ? 'Sending new question…'
+                : 'Sending automatically…'
               : pendingQuestion.relation === 'update'
                 ? 'Add to this question?'
                 : 'Building question…'}

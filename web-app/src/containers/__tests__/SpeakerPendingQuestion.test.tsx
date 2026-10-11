@@ -70,10 +70,11 @@ describe('pending question controls', () => {
       text: 'How does DNS work?',
       complete: true,
       manual: false,
+      relation: 'new',
       reason: 'complete',
     })
     const { rerender } = render(<SpeakerPendingQuestion />)
-    expect(screen.getByText('Sending automatically…')).toBeInTheDocument()
+    expect(screen.getByText('Sending new question…')).toBeInTheDocument()
     act(() =>
       useSpeakerTranscription.getState().setPendingQuestion({
         id: 'q',
