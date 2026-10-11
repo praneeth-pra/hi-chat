@@ -392,6 +392,11 @@ describe('ChatInput', () => {
       screen.queryByRole('region', { name: 'Speaker recommendations' })
     ).not.toBeInTheDocument()
     expect(sendNow).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId('chat-input'), {
+      key: 'Enter',
+      repeat: true,
+    })
+    expect(sendNow).not.toHaveBeenCalled()
     fireEvent.keyDown(screen.getByTestId('chat-input'), { key: 'Enter' })
     expect(sendNow).toHaveBeenCalledTimes(1)
     expect(mockPromptState.setPrompt).not.toHaveBeenCalled()

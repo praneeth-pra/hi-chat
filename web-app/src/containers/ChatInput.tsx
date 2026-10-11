@@ -1352,7 +1352,7 @@ const ChatInput = ({
               onKeyDown={(e) => {
                 if (speakerReview.showing && e.key === 'Escape') {
                   e.preventDefault()
-                  speakerReview.discard()
+                  if (!e.repeat) speakerReview.discard()
                   return
                 }
                 if (
@@ -1363,7 +1363,7 @@ const ChatInput = ({
                   e.keyCode !== 229
                 ) {
                   e.preventDefault()
-                  speakerReview.send()
+                  if (!e.repeat) speakerReview.send()
                   return
                 }
                 // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
