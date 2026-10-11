@@ -236,23 +236,22 @@ local function stopTyping(message)
   local target = typingTarget
   typingTarget = nil
   if target then pcall(typingSignal, target, "f19") end
-  if message then hs.alert.show(message) end
+  if message and message ~= "Jan typing OFF" then print("[jan typing]", message) end
 end
 
 local function toggleTyping()
   if typingTarget then stopTyping("Jan typing OFF") return end
   local target = typingWindow()
   if not target then
-    hs.alert.show("Select Hi-chat in Safari once, return to your main app, then tap Option")
+    print("[jan typing] Select Hi-chat in Safari once, return to your main app, then tap Option")
     return
   end
   local ok = pcall(function()
     typingSignal(target, "f17") -- focus only the page's draft field; no auto-send
     typingSignal(target, "f18") -- explicit on signal for the keyboard symbol
   end)
-  if not ok then hs.alert.show("Could not enable Jan typing") return end
+  if not ok then print("[jan typing] Could not enable Jan typing") return end
   typingTarget = target
-  hs.alert.show("Jan typing ON — Option or Escape to stop")
 end
 
 -- Global so macOS cannot garbage-collect the tap. Copied events are tagged

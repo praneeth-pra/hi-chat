@@ -103,6 +103,7 @@ assert(callback(event(types.keyDown, 0, {}, "a")) == false)
 tapOption()
 assert(state() and #posted == 4)
 assert(posted[1].key == keymap.f17 and posted[3].key == keymap.f18)
+assert(#alerts == 0) -- The keyboard symbol is the only normal mode indicator.
 assert(posted[1].marker ~= 0)
 send("f15")
 assert(sentKeys[1] == "f15")
@@ -127,7 +128,7 @@ callback(event(types.keyUp, keymap.v, { cmd = true }))
 -- A key released after disabling still goes to the app that got its keydown.
 callback(event(types.keyDown, 0, {}, "a"))
 tapOption()
-assert(not state())
+assert(not state() and #alerts == 0)
 assert(callback(event(types.keyUp, 0, {})) == true)
 assert(posted[#posted - 1].key == keymap.f19)
 -- Held Option and Option chords must never toggle the mode.
