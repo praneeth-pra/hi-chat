@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { EngineTiming } from '@/lib/speakerCaptureSession'
+import type { QuestionCommit, QuestionDraft } from '@/lib/speakerTurns'
 import type { CheckInfo } from '@/lib/speakerFilter'
 
 /** What happened to one clip, shown in the chip's tooltip. */
@@ -24,7 +25,38 @@ export type SpeakerStatus =
   | 'unsupported'
   | 'error'
 
+export type SpeakerTurnDelivery = QuestionCommit & {
+  epoch: number
+  threadId?: string
+}
+type QuestionControls = {
+  sendNow: () => void
+  keepListening: () => void
+  discard: () => void
+}
+let questionControls: QuestionControls | null = null
+export function setQuestionControls(controls: QuestionControls) {
+  questionControls = controls
+  return () => {
+    if (questionControls === controls) questionControls = null
+  }
+}
+
 type SpeakerTranscriptionState = {
+  pendingQuestion: QuestionDraft | null
+  setPendingQuestion: (draft: QuestionDraft | null) => void
+  sendPendingQuestion: () => void
+  keepListening: () => void
+  discardPendingQuestion: () => void
+  turnQueue: SpeakerTurnDelivery[]
+  deliveryEpoch: number
+  turnVersions: Record<string, number>
+  sendingTurn: SpeakerTurnDelivery | null
+  queueTurn: (turn: QuestionCommit, threadId?: string) => void
+  takeTurn: () => SpeakerTurnDelivery | undefined
+  finishTurn: (turn: SpeakerTurnDelivery) => void
+  resetTurns: () => void
+
   /** Listening is on by default; the user can switch it off from the chat box. */
   enabled: boolean
   /** Coding mode: screen-share chatter is skipped while coding. Not kept after a reload. */
@@ -82,7 +114,57 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
       enabled: true,
       status: 'off',
       error: '',
-      setEnabled: (enabled) => set({ enabled }),
+      setEnabled: (enabled) => {
+        if (!enabled) {
+          questionControls?.discard()
+          get().resetTurns()
+        }
+        set({ enabled })
+      },
+      pendingQuestion: null,
+      setPendingQuestion: (pendingQuestion) => set({ pendingQuestion }),
+      sendPendingQuestion: () => questionControls?.sendNow(),
+      keepListening: () => questionControls?.keepListening(),
+      discardPendingQuestion: () => questionControls?.discard(),
+      turnQueue: [],
+      deliveryEpoch: 0,
+      turnVersions: {},
+      sendingTurn: null,
+      queueTurn: (turn, threadId) =>
+        set((state) =>
+          !state.enabled
+            ? {}
+            : {
+                turnQueue: [
+                  ...state.turnQueue.filter((t) => t.id !== turn.id),
+                  { ...turn, threadId, epoch: state.deliveryEpoch },
+                ],
+                turnVersions: {
+                  ...state.turnVersions,
+                  [turn.id]: turn.version,
+                },
+              }
+        ),
+      takeTurn: () => {
+        const [turn, ...rest] = get().turnQueue
+        set({ turnQueue: rest, sendingTurn: turn ?? null })
+        return turn
+      },
+      finishTurn: (turn) => {
+        if (get().sendingTurn === turn) set({ sendingTurn: null })
+      },
+      resetTurns: () =>
+        set((state) => ({
+          turnQueue: [],
+          turnVersions: {},
+          sendingTurn: null,
+          pendingQuestion: null,
+          queue: [],
+          revision: null,
+          lastSent: null,
+          suggestions: [],
+          deliveryEpoch: state.deliveryEpoch + 1,
+        })),
       coding: false,
       setCoding: (coding) => set({ coding }),
       queue: [],

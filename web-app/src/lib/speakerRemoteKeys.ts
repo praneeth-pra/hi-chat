@@ -34,10 +34,10 @@ export const DICTATION_STOP_KEY = 'F13'
 export const CODE_UP_KEY = 'Shift+F16'
 export const CODE_DOWN_KEY = 'Shift+F17'
 
-let scenarioSender: (() => string | null) | null = null
+let scenarioSender: (() => string | null | boolean) | null = null
 
 /** The speaker listener registers how to send the scenario; returns the cleanup. */
-export function setScenarioSender(send: () => string | null) {
+export function setScenarioSender(send: () => string | null | boolean) {
   scenarioSender = send
   return () => {
     if (scenarioSender === send) scenarioSender = null
@@ -50,6 +50,10 @@ function sendScenario(): boolean {
     return true
   }
   const text = scenarioSender()
+  if (text === true) {
+    toast('Sending assembled question')
+    return true
+  }
   if (!text) {
     toast('Nothing new heard since the last question')
     return true

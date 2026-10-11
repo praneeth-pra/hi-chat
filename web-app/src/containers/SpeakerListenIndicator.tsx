@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import {
   ClipLog,
   setSuggestionSender,
+  setQuestionControls,
   SpeakerStatus,
   useSpeakerTranscription,
 } from '@/hooks/useSpeakerTranscription'
@@ -19,28 +20,21 @@ import {
   startSpeakerCapture,
 } from '@/lib/speakerCaptureSession'
 import { getLiveMode } from '@/lib/speakerLive'
-import {
-  CheckInfo,
-  wordCount,
-  createRelevanceFilter,
-  getJudgeModel,
-  getSecondJudge,
-  getWaitMode,
-} from '@/lib/speakerFilter'
+import { CheckInfo, getJudgeModel, getSecondJudge } from '@/lib/speakerFilter'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { anthropicConfig } from '@/lib/anthropicProvider'
 import { useAssistant } from '@/hooks/useAssistant'
 import { activeKeyTerms } from '@/lib/keyTerms'
-import { DEFAULT_PAUSE_OPTIONS } from '@/lib/speakerCapture'
-import {
-  ANSWER_WORDS,
-  createCallLevel,
-  createTurnTracker,
-  getMicTurns,
-  startMicActivity,
-} from '@/lib/micActivity'
 import { CODING_OFFER_COOLDOWN_MS, isCodingCue } from '@/lib/codingCue'
-import { TurnCheck, createTurnListener, getSmartTurn } from '@/lib/smartTurn'
+import {
+  TurnCheck,
+  createTurnListener,
+  getSmartTurn,
+  SMART_TURN_HOLD_BELOW,
+} from '@/lib/smartTurn'
+import { createQuestionTurns } from '@/lib/speakerTurns'
+import { judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
+import { useThreads } from '@/hooks/useThreads'
 import { toast } from 'sonner'
 import { isPlatformTauri } from '@/lib/platform/utils'
 import {
@@ -121,14 +115,9 @@ export function SpeakerTranscriptionProvider() {
     let words: { name: string; text: string }[] = []
     let turnCheck: TurnCheck | null = null
     // Hears from the interviewer's voice whether they have finished
-    const turnListener = createTurnListener()
-    // Your own mic tells when the interviewer's question is over; sound it
-    // picks up while the call is loud is the interviewer through the speakers
-    const call = createCallLevel(DEFAULT_PAUSE_OPTIONS.threshold)
-    const mic = startMicActivity(call.talking)
-    const turns = createTurnTracker(mic, getMicTurns)
+    let turnListener = getSmartTurn() ? createTurnListener() : null
     const log = (clip: ClipLog) => {
-      const line = `${clip.sent ? 'sent' : 'skipped'} "${clip.text}" | ${describeClip(clip)}${clip.note ? ` | ${clip.note}` : ''}`
+      const line = `${clip.sent ? 'sent' : clip.check?.type === 'skip' ? 'skipped' : 'buffered'} "${clip.text}" | ${describeClip(clip)}${clip.note ? ` | ${clip.note}` : ''}`
       // Each engine's own words, so their accuracy can be compared
       const heard = clip.engines.length
         ? words.map((w) => ` | ${w.name}: "${w.text}"`).join('')
@@ -138,13 +127,12 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        `wait=${getWaitMode() ? 'on' : 'off'}`,
+        'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
         `engines=${getTranscribeMode()}`,
         `terms=${speakerKeyTerms().length}`,
         `coding=${useSpeakerTranscription.getState().coding ? 'on' : 'off'}`,
-        `mic=${!getMicTurns() ? 'off' : mic.on() ? 'on' : 'unavailable'}`,
-        `smartturn=${getSmartTurn() ? turnListener.state() : 'off'}`,
+        `smartturn=${getSmartTurn() ? (turnListener?.state() ?? 'off') : 'off'}`,
         `turn=${turnCheck ? turnCheck.probability.toFixed(2) : 'na'}`,
         // Which candidate's assistant was in use; spaces kept out of the field
         `assistant=${(useAssistant.getState().currentAssistant?.name ?? 'none').replace(/\s+/g, '_')}`,
@@ -153,135 +141,177 @@ export function SpeakerTranscriptionProvider() {
       useSpeakerTranscription.getState().logClip(clip)
       offerCodingMode(clip.text)
     }
-    const filter = createRelevanceFilter(
-      () => {
-        const groq = useModelProvider.getState().getProviderByName('groq')
-        const cerebras = useModelProvider
-          .getState()
-          .getProviderByName('cerebras')
-        return {
-          apiKey: groq?.api_key,
-          baseUrl: groq?.base_url,
-          cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
-          anthropic: anthropicConfig(useModelProvider.getState().providers),
-          judge: getJudgeModel(),
-          secondJudge: getSecondJudge(),
-          keyterms: speakerKeyTerms(),
-          coding: useSpeakerTranscription.getState().coding,
-        }
-      },
-      (info) => (check = info),
-      Date.now,
-      {
-        enabled: getWaitMode,
-        smartTurn: getSmartTurn,
-        // Keep holding while the speaker talks or the next clip transcribes.
-        busy: () =>
-          ['hearing', 'transcribing'].includes(
-            useSpeakerTranscription.getState().status
-          ),
-        // The judges disagreed: offer it as a chip instead of sending it
-        onUnsure: (text) => useSpeakerTranscription.getState().suggest(text),
-        onLate: (clip) => {
-          turnCheck = null
-          log({ ...clip, engines: [], note: clip.check?.note })
-          if (clip.sent) send(clip.text)
-        },
+    const getConfig = () => {
+      const groq = useModelProvider.getState().getProviderByName('groq')
+      const cerebras = useModelProvider.getState().getProviderByName('cerebras')
+      return {
+        apiKey: groq?.api_key,
+        baseUrl: groq?.base_url,
+        cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
+        anthropic: anthropicConfig(useModelProvider.getState().providers),
+        judge: getJudgeModel(),
+        secondJudge: getSecondJudge(),
+        keyterms: speakerKeyTerms(),
+        coding: useSpeakerTranscription.getState().coding,
       }
-    )
-    // A question that takes in the one just sent replaces it in the chat, and
-    // so does anything more the interviewer asks before you start answering
-    const send = (text: string) => {
-      const speaker = useSpeakerTranscription.getState()
-      if (filter.takeRevision(text)) {
-        turns.revised(text)
-        speaker.revise(text)
-        return
-      }
-      const turn = turns.next(text)
-      if (!turn.continues) return speaker.enqueue(turn.text)
-      reportClip(
-        `joined "${turn.text}" | You hadn't spoken since the last question`
-      )
-      speaker.revise(turn.text)
     }
-    // A tapped suggestion goes out like any question and counts as sent
-    const unregisterSuggestions = setSuggestionSender((text) => {
-      filter.markSent(text)
-      log({ text, sent: true, engines: [], note: 'Sent from a suggestion' })
-      send(text)
+    const turns = createQuestionTurns({
+      judge: (texts, context) =>
+        judgeSpeakerTurn(texts, context, getConfig(), (info) => {
+          check = info
+        }),
+      onDraft: (draft) =>
+        useSpeakerTranscription.getState().setPendingQuestion(draft),
+      onSuggest: (text) => useSpeakerTranscription.getState().suggest(text),
+      onCommit: (turn) => {
+        useSpeakerTranscription
+          .getState()
+          .queueTurn(turn, useThreads.getState().currentThreadId)
+        reportClip(
+          `sent "${turn.text}" | turn=${turn.id} version=${turn.version} relation=${turn.relation}`
+        )
+      },
     })
-    // F16 from Hammerspoon sends everything heard since the last question
-    const unregister = setScenarioSender(() => {
-      const text = filter.takeScenario()
-      if (text)
-        log({
-          text,
-          sent: true,
-          engines: [],
-          note: 'Sent with the scenario key',
-        })
-      return text
+    const unregisterControls = setQuestionControls({
+      sendNow: turns.sendNow,
+      keepListening: turns.keepListening,
+      discard: () => {
+        turns.discard()
+        session.restart()
+      },
+    })
+    let deliveryEpoch = useSpeakerTranscription.getState().deliveryEpoch
+    const unregisterEpoch = useSpeakerTranscription.subscribe((state) => {
+      if (state.deliveryEpoch !== deliveryEpoch) {
+        deliveryEpoch = state.deliveryEpoch
+        turns.discard()
+        turns.endTurn()
+        session.restart()
+      }
+    })
+    const unregisterSuggestions = setSuggestionSender((text) =>
+      turns.confirm(text)
+    )
+    // F16 commits the assembled question through the same coordinator as the UI.
+    const unregister = setScenarioSender(() => turns.sendNow())
+    let threadId = useThreads.getState().currentThreadId
+    const unregisterThread = useThreads.subscribe((state) => {
+      if (state.currentThreadId === threadId) return
+      const createdBySpeaker =
+        !threadId &&
+        !!state.currentThreadId &&
+        useSpeakerTranscription.getState().sendingTurn?.threadId ===
+          state.currentThreadId
+      threadId = state.currentThreadId
+      if (!createdBySpeaker) {
+        turns.discard()
+        turns.endTurn()
+        useSpeakerTranscription.getState().resetTurns()
+      }
     })
     const session = startSpeakerCapture({
-      onStatus: setStatus,
-      // Only real questions and requests are sent.
+      onStatus: (status) => {
+        setStatus(status)
+        turns.activity(status === 'hearing' || status === 'transcribing')
+      },
       accept: async (texts, engines, engineWords = [], turn = null) => {
         check = undefined
         words = engineWords
         turnCheck = turn
-        try {
-          const text = await filter(texts, turn)
-          // A long clip that isn't a question (or the start of one) is most
-          // likely your answer, which ends the interviewer's turn
-          if (
-            text === null &&
-            !filter.holding() &&
-            wordCount(texts[0]) >= ANSWER_WORDS
-          )
-            turns.end()
-          log({
-            text: text ?? texts[0],
-            sent: text !== null,
-            engines,
-            check,
-            note: check?.note,
-          })
-          return text
-        } catch (err) {
-          log({
-            text: texts[0],
-            sent: false,
-            engines,
-            note: (err as Error).message,
-          })
-          throw err
+        await turns.accept(
+          texts,
+          !!(getSmartTurn() && turn && turn.probability < SMART_TURN_HOLD_BELOW)
+        )
+        const info = check as CheckInfo | undefined
+        log({
+          text: texts[0],
+          sent: false,
+          engines,
+          check: info,
+          note: info?.note ?? 'Added to question turn',
+        })
+        // Only the coordinator may send, never an individual capture clip.
+        return null
+      },
+      onText: () => {},
+      onAudio: (samples) => {
+        if (getSmartTurn()) {
+          turnListener ??= createTurnListener()
+          turnListener.push(samples)
         }
       },
-      // ChatInput sends queued questions as soon as no reply is streaming.
-      onText: (text) => send(text),
-      onLevel: call.push,
-      onAudio: turnListener.push,
-      checkTurn: turnListener.check,
+      checkTurn: () => getSmartTurn() ? turnListener?.check() ?? Promise.resolve(null) : Promise.resolve(null),
     })
-    // A question held while the interviewer sounded mid-turn goes out as soon
-    // as you start answering: they have finished
-    const flushOnSpeech = setInterval(() => {
-      const since = filter.heldSince()
-      if (getSmartTurn() && since !== null && mic.spokeAt() > since)
-        void filter.flush()
-    }, 250)
     return () => {
-      clearInterval(flushOnSpeech)
       session.stop()
-      filter.stop()
-      mic.stop()
+      turns.stop()
+      unregisterControls()
+      unregisterEpoch()
+      unregisterThread()
+      useSpeakerTranscription.getState().resetTurns()
       unregister()
       unregisterSuggestions()
     }
   }, [enabled, setStatus])
 
   return null
+}
+
+/** The draft is distinct from sent chat messages and survives long scenario pauses. */
+export function SpeakerPendingQuestion() {
+  const {
+    enabled,
+    pendingQuestion,
+    sendingTurn,
+    sendPendingQuestion,
+    keepListening,
+    discardPendingQuestion,
+  } = useSpeakerTranscription()
+  if (isPlatformTauri() || !enabled) return null
+  if (!pendingQuestion)
+    return sendingTurn ? (
+      <div className="px-3 pt-2 text-sm text-main-view-fg/60" role="status">
+        {sendingTurn.relation === 'update'
+          ? 'Updating the same question…'
+          : 'Preparing answer…'}
+      </div>
+    ) : null
+  return (
+    <div
+      className="m-2 rounded-md border border-main-view-fg/15 p-3 text-sm"
+      data-test-id="speaker-pending-question"
+    >
+      <div className="font-medium">
+        {pendingQuestion.manual
+          ? 'Waiting for you to send'
+          : pendingQuestion.complete
+            ? 'Question ready'
+            : 'Building question…'}
+      </div>
+      <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">
+        {pendingQuestion.text}
+      </p>
+      <div className="mt-2 flex gap-3">
+        <button
+          type="button"
+          className="text-accent"
+          onClick={sendPendingQuestion}
+        >
+          Send now
+        </button>
+        <button
+          type="button"
+          onClick={keepListening}
+          disabled={pendingQuestion.manual}
+        >
+          Keep listening
+        </button>
+        <button type="button" onClick={discardPendingQuestion}>
+          Discard
+        </button>
+      </div>
+    </div>
+  )
 }
 
 /**

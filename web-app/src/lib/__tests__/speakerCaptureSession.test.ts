@@ -20,9 +20,13 @@ describe('startSpeakerCapture', () => {
   let deviceChange: (() => void) | undefined
   let getUserMedia: ReturnType<typeof vi.fn>
   let contexts: number
+  let taps: {
+    port: { onmessage: ((event: { data: Float32Array }) => void) | null }
+  }[]
 
   beforeEach(() => {
     contexts = 0
+    taps = []
     let labelled = false
     getUserMedia = vi.fn(async (c: MediaStreamConstraints) => {
       const t = track()
@@ -48,7 +52,11 @@ describe('startSpeakerCapture', () => {
     vi.stubGlobal(
       'AudioWorkletNode',
       class {
-        port: { onmessage: unknown } = { onmessage: null }
+        port: { onmessage: ((event: { data: Float32Array }) => void) | null } =
+          { onmessage: null }
+        constructor() {
+          taps.push(this)
+        }
         connect() {}
       }
     )
@@ -93,6 +101,47 @@ describe('startSpeakerCapture', () => {
     expect(loopbackOpens).toHaveLength(1)
     expect(contexts).toBe(1)
     expect(statuses.at(-1)).toBe('listening')
+    session.stop()
+  })
+  it('ignores an old transcript after restarting capture for another chat', async () => {
+    let resolveOld!: (response: Response) => void
+    const reply = (text: string) =>
+      new Response(
+        JSON.stringify({
+          results: [{ name: 'elevenlabs', ok: true, ms: 1, text }],
+        }),
+        { status: 200 }
+      )
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Promise<Response>((r) => {
+          resolveOld = r
+        })
+      )
+      .mockResolvedValueOnce(reply('New chat question'))
+    vi.stubGlobal('fetch', fetchMock)
+    const accept = vi.fn(async (texts) => texts[0])
+    const onText = vi.fn()
+    const session = startSpeakerCapture({ onStatus: () => {}, accept, onText })
+    for (let i = 0; i < 10; i++) await flush()
+    const utterance = (tap: (typeof taps)[number]) => {
+      for (let i = 0; i < 4; i++)
+        tap.port.onmessage?.({ data: new Float32Array(2400).fill(0.1) })
+      for (let i = 0; i < 20; i++)
+        tap.port.onmessage?.({ data: new Float32Array(2400) })
+    }
+    utterance(taps[0])
+    await flush()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    session.restart()
+    for (let i = 0; i < 10; i++) await flush()
+    resolveOld(reply('Old chat question'))
+    await flush()
+    expect(accept).not.toHaveBeenCalled()
+    utterance(taps[1])
+    for (let i = 0; i < 5; i++) await flush()
+    expect(onText).toHaveBeenCalledExactlyOnceWith('New chat question')
     session.stop()
   })
 })

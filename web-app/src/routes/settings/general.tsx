@@ -64,24 +64,13 @@ import {
 import {
   getJudgeModel,
   getWaitMode,
-  getClipTypes,
-  setClipTypes,
   getSecondJudge,
   setSecondJudge,
   JUDGE_MODELS,
   setJudgeModel,
-  setWaitMode,
   type JudgeModel,
 } from '@/lib/speakerFilter'
-import {
-  getMicDevice,
-  getDictationMic,
-  getMicTurns,
-  listMics,
-  setMicDevice,
-  setDictationMic,
-  setMicTurns,
-} from '@/lib/micActivity'
+import { getDictationMic, listMics, setDictationMic } from '@/lib/micActivity'
 import { getTablesAsLists, setTablesAsLists } from '@/lib/tablesToLists'
 import {
   ANSWER_MODELS,
@@ -197,7 +186,7 @@ function General() {
     const providers = useModelProvider.getState()
     const groq = providers.getProviderByName('groq')
     const cerebras = providers.getProviderByName('cerebras')
-    // The settings a live interview would use right now
+    // Provider settings for comparison with the previous clip filter
     const config = {
       apiKey: groq?.api_key,
       baseUrl: groq?.base_url,
@@ -269,11 +258,7 @@ function General() {
     useState<ChatModelKey>(getChatFallback)
   const [chatThinking, setChatThinkingState] =
     useState<ChatThinking>(getChatThinking)
-  const [waitMode, setWaitModeState] = useState(getWaitMode)
-  const [clipTypes, setClipTypesState] = useState(getClipTypes)
   const [smartTurn, setSmartTurnState] = useState(getSmartTurn)
-  const [micTurns, setMicTurnsState] = useState(getMicTurns)
-  const [micDevice, setMicDeviceState] = useState(getMicDevice)
   const [dictationMic, setDictationMicState] = useState(getDictationMic)
   const [mics, setMics] = useState<string[] | null>(null)
   const loadMics = (open: boolean) => {
@@ -982,34 +967,12 @@ function General() {
                 }
               />
               <CardItem
-                title="Clip types"
-                description="The judge also names what kind of clip it heard (question, logistics, repeat...), and a YES for a skip type is dropped. Turn off to compare in the replay below."
-                actions={
-                  <Switch
-                    checked={clipTypes}
-                    onCheckedChange={(on) => {
-                      setClipTypes(on)
-                      setClipTypesState(on)
-                    }}
-                  />
-                }
-              />
-              <CardItem
-                title="Wait for the rest of a question"
-                description="Holds a clip that stops mid-question or sets up a scenario, and joins it to the next clip."
-                actions={
-                  <Switch
-                    checked={waitMode}
-                    onCheckedChange={(on) => {
-                      setWaitMode(on)
-                      setWaitModeState(on)
-                    }}
-                  />
-                }
+                title="Question turns"
+                description="Scenario fragments stay pending across pauses. Complete questions settle briefly before sending; related follow-ups update the same question. Use Send now, Keep listening or Discard above the chat box."
               />
               <CardItem
                 title="Smart turn detection"
-                description="Listens to the interviewer's voice to tell whether they have finished. A question asked while they sound mid-sentence waits up to 5 s for the rest, or until you start speaking. Its score is logged either way. Downloads a 32 MB model the first time."
+                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn waits up to 5 s for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled."
                 actions={
                   <Switch
                     checked={smartTurn}
@@ -1018,52 +981,6 @@ function General() {
                       setSmartTurnState(on)
                     }}
                   />
-                }
-              />
-              <CardItem
-                title="One answer until you speak"
-                description="Uses your microphone to tell when a question is over: everything the interviewer asks before you start talking becomes one question with one answer. Only the mic level is checked; nothing is recorded or sent."
-                actions={
-                  <Switch
-                    checked={micTurns}
-                    onCheckedChange={(on) => {
-                      setMicTurns(on)
-                      setMicTurnsState(on)
-                    }}
-                  />
-                }
-              />
-              <CardItem
-                title="Microphone"
-                description="The mic One answer until you speak listens to for when you start talking. Takes effect when you reload the page. BlackHole is never used."
-                actions={
-                  <DropdownMenu onOpenChange={loadMics}>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
-                      >
-                        {micDevice || 'Mac default input'}
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {['', ...(mics ?? [])].map((label) => (
-                        <DropdownMenuItem
-                          key={label || 'default'}
-                          className={`cursor-pointer my-0.5 ${micDevice === label ? 'bg-main-view-fg/5' : ''}`}
-                          onClick={() => {
-                            setMicDevice(label)
-                            setMicDeviceState(label)
-                          }}
-                        >
-                          {label || 'Mac default input'}
-                        </DropdownMenuItem>
-                      ))}
-                      {mics === null && (
-                        <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 }
               />
               <CardItem
@@ -1087,7 +1004,7 @@ function General() {
             {/* Speaker test */}
             <Card title="Speaker test">
               <CardItem
-                title="Compare judgement models"
+                title="Compare legacy clip judges"
                 description="Runs each judgement model you have a key for on 58 recorded clips and shows how many it gets right, and how fast."
                 actions={
                   <div className="flex gap-2">
@@ -1142,8 +1059,8 @@ function General() {
                 </div>
               )}
               <CardItem
-                title="Replay labelled interviews"
-                description="Replays every labelled clip from your recorded interviews through the speaker filter with your current judge and settings, and counts chatter it would send and questions it would miss, next to what happened live. Takes a few minutes."
+                title="Replay legacy clip filtering"
+                description="Evaluates the previous clip-based filter, not the new question-turn coordinator. Replays labelled interview transcripts and counts chatter it would send and questions it would miss, next to what happened live. Takes a few minutes."
                 actions={
                   <div className="flex gap-2">
                     <Button
