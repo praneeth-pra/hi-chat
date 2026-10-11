@@ -1,13 +1,11 @@
 import { toast } from 'sonner'
-import { useCodingMode } from '@/hooks/useCodingMode'
 import { stopDictation, toggleDictation } from '@/lib/dictation'
 
 /**
  * Keys a helper like Hammerspoon can send to this tab while another app is
- * in front. F18 and F19 aren't on Mac laptop keyboards, so nothing typed by
+ * in front. F13–F20 aren't on Mac laptop keyboards, so nothing typed by
  * hand triggers them.
  */
-export const CODING_KEY = 'F18'
 export const FOCUS_CHAT_KEY = 'F20'
 /** Like F20, but the dictated text stays in the box for you to send. */
 export const FOCUS_CHAT_DRAFT_KEY = 'F17'
@@ -146,7 +144,7 @@ function keyName(e: KeyboardEvent): string {
   return byCode[e.keyCode] ?? e.key
 }
 
-/** Dictation, coding mode, explicit send and navigation shortcuts. */
+/** Dictation, explicit send and navigation shortcuts. */
 export function handleRemoteKey(key: string): boolean {
   if (key === FOCUS_CHAT_KEY) return focusChatBox(true)
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
@@ -166,12 +164,6 @@ export function handleRemoteKey(key: string): boolean {
     )
     if (send && !send.disabled) send.click()
     else toast('Nothing to send')
-    return true
-  }
-  const state = useCodingMode.getState()
-  if (key === CODING_KEY) {
-    state.setCoding(!state.coding)
-    toast(`Coding mode ${state.coding ? 'off' : 'on'}`)
     return true
   }
   return false

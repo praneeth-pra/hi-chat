@@ -57,10 +57,11 @@ The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy
 and reload Hammerspoon; a Railway deployment cannot update a script on your Mac.
 The script retains scrolling, fn + Up/Down code navigation, Left Control dictation,
 fn + Return sending, Z/X and the native-sized dummy cursor. The retired Speaker
-Option toggle and fn + Left/Right recommendation shortcuts are removed. Ordinary
-arrows and fn + Left/Right pass through to the app in front.
+Option toggle and fn + Left/Right recommendation shortcuts are removed. Option,
+ordinary arrows and fn + Left/Right pass through to the app in front.
 
-Coding mode remains available as its own chat toolbar button and F18 shortcut.
+The coding-mode toolbar button and F18 toggle are also removed. Questions asking
+for code still receive the existing short-code instruction automatically.
 There is no Speaker capture, review UI, question judge, background microphone
 turn detector or Smart Turn model download.
 

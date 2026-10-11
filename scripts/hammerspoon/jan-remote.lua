@@ -20,6 +20,7 @@
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
 -- arrows and fn + Left / Right remain available to the app in front.
+-- Option is not bound; its normal Mac behavior remains available.
 --
 -- Settings you may want to change:
 local SPEED = 700        -- pixels per second while held

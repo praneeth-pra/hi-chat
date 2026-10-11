@@ -46,7 +46,7 @@ Existing chats/answers and saved transcription vocabulary are retained.
 
 Shared live transcribers, token retrieval, audio conversion, microphone choice,
 dictionary and transcript reconciliation remain for dictation. Microphone readiness
-is still controlled by dictation's existing setting. Coding mode, ordinary chat,
+is still controlled by dictation's existing setting. Ordinary chat,
 attachments, model selection, answer streaming and unrelated Hammerspoon helpers
 are preserved. Update the Mac script separately to release its old fn-arrow and
 Left Option bindings; deploying the web app alone cannot change Hammerspoon.

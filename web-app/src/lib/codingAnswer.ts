@@ -1,7 +1,7 @@
 /**
  * Interview code came out long (8 Oct: P asked for "only the short and
  * effective version" of the code, with the explanation kept). When a
- * question looks like it asks for code, or coding mode is on, the
+ * question looks like it asks for code, the
  * instructions get one more rule: only the asked-for logic in the code, then
  * a brief explanation. The rule itself says "if", so a question that
  * only mentions a word like "function" is answered as usual.
@@ -18,10 +18,9 @@ export const CODING_ANSWER_RULE = `If this question asks you to write code, a co
 /** The assistant's instructions, plus the short-code rule when it applies. */
 export function withCodingRule(
   instructions: string | undefined,
-  question: string,
-  codingMode = false
+  question: string
 ): string | undefined {
-  if (!codingMode && !asksForCode(question)) return instructions
+  if (!asksForCode(question)) return instructions
   return instructions
     ? `${instructions}\n\n${CODING_ANSWER_RULE}`
     : CODING_ANSWER_RULE

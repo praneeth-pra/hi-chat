@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useCodingMode } from '@/hooks/useCodingMode'
 import {
   stepCode,
   handleRemoteKey,
@@ -17,14 +16,12 @@ vi.mock('@/lib/dictation', () => ({
 }))
 describe('remote keys without Speaker', () => {
   beforeEach(() => {
-    useCodingMode.setState({ coding: false })
     vi.clearAllMocks()
     cancelDictation()
   })
-  it('retains coding mode but ignores retired speaker keys', () => {
-    expect(handleRemoteKey('F18')).toBe(true)
-    expect(useCodingMode.getState().coding).toBe(true)
+  it('ignores retired coding and speaker keys', () => {
     for (const key of [
+      'F18',
       'F19',
       'F16',
       'Shift+F15',
@@ -33,22 +30,34 @@ describe('remote keys without Speaker', () => {
       'ArrowRight',
       'Home',
       'End',
+      'Alt',
     ])
       expect(handleRemoteKey(key)).toBe(false)
-    expect(useCodingMode.getState().coding).toBe(true)
     expect(toggleDictation).not.toHaveBeenCalled()
   })
-  it('does not consume arrows or retired recommendation keys through the global listener', () => {
+  it('leaves Option, arrows and retired coding/speaker keys unconsumed', () => {
     const stop = listenForRemoteKeys()
     for (const key of [
       'ArrowLeft',
       'ArrowRight',
       'Home',
       'End',
+      'Alt',
+      'F18',
       'F19',
       'F16',
     ]) {
       const event = new KeyboardEvent('keydown', { key, cancelable: true })
+      window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+    // Safari can report the retired F18/F19 keys only by key code.
+    for (const keyCode of [129, 130]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Unidentified',
+        keyCode,
+        cancelable: true,
+      })
       window.dispatchEvent(event)
       expect(event.defaultPrevented).toBe(false)
     }

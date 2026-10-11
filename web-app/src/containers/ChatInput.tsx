@@ -45,7 +45,6 @@ import { TokenCounter } from '@/components/TokenCounter'
 import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
-import { CodingModeButton } from './CodingModeButton'
 import { DictationBanner, DictationButton } from './DictationIndicator'
 import {
   ContentType,
@@ -1435,7 +1434,6 @@ const ChatInput = ({
 
             <div className="flex shrink-0 items-center gap-2">
               <DictationButton />
-              <CodingModeButton />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&
                 tokenCounterCompact &&

@@ -8,6 +8,7 @@ end
 -- Retired keys have no callback/binding, including plain and fn side arrows.
 assert(not source:find('recommendationTap', 1, true))
 assert(not source:find('toggle("f19")', 1, true))
+assert(not source:find('toggle("f18")', 1, true))
 local sent, callback = {}, nil
 hs = {
   keycodes = { map = { ctrl = 59 } },
