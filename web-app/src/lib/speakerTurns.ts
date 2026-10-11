@@ -1,10 +1,5 @@
-import {
-  hasQuestionCue,
-  type TurnContext,
-  type TurnDecision,
-} from './speakerTurnJudge'
+import { type TurnContext, type TurnDecision } from './speakerTurnJudge'
 
-export const SPEAKER_REVIEW_MS = 3000
 const MAX_DRAFT_CHARS = 24000
 
 export type QuestionDraft = {
@@ -17,7 +12,7 @@ export type QuestionDraft = {
   uncertain?: boolean
   relation?: 'new' | 'update'
   addition?: string
-  reviewUntil?: number
+  queuedQuestions?: number
   captureEnd?: number | null
   clip?: number
   reason: string
@@ -38,53 +33,75 @@ type Options = {
   onSuggest: (text: string, reason?: string) => void
   onTrace?: (event: string, fields: Record<string, unknown>) => void
 }
-const normalize = (t: string) =>
-  t
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-const append = (base: string, text: string) =>
-  normalize(base).includes(normalize(text)) ? base : `${base} ${text}`.trim()
+type Fragment = { text: string; clip: number; captureEnd: number }
+type HeldQuestion = { draft: QuestionDraft; fragments: Fragment[] }
 
-/** Speech is committed only by explicit approval; pauses never trigger sends. */
+/** Approval is the boundary: judges advise, but never send or delete speech. */
 export function createQuestionTurns(options: Options) {
-  let draft: QuestionDraft | null = null
+  let held: HeldQuestion[] = []
+  let selected: string | undefined
   let active: QuestionCommit | null = null
   let recent: string[] = []
-  let processing = 0
-  let hearing = false
-  let quietSince: number | null = null
-  let busy = false
   let stopped = false
   let epoch = 0
   let sequence = 0
   let clipSequence = 0
-  let manualRequested = false
-  let manualOrigin: 'send-now' | 'suggestion' = 'send-now'
+  let quietSince: number | null = null
   let queue: Promise<unknown> = Promise.resolve()
   const session = Math.random().toString(36).slice(2)
-  const publish = () => options.onDraft(draft ? { ...draft } : null)
-  const emitDraft = () => {
-    if (!draft || stopped) return
-    const relation = 'new' as const
-    active = {
-      id: draft.id,
-      text: draft.text,
-      version: 1,
-      relation,
-      origin: manualOrigin,
-      captureEnd: draft.captureEnd,
-      clip: draft.clip,
+  const owner = (fragment?: Fragment) =>
+    fragment ? held.find((q) => q.fragments.includes(fragment)) : undefined
+  const current = () => held.find((q) => q.draft.id === selected) ?? held[0]
+  const publish = () => {
+    const question = current()
+    selected = question?.draft.id
+    options.onDraft(
+      question ? { ...question.draft, queuedQuestions: held.length - 1 } : null
+    )
+  }
+  const refresh = (q: HeldQuestion) => {
+    q.draft.text = q.fragments.map((f) => f.text).join(' ')
+    const last = q.fragments.at(-1)!
+    q.draft.clip = last.clip
+    q.draft.captureEnd = last.captureEnd
+  }
+  const create = (fragment: Fragment) => {
+    const q: HeldQuestion = {
+      draft: {
+        id: `${session}-${++sequence}`,
+        text: fragment.text,
+        complete: false,
+        manual: false,
+        requiresReview: true,
+        relation: 'new',
+        reason: 'Ready for your review',
+      },
+      fragments: [fragment],
     }
-    draft = null
-    manualRequested = false
+    refresh(q)
+    held.push(q)
+    return q
+  }
+  const remove = (q: HeldQuestion) => {
+    held = held.filter((item) => item !== q)
+    if (selected === q.draft.id) selected = undefined
+  }
+  const commit = (q: HeldQuestion, origin: 'send-now' | 'suggestion') => {
+    active = {
+      id: q.draft.id,
+      text: q.draft.text,
+      version: 1,
+      relation: 'new',
+      origin,
+      captureEnd: q.draft.captureEnd,
+      clip: q.draft.clip,
+    }
+    remove(q)
     publish()
     options.onTrace?.('commit', {
       at: Date.now(),
       turn: active.id,
-      version: active.version,
-      origin: active.origin,
+      origin,
       clip: active.clip,
       captureEnd: active.captureEnd,
       afterCaptureMs:
@@ -92,228 +109,187 @@ export function createQuestionTurns(options: Options) {
     })
     options.onCommit({ ...active })
   }
-  const schedule = () => {
-    // Approval applies only to the visible draft, never future in-flight speech.
-    if (draft && !stopped && manualRequested) emitDraft()
-  }
-  const suggestQuestion = (text: string, reason?: string) => {
-    if (hasQuestionCue(text)) {
-      options.onTrace?.('recommendation', { at: Date.now(), reason, text })
-      options.onSuggest(text, reason)
-    } else
-      options.onTrace?.('recommendation-suppressed', {
-        at: Date.now(),
-        reason: 'No question evidence',
-      })
-  }
-  const apply = (decision: TurnDecision) => {
-    const { text, complete, reason } = decision
-    let action = decision.action
-    if (action === 'skip' || !text.trim()) return
-    if (action === 'suggest') {
-      // An uncertain continuation must not let an earlier partial question escape.
-      if (draft) {
-        draft.uncertain = true
-        draft.complete = false
-        draft.reason = reason
-        publish()
-      }
-      suggestQuestion(text, reason)
-      return
-    }
-    // A later complete question replaces the previous unaccepted card.
-    // Only unfinished fragments accumulate into one unsent scenario draft.
-    if (draft?.requiresReview && draft.complete && complete) {
-      options.onTrace?.('review-superseded', { at: Date.now(), turn: draft.id })
-      draft = null
-    }
-    // A clip boundary cannot erase an answerable question or split unfinished setup.
-    if (
-      draft &&
-      !draft.complete &&
-      !draft.followsQuestion &&
-      action === 'new-question' &&
-      !complete
-    )
-      action = 'context'
-    if (draft && action === 'new-question') {
-      options.onTrace?.('context-cleared', {
-        at: Date.now(),
-        turn: draft.id,
-        reason: 'new-topic',
-        clip: draft.clip,
-      })
-      draft = null
-    }
-    if (!draft) {
-      const continuation = action === 'followup' && active
-      draft = {
-        id: `${session}-${++sequence}`,
-        text: '',
-        requiresReview: true,
-        followsQuestion: continuation ? active!.id : undefined,
-        complete: false,
-        manual: false,
-        reason,
-      }
-    }
-    draft.text = append(draft.text, text)
-    draft.relation = 'new'
-    draft.reviewUntil = Date.now() + SPEAKER_REVIEW_MS
-    draft.complete = complete && action !== 'context'
-    if (draft.complete) draft.uncertain = false
-    draft.reason = reason
-    if (draft.text.length > MAX_DRAFT_CHARS) {
-      suggestQuestion(draft.text, draft.reason)
-      draft = null
-      manualRequested = false
-    }
-    publish()
-  }
   return {
     accept(
       texts: string[],
       _unfinishedTurn = false,
       capture?: { clipId: number; captureEnd: number }
     ): Promise<void> {
-      const clip = capture?.clipId ?? ++clipSequence
-      const captureEnd = capture?.captureEnd ?? quietSince ?? Date.now()
+      if (stopped) return Promise.resolve()
+      const text = texts.find((t) => t.trim())?.trim()
+      if (!text) return Promise.resolve()
+      const fragment: Fragment = {
+        text,
+        clip: capture?.clipId ?? ++clipSequence,
+        captureEnd: capture?.captureEnd ?? quietSince ?? Date.now(),
+      }
       const transcriptReady = Date.now()
+      const previous = held.at(-1)
+      const previousFragment = previous?.fragments.at(-1)
+      // Incomplete scenario fragments stay together. A completed question keeps
+      // its own place while the next clip's topic is classified in the background.
+      if (
+        previous &&
+        !previous.draft.complete &&
+        previous.draft.text.length + text.length < MAX_DRAFT_CHARS
+      ) {
+        previous.fragments.push(fragment)
+        refresh(previous)
+      } else create(fragment)
+      publish()
       options.onTrace?.('transcript-ready', {
-        clip,
+        clip: fragment.clip,
         at: transcriptReady,
-        captureEnd,
+        captureEnd: fragment.captureEnd,
         captureEndKind: capture ? 'clip-finalized' : 'quiet-state-snapshot',
       })
       const acceptedEpoch = epoch
-      processing++
-      const run = queue
-        .then(async () => {
-          if (stopped || acceptedEpoch !== epoch) return
-          const pendingId = draft?.id
-          const context = {
-            pending: draft?.text ?? '',
-            active: active?.text ?? '',
-            recent: recent.slice(-6),
-          }
-          const judgeStarted = Date.now()
-          options.onTrace?.('judge-start', {
-            clip,
-            at: judgeStarted,
-            queuedMs: judgeStarted - transcriptReady,
-            pendingChars: context.pending.length,
-            activeChars: context.active.length,
-          })
-          const decision = await options.judge(texts, context)
-          if (stopped || acceptedEpoch !== epoch) return
-          options.onTrace?.('decision-ready', {
-            clip,
+      const run = queue.then(async () => {
+        const q = owner(fragment)
+        if (stopped || epoch !== acceptedEpoch || !q) return
+        const preceding = owner(previousFragment)
+        const context = {
+          pending:
+            preceding?.fragments
+              .filter(
+                (f) =>
+                  f.clip !== fragment.clip &&
+                  (q !== preceding ||
+                    preceding.fragments.indexOf(f) <
+                      preceding.fragments.indexOf(fragment))
+              )
+              .map((f) => f.text)
+              .join(' ') ?? '',
+          active: active?.text ?? '',
+          recent: recent.slice(-6),
+        }
+        const started = Date.now()
+        options.onTrace?.('judge-start', {
+          clip: fragment.clip,
+          at: started,
+          queuedMs: started - transcriptReady,
+          pendingChars: context.pending.length,
+          activeChars: context.active.length,
+        })
+        let decision: TurnDecision
+        try {
+          decision = await options.judge(texts, context)
+        } catch {
+          options.onTrace?.('judge-unavailable', {
+            clip: fragment.clip,
             at: Date.now(),
-            judgeMs: Date.now() - judgeStarted,
-            action: decision.action,
-            complete: decision.complete,
-            reason: decision.reason,
-            hadPending: !!context.pending,
-            hadActive: !!context.active,
           })
-          // A ready draft may have committed while this judge was running.
-          // Recognize the continuation as a follow-up, offered as a separate prompt.
-          if (
-            !draft &&
-            pendingId &&
-            active?.id === pendingId &&
-            (decision.action === 'question' || decision.action === 'context')
-          )
-            decision.action = 'followup'
-          apply(decision)
-          if (draft && decision.action !== 'skip') {
-            draft.captureEnd = captureEnd
-            draft.clip = clip
-            publish()
-          }
-          if (decision.action !== 'skip' && decision.action !== 'suggest')
-            recent = [...recent, decision.text].slice(-6)
+          return // Transcription remains reviewable even if the judge fails.
+        }
+        if (stopped || epoch !== acceptedEpoch) return
+        const target = owner(fragment)
+        if (!target) return // Sent or discarded speech cannot be resurrected.
+        const before = owner(previousFragment)
+        options.onTrace?.('decision-ready', {
+          clip: fragment.clip,
+          at: Date.now(),
+          judgeMs: Date.now() - started,
+          action: decision.action,
+          complete: decision.complete,
+          reason: decision.reason,
         })
-        .finally(() => {
-          processing--
-          schedule()
-        })
+        let result = target
+        if (
+          before &&
+          before !== target &&
+          (decision.action === 'context' || decision.action === 'question') &&
+          before.draft.text.length + target.draft.text.length < MAX_DRAFT_CHARS
+        ) {
+          before.fragments.push(...target.fragments)
+          remove(target)
+          result = before
+          refresh(result)
+        } else if (
+          before === target &&
+          decision.action === 'new-question' &&
+          previousFragment &&
+          target.fragments.indexOf(fragment) > 0 &&
+          target.draft.complete
+        ) {
+          // Keep both topics, including any fragments that arrived while judging.
+          const splitAt = target.fragments.indexOf(fragment)
+          const following = target.fragments.splice(splitAt)
+          refresh(target)
+          result = create(following[0])
+          result.fragments = following
+          refresh(result)
+          held = held.filter((q) => q !== result)
+          held.splice(held.indexOf(target) + 1, 0, result)
+        }
+        result.draft.complete ||= decision.complete
+        result.draft.uncertain =
+          decision.action === 'suggest' || decision.action === 'skip'
+        result.draft.reason = decision.reason
+        if (
+          active &&
+          !before &&
+          (decision.action === 'followup' ||
+            decision.action === 'question' ||
+            decision.action === 'context')
+        )
+          result.draft.followsQuestion = active.id
+        recent = [...recent, text].slice(-6)
+        publish()
+      })
       queue = run.catch(() => {})
       return run
     },
-    audioActivity(isHearing: boolean) {
-      if (isHearing !== hearing) {
-        hearing = isHearing
-        quietSince = hearing ? null : Date.now()
-        if (!hearing) options.onTrace?.('capture-end', { at: quietSince })
-      }
+    audioActivity(hearing: boolean) {
+      quietSince = hearing ? null : Date.now()
     },
-    activity(isBusy: boolean) {
-      if (busy !== isBusy)
-        options.onTrace?.('capture-busy', {
-          at: Date.now(),
-          busy: isBusy,
-          processing,
-          turn: draft?.id,
-          clip: draft?.clip,
-        })
-      busy = isBusy
-      schedule()
+    activity(busy: boolean) {
+      options.onTrace?.('capture-busy', { at: Date.now(), busy })
     },
     sendNow() {
-      const available = !!draft && !stopped
-      manualOrigin = 'send-now'
-      manualRequested = available
-      schedule()
-      return available
+      const q = current()
+      if (!q || stopped) return false
+      commit(q, 'send-now')
+      return true
+    },
+    next() {
+      if (held.length < 2) return
+      selected = held[(held.indexOf(current()!) + 1) % held.length].draft.id
+      publish()
     },
     keepListening() {
-      if (draft) {
-        draft.manual = true
-        draft.reason = 'Waiting for you to send'
+      const q = current()
+      if (q) {
+        q.draft.manual = true
         publish()
       }
     },
-    expireReview(id: string, text: string) {
-      if (
-        !draft ||
-        draft.id !== id ||
-        draft.text !== text ||
-        (draft.complete && !draft.requiresReview)
-      )
-        return
-      options.onTrace?.('review-hidden', {
-        at: Date.now(),
-        turn: draft.id,
-        clip: draft.clip,
-        relation: draft.relation,
-      })
-      // Visibility expires; the held follow-up remains available to later speech.
-    },
     discard() {
+      const q = current()
+      if (q) {
+        options.onTrace?.('review-discarded', {
+          at: Date.now(),
+          turn: q.draft.id,
+        })
+        remove(q)
+        publish()
+      }
+    },
+    reset() {
       epoch++
-      manualRequested = false
+      held = []
+      selected = undefined
+      active = null
+      recent = []
       quietSince = null
-      draft = null
+      queue = Promise.resolve()
       publish()
     },
     confirm(text: string) {
-      epoch++
-      // A manual click does not establish semantic relatedness or spoken order.
-      // Preserve unsent context; never append a stale recommendation to an answer.
-      if (draft && draft.text !== text)
-        suggestQuestion(draft.text, 'Unsent question context')
-      draft = null
-      active = null
-      manualOrigin = 'suggestion'
-      manualRequested = true
-      apply({
-        action: 'new-question',
-        complete: true,
-        text,
-        reason: 'Sent as a new question by you',
-      })
-      schedule()
+      const existing = held.find((q) => q.draft.text === text)
+      const q =
+        existing ??
+        create({ text, clip: ++clipSequence, captureEnd: Date.now() })
+      if (!stopped) commit(q, 'suggestion')
     },
     endTurn() {
       active = null
@@ -321,7 +297,8 @@ export function createQuestionTurns(options: Options) {
     stop() {
       stopped = true
       epoch++
-      draft = null
+      held = []
+      selected = undefined
       publish()
     },
   }

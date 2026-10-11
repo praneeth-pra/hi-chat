@@ -1352,7 +1352,7 @@ const ChatInput = ({
               onKeyDown={(e) => {
                 if (speakerReview.showing && e.key === 'Escape') {
                   e.preventDefault()
-                  speakerReview.discard()
+                  if (!e.repeat) speakerReview.discard()
                   return
                 }
                 if (
@@ -1363,7 +1363,7 @@ const ChatInput = ({
                   e.keyCode !== 229
                 ) {
                   e.preventDefault()
-                  speakerReview.send()
+                  if (!e.repeat) speakerReview.send()
                   return
                 }
                 // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
@@ -1427,6 +1427,16 @@ const ChatInput = ({
                       onClick={speakerReview.select}
                     >
                       Review question
+                    </button>
+                  )}
+                  {!!speakerReview.queuedQuestions && (
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-accent"
+                      onClick={speakerReview.next}
+                      title="Review another held question"
+                    >
+                      {speakerReview.queuedQuestions} more
                     </button>
                   )}
                   {speakerReview.showing && prompt && (
@@ -1647,7 +1657,11 @@ const ChatInput = ({
                 <Button
                   variant={!composerText.trim() ? null : 'default'}
                   size="icon"
-                  disabled={!composerText.trim() || ingestingAny}
+                  disabled={
+                    !composerText.trim() ||
+                    ingestingAny ||
+                    (speakerReview.showing && !speakerReview.canSend)
+                  }
                   data-test-id="send-message-button"
                   aria-label="Send"
                   title={

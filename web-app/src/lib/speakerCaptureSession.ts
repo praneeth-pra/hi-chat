@@ -187,6 +187,8 @@ export async function fetchLiveKeyWithTerms(
 
 /** A live engine streaming beside ElevenLabs (Soniox, Cartesia). */
 type SideStream = {
+  setPreviewListener(listener: (text: string) => void): void
+  setPreviewListener(listener: (text: string) => void): void
   push(samples: Float32Array): void
   finish(): Promise<string>
   abort(): void
@@ -224,6 +226,7 @@ registerProcessor('speaker-tap', SpeakerTap)
 `
 
 type Callbacks = {
+  onPreview?: (preview: { clipId: number; text: string } | null) => void
   onTrace?: (line: string) => void
   onStatus: (status: SpeakerStatus, error?: string) => void
   onText: (text: string) => void
@@ -306,6 +309,7 @@ export async function transcribeClip(
  */
 export function startSpeakerCapture({
   onStatus,
+  onPreview,
   onText,
   accept = async (texts) => texts[0] ?? null,
   onLevel,
@@ -319,6 +323,9 @@ export function startSpeakerCapture({
   let queue: Promise<void> = Promise.resolve()
   let pending = 0
   let clipSequence = 0
+  let recordingClip = 0
+  let previewClip = 0
+  const finalizedClips = new Set<number>()
   let speaking = false
   const cleanups: (() => void)[] = []
 
@@ -373,12 +380,17 @@ export function startSpeakerCapture({
     turnCheck: Promise<TurnCheck | null> = Promise.resolve(null)
   ) => {
     const captureGeneration = generation
-    const capture = { clipId: ++clipSequence, captureEnd: Date.now() }
+    const capture = {
+      clipId: recordingClip || ++clipSequence,
+      captureEnd: Date.now(),
+    }
     // Ignore clips too short to hold a word.
     if (samples.length < TARGET_SAMPLE_RATE * 0.4) {
       live?.abort()
       third?.abort()
       more.forEach((m) => m.stream.abort())
+      finalizedClips.add(capture.clipId)
+      if (previewClip === capture.clipId) onPreview?.(null)
       return
     }
     // Lossless FLAC is about half the size of WAV, so it uploads faster.
@@ -454,6 +466,12 @@ export function startSpeakerCapture({
       return result
     })
     result?.catch(() => {})
+    let checkedTurn: TurnCheck | null = null
+    void turnCheck
+      .then((turn) => {
+        checkedTurn = turn
+      })
+      .catch(() => {})
     pending++
     idleStatus()
     // Sequential, so text lands in the order it was spoken.
@@ -473,17 +491,23 @@ export function startSpeakerCapture({
           texts,
           words.map((w) => w.name)
         ).filter((t) => t.trim())
-        const turn = await turnCheck
-        stage('turn-check-ready')
+        const turn = checkedTurn
+        stage(`turn-check-observed available=${turn !== null}`)
         const text =
           !stopped && captureGeneration === generation && heard.length
             ? await accept(heard, timings, words, turn, capture)
             : null
+        finalizedClips.add(capture.clipId)
+        if (captureGeneration === generation && previewClip === capture.clipId)
+          onPreview?.(null)
         if (!stopped && captureGeneration === generation && text) onText(text)
         if (captureGeneration === generation) pending--
         if (!stopped && captureGeneration === generation) idleStatus()
       })
       .catch((err: Error) => {
+        finalizedClips.add(capture.clipId)
+        if (captureGeneration === generation && previewClip === capture.clipId)
+          onPreview?.(null)
         if (captureGeneration === generation) pending--
         if (!stopped && captureGeneration === generation)
           onStatus('error', err.message)
@@ -606,9 +630,22 @@ export function startSpeakerCapture({
         const event = detector.feed(level, clock)
 
         if (event === 'start') {
+          recordingClip = ++clipSequence
+          const clipId = recordingClip
+          let previewEngine = ''
+          const preview = (engine: string) => (text: string) => {
+            if (stale() || finalizedClips.has(clipId) || !text.trim()) return
+            if (previewEngine && previewEngine !== engine) return
+            previewEngine = engine
+            // Older finalization must never replace a newer clip's preview.
+            if (clipId < previewClip) return
+            previewClip = clipId
+            onPreview?.({ clipId, text: text.trim() })
+          }
           utterance = [...preroll]
           if (getLiveMode()) {
             live = new LiveTranscriber(elevenTokens.take())
+            live.setPreviewListener(preview('elevenlabs'))
             preroll.forEach((chunk) => live!.push(chunk))
           }
           if (grokLive()) {
@@ -618,6 +655,7 @@ export function startSpeakerCapture({
               undefined,
               keyTermsSource()
             )
+            third.setPreviewListener(preview('grok'))
             preroll.forEach((chunk) => third!.push(chunk))
           }
           if (sonioxCartesiaLive()) {
@@ -639,8 +677,10 @@ export function startSpeakerCapture({
                 ),
               },
             ]
-            for (const m of more)
+            for (const m of more) {
+              m.stream.setPreviewListener(preview(m.name))
               preroll.forEach((chunk) => m.stream.push(chunk))
+            }
           }
           speaking = true
           idleStatus()
@@ -709,6 +749,9 @@ export function startSpeakerCapture({
 
   const close = () => {
     generation++
+    finalizedClips.clear()
+    previewClip = 0
+    onPreview?.(null)
     opening = false
     cleanups.splice(0).forEach((fn) => fn())
     stream?.getTracks().forEach((t) => t.stop())

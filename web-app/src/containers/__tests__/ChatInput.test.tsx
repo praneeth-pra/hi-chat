@@ -377,7 +377,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {
@@ -392,6 +391,11 @@ describe('ChatInput', () => {
     expect(
       screen.queryByRole('region', { name: 'Speaker recommendations' })
     ).not.toBeInTheDocument()
+    expect(sendNow).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId('chat-input'), {
+      key: 'Enter',
+      repeat: true,
+    })
     expect(sendNow).not.toHaveBeenCalled()
     fireEvent.keyDown(screen.getByTestId('chat-input'), { key: 'Enter' })
     expect(sendNow).toHaveBeenCalledTimes(1)
@@ -410,7 +414,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {
@@ -432,7 +435,6 @@ describe('ChatInput', () => {
       complete: true,
       manual: false,
       requiresReview: true,
-      reviewUntil: Date.now() + 3000,
       reason: 'question',
     })
     await act(async () => {

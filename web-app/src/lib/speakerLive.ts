@@ -78,6 +78,7 @@ export function elevenLabsTerms(keyterms: string[]): string[] {
  * is held and sent on open. `finish()` commits and resolves with the text.
  */
 export class LiveTranscriber {
+  private onPreview?: (text: string) => void
   private socket: SocketLike | null = null
   private queue: string[] = []
   private pending: Float32Array[] = []
@@ -89,6 +90,10 @@ export class LiveTranscriber {
   // ElevenLabs commits by itself after ~36 s of audio, even in manual mode;
   // those earlier segments are kept and joined to the final one.
   private earlier: string[] = []
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
 
   constructor(
     token: Promise<string>,
@@ -185,6 +190,13 @@ export class LiveTranscriber {
     } catch {
       return
     }
+    if (
+      msg.message_type === 'partial_transcript' ||
+      msg.message_type === 'committed_transcript'
+    )
+      this.onPreview?.(
+        [...this.earlier, msg.text?.trim()].filter(Boolean).join(' ')
+      )
     if (msg.message_type === 'committed_transcript' && !this.committed) {
       if (msg.text?.trim()) this.earlier.push(msg.text.trim())
     } else if (msg.message_type === 'committed_transcript') {
@@ -252,6 +264,7 @@ export function afterSameText(text: string, prefix: string): string | null {
  * rest and ends with transcript.done, and resolves with the fullest text.
  */
 export class GrokLiveTranscriber {
+  private onPreview?: (text: string) => void
   private socket: SocketLike | null = null
   private queue: (ArrayBuffer | string)[] = []
   private pending: Float32Array[] = []
@@ -262,6 +275,10 @@ export class GrokLiveTranscriber {
   // Finished stretches, and the locked chunks of the one in progress
   private utterances: string[] = []
   private chunks: string[] = []
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
 
   constructor(
     ticket: Promise<string>,
@@ -397,6 +414,10 @@ export class GrokLiveTranscriber {
     } else if (msg.type === 'error') {
       this.abort(new Error(`Grok live: ${msg.message ?? 'error'}`))
     }
+    if (msg.type === 'transcript.partial')
+      this.onPreview?.(
+        msg.is_final ? this.heard() : `${this.heard()} ${text}`.trim()
+      )
   }
 
   private close() {
@@ -442,6 +463,7 @@ export function sonioxTerms(terms: string[]): string[] {
  * words joined are the text.
  */
 export class SonioxLiveTranscriber {
+  private onPreview?: (text: string) => void
   private socket: SocketLike | null = null
   private queue: (ArrayBuffer | string)[] = []
   private pending: Float32Array[] = []
@@ -451,6 +473,10 @@ export class SonioxLiveTranscriber {
   private fail: ((err: Error) => void) | null = null
   private finals = ''
   private partial = ''
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
 
   constructor(
     key: Promise<{ token: string; terms: string[] }>,
@@ -584,6 +610,7 @@ export class SonioxLiveTranscriber {
       else partial += text
     }
     this.partial = partial
+    this.onPreview?.(this.heard())
     if (msg.finished) this.resolveWith()
   }
 
@@ -638,6 +665,7 @@ export function cartesiaTerms(dictionary: string[], first: string[] = []) {
  * the rest and is acknowledged with flush_done.
  */
 export class CartesiaLiveTranscriber {
+  private onPreview?: (text: string) => void
   private socket: SocketLike | null = null
   private queue: (ArrayBuffer | string)[] = []
   private pending: Float32Array[] = []
@@ -647,6 +675,10 @@ export class CartesiaLiveTranscriber {
   private fail: ((err: Error) => void) | null = null
   private finals = ''
   private partial = ''
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
 
   constructor(
     key: Promise<{ token: string; terms: string[] }>,
@@ -767,6 +799,7 @@ export class CartesiaLiveTranscriber {
         this.finals += msg.text ?? ''
         this.partial = ''
       } else this.partial = msg.text ?? ''
+      this.onPreview?.(this.heard())
     } else if (msg.type === 'flush_done' || msg.type === 'done') {
       if (this.done) this.resolveWith()
     } else if (msg.type === 'error') {

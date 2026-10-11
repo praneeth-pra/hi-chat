@@ -985,7 +985,7 @@ function General() {
               />
               <CardItem
                 title="Speaker question review"
-                description="Scenario fragments stay pending across pauses. Every question appears for approval in the prompt box. Send creates a separate prompt and never appends to an existing question or replaces its answer. fn + Right sends; fn + Left discards. Proposals hide after three seconds. Your typed draft is preserved."
+                description="Scenario fragments stay together across pauses until you send or discard them. Separate questions remain available through the more control in the prompt box. Every question requires approval. Send creates a separate prompt and never appends to an existing question or replaces its answer. fn + Right sends; fn + Left discards. Drafts never expire. Streaming text is previewed while transcription finishes; sending does not wait for the judge. Your typed draft is preserved."
               />
               <CardItem
                 title="Smart turn detection"
