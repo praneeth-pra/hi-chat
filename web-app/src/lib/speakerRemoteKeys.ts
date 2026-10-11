@@ -205,12 +205,14 @@ export function handleSpeakerKey(key: string): boolean {
   if (key === RECOMMENDATION_SEND_KEY || key === RECOMMENDATION_DISCARD_KEY) {
     if (state.enabled && state.pendingQuestion) {
       if (
-        (!state.pendingQuestion.complete &&
+        ((!state.pendingQuestion.complete ||
+          state.pendingQuestion.requiresReview) &&
           state.pendingQuestion.reviewUntil !== undefined &&
           Date.now() >= state.pendingQuestion.reviewUntil) ||
         (!state.pendingQuestion.complete &&
           !state.pendingQuestion.manual &&
           !state.pendingQuestion.uncertain &&
+          !state.pendingQuestion.requiresReview &&
           state.pendingQuestion.relation !== 'update' &&
           !hasQuestionCue(state.pendingQuestion.text))
       ) {

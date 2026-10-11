@@ -53,8 +53,8 @@ describe('question-turn coordination', () => {
       'Suppose we have three services. Payment succeeds but delivery fails. How do we keep them consistent?'
     )
   })
-  it('joins a follow-up before delivery and extends the settling window', async () => {
-    const { turns, judge, onCommit } = setup()
+  it('keeps a complete first question separate when its follow-up arrives before delivery', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
       .mockResolvedValueOnce(
@@ -63,14 +63,22 @@ describe('question-turn coordination', () => {
     await turns.accept(['How does DNS work?'])
     await vi.advanceTimersByTimeAsync(400)
     await turns.accept(['And what about caching?'])
-    await vi.advanceTimersByTimeAsync(400)
-    expect(onCommit).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(100)
-    expect(onCommit.mock.calls[0][0].text).toBe(
-      'How does DNS work? And what about caching?'
-    )
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit.mock.calls[0][0].text).toBe('How does DNS work?')
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
+      requiresReview: true,
+      text: 'And what about caching?',
+    })
+    turns.sendNow()
+    expect(onCommit.mock.calls[1][0]).toMatchObject({
+      relation: 'new',
+      version: 1,
+      text: 'And what about caching?',
+    })
+    expect(onCommit.mock.calls[1][0].id).not.toBe(onCommit.mock.calls[0][0].id)
   })
-  it('versions follow-ups to the same question, including after its answer', async () => {
+  it('requires approval for follow-ups even after a long pause', async () => {
     const { turns, judge, onCommit } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
@@ -78,23 +86,22 @@ describe('question-turn coordination', () => {
         decision('followup', 'And what about caching?', true)
       )
     await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
     await vi.advanceTimersByTimeAsync(120000)
     await turns.accept(['And what about caching?'])
-    await vi.advanceTimersByTimeAsync(500)
-    const [first, second] = onCommit.mock.calls.map((c) => c[0])
-    expect(second).toMatchObject({
-      id: first.id,
-      version: 2,
-      relation: 'update',
-      text: 'How does DNS work? And what about caching?',
-    })
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
     expect(judge.mock.calls[1][1]).toMatchObject({
       active: 'How does DNS work?',
     })
+    turns.sendNow()
+    expect(onCommit.mock.calls[1][0]).toMatchObject({
+      text: 'And what about caching?',
+      relation: 'new',
+      origin: 'send-now',
+    })
   })
-  it('does not recommend the old question when a held addition is superseded by a new topic', async () => {
-    const { turns, judge, onCommit, onSuggest } = setup()
+  it('replaces a held follow-up with the new topic review without resending the old question', async () => {
+    const { turns, judge, onCommit, onSuggest, onDraft } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
       .mockResolvedValueOnce(decision('followup', 'With caching'))
@@ -107,12 +114,15 @@ describe('question-turn coordination', () => {
     await turns.accept(['Explain garbage collection.'])
     await vi.advanceTimersByTimeAsync(500)
     expect(onSuggest).not.toHaveBeenCalled()
-    expect(onCommit.mock.calls[1][0]).toMatchObject({
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
+      requiresReview: true,
       text: 'Explain garbage collection.',
-      relation: 'new',
     })
+    turns.sendNow()
+    expect(onCommit.mock.calls[1][0].text).toBe('Explain garbage collection.')
   })
-  it('uses a different turn for a clearly separate topic', async () => {
+  it('requires approval for new topics after the first question', async () => {
     const { turns, judge, onCommit } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
@@ -122,9 +132,53 @@ describe('question-turn coordination', () => {
     await turns.accept(['How does DNS work?'])
     await vi.advanceTimersByTimeAsync(500)
     await turns.accept(['Explain garbage collection.'])
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     expect(onCommit.mock.calls[1][0].id).not.toBe(onCommit.mock.calls[0][0].id)
     expect(onCommit.mock.calls[1][0].text).toBe('Explain garbage collection.')
+  })
+  it('discarding a follow-up cannot re-enable automatic sending for the next question', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge
+      .mockResolvedValueOnce(decision('question', 'Explain DNS.', true))
+      .mockResolvedValueOnce(decision('followup', 'What about caching?', true))
+      .mockResolvedValueOnce(decision('new-question', 'Explain JVM.', true))
+    await turns.accept(['Explain DNS.'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept(['What about caching?'])
+    turns.discard()
+    await turns.accept(['Explain JVM.'])
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
+      requiresReview: true,
+      text: 'Explain JVM.',
+    })
+  })
+  it('offers only the latest complete follow-up without appending earlier unaccepted questions', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge
+      .mockResolvedValueOnce(decision('question', 'Compare ECS and EKS.', true))
+      .mockResolvedValueOnce(
+        decision('followup', 'Which one is cheaper?', true)
+      )
+      .mockResolvedValueOnce(
+        decision('followup', 'Which one is easier to operate?', true)
+      )
+    await turns.accept(['Compare ECS and EKS.'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept(['Which one is cheaper?'])
+    await turns.accept(['Which one is easier to operate?'])
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
+      text: 'Which one is easier to operate?',
+      requiresReview: true,
+    })
+    turns.sendNow()
+    expect(onCommit.mock.calls[1][0].text).toBe(
+      'Which one is easier to operate?'
+    )
+    expect(onCommit.mock.calls[0][0].text).toBe('Compare ECS and EKS.')
   })
   it('sends a complete judged question despite ongoing capture', async () => {
     const { turns, judge, onCommit } = setup()
@@ -193,11 +247,12 @@ describe('question-turn coordination', () => {
     resolve(decision('question', 'with zero downtime?', true))
     await next
     await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     expect(onCommit.mock.calls[1][0]).toMatchObject({
-      id: onCommit.mock.calls[0][0].id,
-      relation: 'update',
-      version: 2,
-      text: 'How would you migrate it with zero downtime?',
+      relation: 'new',
+      version: 1,
+      text: 'with zero downtime?',
     })
   })
   it('discards an in-flight judgement and its queued continuation', async () => {
@@ -350,7 +405,7 @@ describe('question-turn coordination', () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(onCommit).toHaveBeenCalledTimes(1)
   })
-  it('a queued continuation updates the question that committed during judgement', async () => {
+  it('a queued continuation requires review after the first question committed during judgement', async () => {
     const { turns, judge, onCommit } = setup()
     judge.mockResolvedValueOnce(
       decision('question', 'How does DNS work?', true)
@@ -369,12 +424,14 @@ describe('question-turn coordination', () => {
     resolve(decision('question', 'And what about caching?', true))
     await next
     await vi.advanceTimersByTimeAsync(0)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     const [first, second] = onCommit.mock.calls.map((c) => c[0])
+    expect(second.id).not.toBe(first.id)
     expect(second).toMatchObject({
-      id: first.id,
-      version: 2,
-      relation: 'update',
-      text: 'How does DNS work? And what about caching?',
+      version: 1,
+      relation: 'new',
+      text: 'And what about caching?',
     })
   })
   it('rejected candidate answers do not enter conversation history', async () => {
@@ -397,8 +454,8 @@ describe('question-turn coordination', () => {
     await vi.advanceTimersByTimeAsync(500)
     await turns.accept(['With caching.'])
     const draft = onDraft.mock.calls.at(-1)![0]!
-    expect(draft.relation).toBe('update')
-    expect(draft.addition).toBe('With caching.')
+    expect(draft.requiresReview).toBe(true)
+    expect(draft.text).toBe('With caching.')
     let resolve!: (decision: TurnDecision) => void
     judge.mockImplementationOnce(
       () =>
@@ -412,8 +469,10 @@ describe('question-turn coordination', () => {
     resolve(decision('followup', 'What about TTL?', true))
     await next
     await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     expect(onCommit.mock.calls.at(-1)![0].text).toBe(
-      'How does DNS work? With caching. What about TTL?'
+      'With caching. What about TTL?'
     )
     expect(onCommit).toHaveBeenCalledTimes(2)
   })
@@ -433,7 +492,7 @@ describe('question-turn coordination', () => {
     await turns.accept(['Do you have it running in a container or on EC2?'])
     expect(onCommit).toHaveBeenCalledTimes(1)
     expect(onCommit.mock.calls[0][0].text).toBe('How did you integrate Vault?')
-    expect(onDraft.mock.calls.at(-1)![0]?.relation).toBe('update')
+    expect(onDraft.mock.calls.at(-1)![0]?.requiresReview).toBe(true)
     await turns.accept(['That is actually maintained by another team.'])
     expect(onCommit).toHaveBeenCalledTimes(1)
     expect(onDraft.mock.calls.at(-1)![0]?.text).not.toContain('another team')

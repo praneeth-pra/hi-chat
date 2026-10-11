@@ -14,6 +14,8 @@ export type QuestionDraft = {
   text: string
   complete: boolean
   manual: boolean
+  requiresReview?: boolean
+  followsQuestion?: string
   uncertain?: boolean
   relation?: 'new' | 'update'
   addition?: string
@@ -52,6 +54,7 @@ const append = (base: string, text: string) =>
 export function createQuestionTurns(options: Options) {
   let draft: QuestionDraft | null = null
   let active: QuestionCommit | null = null
+  let hasSentQuestion = false
   let recent: string[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   let processing = 0
@@ -75,17 +78,18 @@ export function createQuestionTurns(options: Options) {
   const emitDraft = () => {
     cancelTimer()
     if (!draft || stopped) return
-    const relation = active?.id === draft.id ? 'update' : 'new'
+    const relation = 'new' as const
     active = {
       id: draft.id,
       text: draft.text,
-      version: relation === 'update' ? active!.version + 1 : 1,
+      version: 1,
       relation,
       origin: manualRequested ? manualOrigin : 'automatic',
       captureEnd: draft.captureEnd,
       clip: draft.clip,
     }
     draft = null
+    hasSentQuestion = true
     manualRequested = false
     publish()
     options.onTrace?.('commit', {
@@ -111,7 +115,13 @@ export function createQuestionTurns(options: Options) {
       commit()
       return
     }
-    if (draft.complete && !draft.manual && !draft.uncertain && !timer) {
+    if (
+      draft.complete &&
+      !draft.manual &&
+      !draft.requiresReview &&
+      !draft.uncertain &&
+      !timer
+    ) {
       // The endpoint belongs to this contribution. Later speech and queued clips
       // cannot postpone a question already judged answerable.
       const elapsed = Date.now() - (draft.captureEnd ?? Date.now())
@@ -143,7 +153,7 @@ export function createQuestionTurns(options: Options) {
     if (action === 'skip' || !text.trim()) return
     cancelTimer()
     if (action === 'suggest') {
-      if (draft?.complete && !draft.manual) emitDraft()
+      if (draft?.complete && !draft.manual && !draft.requiresReview) emitDraft()
       // An uncertain continuation must not let an earlier partial question escape.
       if (draft) {
         draft.uncertain = true
@@ -154,23 +164,29 @@ export function createQuestionTurns(options: Options) {
       suggestQuestion(text, reason)
       return
     }
+    // A later complete question replaces the previous unaccepted card.
+    // Only unfinished fragments accumulate into one unsent scenario draft.
+    if (draft?.requiresReview && draft.complete && complete) {
+      options.onTrace?.('review-superseded', { at: Date.now(), turn: draft.id })
+      draft = null
+    }
     // A clip boundary cannot erase an answerable question or split unfinished setup.
     if (
       draft &&
       !draft.complete &&
-      draft.relation !== 'update' &&
+      !draft.followsQuestion &&
       action === 'new-question' &&
       !complete
     )
       action = 'context'
-    if (draft && draft.complete && !draft.manual && !complete) {
+    if (draft && draft.complete && !draft.manual && !draft.requiresReview) {
       emitDraft()
       if (action === 'context' || action === 'question') action = 'followup'
     }
     if (draft && action === 'new-question') {
-      if (draft.complete && !draft.manual) {
+      if (draft.complete && !draft.manual && !draft.requiresReview) {
         emitDraft()
-      } else if (draft.relation === 'update') {
+      } else if (draft.requiresReview) {
         options.onTrace?.('context-cleared', {
           at: Date.now(),
           turn: draft.id,
@@ -183,19 +199,17 @@ export function createQuestionTurns(options: Options) {
     if (!draft) {
       const continuation = action === 'followup' && active
       draft = {
-        id: continuation ? active!.id : `${session}-${++sequence}`,
-        text: continuation ? active!.text : '',
+        id: `${session}-${++sequence}`,
+        text: '',
+        requiresReview: hasSentQuestion,
+        followsQuestion: continuation ? active!.id : undefined,
         complete: false,
         manual: false,
         reason,
       }
     }
     draft.text = append(draft.text, text)
-    draft.relation = active?.id === draft.id ? 'update' : 'new'
-    draft.addition =
-      draft.relation === 'update'
-        ? draft.text.slice(active!.text.length).trim()
-        : undefined
+    draft.relation = 'new'
     draft.reviewUntil = Date.now() + SPEAKER_REVIEW_MS
     draft.complete = complete && action !== 'context'
     if (draft.complete) draft.uncertain = false
@@ -257,7 +271,7 @@ export function createQuestionTurns(options: Options) {
             hadActive: !!context.active,
           })
           // A ready draft may have committed while this judge was running.
-          // Its continuation still targets the same stable question ID.
+          // Recognize the continuation as a follow-up, offered as a separate prompt.
           if (
             !draft &&
             pendingId &&
@@ -320,8 +334,7 @@ export function createQuestionTurns(options: Options) {
         !draft ||
         draft.id !== id ||
         draft.text !== text ||
-        draft.complete ||
-        draft.relation !== 'update'
+        (draft.complete && !draft.requiresReview)
       )
         return
       options.onTrace?.('review-hidden', {
@@ -361,6 +374,7 @@ export function createQuestionTurns(options: Options) {
     },
     endTurn() {
       active = null
+      hasSentQuestion = false
     },
     stop() {
       stopped = true

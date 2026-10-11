@@ -41,8 +41,12 @@ answer beginning after a question mark is excluded from the selected question. C
 and chatter are rejected; technical vocabulary alone cannot authorize sending.
 The judge selects original transcript words by index, without rewriting them.
 
-Complete questions send automatically. Related follow-ups revise the same
-question ID and answer; a genuinely separate topic creates a new question.
+The first complete question sends automatically. Every later follow-up or new
+question requires approval through a review card. **Send as new** creates a
+separate prompt containing only the new draft; it never appends speech to a sent
+question or replaces its answer. The previous question remains context for the
+judge, not text copied into the new prompt. This policy resets when the speaker
+conversation is reset or listening restarts.
 Incomplete scenarios survive pauses and accumulate without background review
 cards. A final fragment can complete a question begun in an earlier clip.
 Bare “What do you think?” needs surrounding context before it can send.
@@ -60,13 +64,15 @@ at each clip endpoint, independently of earlier questions being judged. Logs
 separate clip-finalized, engine-ready, fallback-start, transcripts-ready,
 capture-queue-ready and turn-check-ready stages.
 
-Only the latest review card appears. **Add** updates the current question;
-**Send now** explicitly sends a new draft. Cards hide after three seconds;
+Only the latest review card appears. Follow-ups are labelled **Follow-up
+question?** and separate topics **New question?**. Both use **Send as new** or
+**Discard**; fn + Right sends and fn + Left discards. **Send now** explicitly
+sends the initial draft. Cards hide after three seconds;
 hiding never deletes accumulated context. Later relevant speech can complete a
 hidden draft. **Discard** explicitly removes it. An uncertain standalone
 recommendation uses **Send as new**, preserving its separate question boundary.
 
-Speaker logs record `conversation-v2`, endpoint configuration, invalid fields,
+Speaker logs record `conversation-v3`, endpoint configuration, invalid fields,
 provider finish reason and recovery outcome. Stage timestamps distinguish clip
 finalization, transcript readiness, decision readiness, settling, queueing,
 sending and first answer content. Commit origin distinguishes automatic sends,
@@ -74,7 +80,7 @@ Send now and clicked recommendations. Recommendation creation/suppression and
 review hiding are logged. Capture end is the audio endpoint, not the last word.
 No raw judge replies or credentials are logged.
 
-Related updates retain the previous answer until a replacement is ready.
+Speaker sends retain all earlier questions and answers.
 Switching chats, typing a question or disabling Speaker cancels stale automatic
 work. Dictation retains its separate microphone flow. Recognized dictation
 appends to the prompt box and automatically sends through its own queue even
@@ -87,7 +93,7 @@ optional; a stalled model load cannot block text decisions.
 The updated version of the supplied Mac script is
 `scripts/hammerspoon/jan-remote.lua`. Replace the corresponding script on your
 Mac with this file and reload Hammerspoon. **fn + Right** accepts the visible
-card (Add or Send); **fn + Left** discards it. Plain Left/Right arrows remain
+card (Send as new or Send now); **fn + Left** discards it. Plain Left/Right arrows remain
 normal navigation. The script tracks the physical fn press because macOS can
 mark plain arrow events with a secondary fn flag. These commands use
 Shift + F15 / Shift + F18 and do not submit a typed draft or toggle coding.

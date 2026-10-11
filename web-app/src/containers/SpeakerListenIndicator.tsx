@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=conversation-v2',
+        'protocol=conversation-v3',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
@@ -305,7 +305,12 @@ export function SpeakerPendingQuestion() {
     ? `${pendingQuestion.id}:${pendingQuestion.text}:${pendingQuestion.reviewUntil ?? 0}`
     : ''
   useEffect(() => {
-    if (!enabled || !pendingQuestion || pendingQuestion.complete) return
+    if (
+      !enabled ||
+      !pendingQuestion ||
+      (pendingQuestion.complete && !pendingQuestion.requiresReview)
+    )
+      return
     const snapshot = pendingQuestion
     const timer = setTimeout(
       () => {
@@ -313,7 +318,7 @@ export function SpeakerPendingQuestion() {
         const current = useSpeakerTranscription.getState()
         // Hide the card only; later speech can complete this retained follow-up.
         if (
-          snapshot.relation === 'update' &&
+          snapshot.requiresReview &&
           current.pendingQuestion?.id === snapshot.id &&
           current.pendingQuestion.text === snapshot.text
         )
@@ -330,7 +335,7 @@ export function SpeakerPendingQuestion() {
     pendingQuestion?.id,
     pendingQuestion?.text,
     pendingQuestion?.complete,
-    pendingQuestion?.relation,
+    pendingQuestion?.requiresReview,
     pendingQuestion?.reviewUntil,
   ])
   if (isPlatformTauri() || !enabled) return null
@@ -342,13 +347,17 @@ export function SpeakerPendingQuestion() {
           : 'Preparing answer…'}
       </div>
     ) : null
-  if (expired === reviewKey && !pendingQuestion.complete) return null
+  if (
+    expired === reviewKey &&
+    (!pendingQuestion.complete || pendingQuestion.requiresReview)
+  )
+    return null
   // Scenario background accumulates without repeatedly asking for approval.
   if (
     !pendingQuestion.complete &&
     !pendingQuestion.manual &&
     !pendingQuestion.uncertain &&
-    pendingQuestion.relation !== 'update' &&
+    !pendingQuestion.requiresReview &&
     !hasQuestionCue(pendingQuestion.text)
   )
     return null
@@ -358,27 +367,29 @@ export function SpeakerPendingQuestion() {
       data-test-id="speaker-pending-question"
     >
       <div className="font-medium">
-        {pendingQuestion.manual
-          ? 'Waiting for you to send'
-          : pendingQuestion.uncertain
-            ? 'Waiting for clearer speech…'
-            : pendingQuestion.complete
-              ? pendingQuestion.relation === 'new'
-                ? 'Sending new question…'
-                : 'Sending automatically…'
-              : pendingQuestion.relation === 'update'
-                ? 'Add to this question?'
+        {pendingQuestion.requiresReview
+          ? pendingQuestion.followsQuestion
+            ? 'Follow-up question?'
+            : 'New question?'
+          : pendingQuestion.manual
+            ? 'Waiting for you to send'
+            : pendingQuestion.uncertain
+              ? 'Waiting for clearer speech…'
+              : pendingQuestion.complete
+                ? pendingQuestion.relation === 'new'
+                  ? 'Sending new question…'
+                  : 'Sending automatically…'
                 : 'New question?'}
       </div>
-      {!pendingQuestion.complete && (
+      {(!pendingQuestion.complete || pendingQuestion.requiresReview) && (
         <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">
-          {pendingQuestion.addition ?? pendingQuestion.text}
+          {pendingQuestion.text}
         </p>
       )}
-      {!pendingQuestion.complete && (
+      {(!pendingQuestion.complete || pendingQuestion.requiresReview) && (
         <p className="mt-1 text-xs text-main-view-fg/50">
-          {pendingQuestion.relation === 'update'
-            ? 'Addition to the current question'
+          {pendingQuestion.requiresReview
+            ? 'Sends as a separate prompt'
             : 'New question setup'}{' '}
           · hides after 3 seconds
         </p>
@@ -392,7 +403,7 @@ export function SpeakerPendingQuestion() {
           className="text-accent"
           onClick={sendPendingQuestion}
         >
-          {pendingQuestion.relation === 'update' ? 'Add' : 'Send now'}{' '}
+          {pendingQuestion.requiresReview ? 'Send as new' : 'Send now'}{' '}
           <kbd className="ml-1 text-xs">fn + →</kbd>
         </button>
         <button type="button" onClick={discardPendingQuestion}>

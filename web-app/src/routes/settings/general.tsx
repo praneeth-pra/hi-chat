@@ -968,7 +968,7 @@ function General() {
               />
               <CardItem
                 title="Automatic speaker questions"
-                description="Scenario fragments stay pending across pauses. Complete questions send automatically; settling overlaps transcription and judgement. Related follow-ups update the same question. No approval is needed for clear questions. Manual recommendations send as new questions; they never silently append to an existing answer."
+                description="Scenario fragments stay pending across pauses. The first complete question sends automatically; later follow-ups and new questions require approval. Review cards send as separate prompts and never append to an existing question or replace its answer. fn + Right sends; fn + Left discards. Cards hide after three seconds."
               />
               <CardItem
                 title="Smart turn detection"

@@ -117,6 +117,34 @@ describe('speaker remote keys', () => {
     unregister()
     useSpeakerTranscription.getState().resetTurns()
   })
+  it('cannot send a complete review question after its card expired', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'review',
+        text: 'Which one is cheaper?',
+        complete: true,
+        manual: false,
+        requiresReview: true,
+        reviewUntil: Date.now() - 1,
+        reason: 'follow-up',
+      })
+    const sendNow = vi.fn()
+    const unregister = setQuestionControls({
+      sendNow,
+      discard: vi.fn(),
+      keepListening: vi.fn(),
+    })
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
+    )
+    expect(sendNow).not.toHaveBeenCalled()
+    stop()
+    unregister()
+    useSpeakerTranscription.getState().resetTurns()
+  })
   it('plain side arrows never control the speaker or prevent normal navigation', () => {
     useSpeakerTranscription.getState().resetTurns()
     useSpeakerTranscription.getState().suggest('What is DNS?')
