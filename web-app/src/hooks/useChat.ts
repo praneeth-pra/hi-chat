@@ -1,3 +1,4 @@
+import { raceAutoAnswers } from '@/lib/autoRace'
 import { useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { usePrompt } from './usePrompt'
@@ -28,7 +29,12 @@ import {
   ChatCompletionMessageToolCall,
   CompletionUsage,
 } from 'openai/resources'
-import { MessageStatus, ContentType, ThreadMessage } from '@janhq/core'
+import {
+  MessageStatus,
+  ContentType,
+  ThreadMessage,
+  type chatCompletionChunk,
+} from '@janhq/core'
 import { useAttachments } from '@/hooks/useAttachments'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
@@ -49,14 +55,8 @@ import { Attachment } from '@/types/attachment'
 import { MCPTool } from '@/types/completion'
 import { useMCPServers } from '@/hooks/useMCPServers'
 import { titleFromMessage } from '@/lib/chatList'
-import {
-  autoChain,
-  FIRST_CHUNK_TIMEOUT_MS,
-  streamWithFallback,
-  useChatAuto,
-} from '@/lib/chatModels'
+import { autoChain, useChatAuto } from '@/lib/chatModels'
 import { hasImages } from '@/lib/visionModels'
-import { anthropicConfig } from '@/lib/anthropicProvider'
 import { streamClaude } from '@/lib/claudeChat'
 import { useAttachmentIngestionPrompt } from './useAttachmentIngestionPrompt'
 import {
@@ -890,12 +890,18 @@ export const useChat = () => {
             attempts: streamTiming.attempts!,
             start: requestStart,
           }
+          const autoState = useChatAuto.getState()
+          if (autoState.auto) streamTiming.autoMode = autoState.mode
+          // Auto's first-answer race requires streaming; manual models retain their setting.
           const streamReply =
-            currentAssistant?.parameters?.stream === false ? false : true
+            autoState.auto || currentAssistant?.parameters?.stream !== false
+          const attemptTracks = new Map<string, typeof track>()
           const sendTo = (
             provider: ModelProvider,
             modelId: string | undefined,
-            controller: AbortController
+            controller: AbortController,
+            attemptTrack = track,
+            autoReasoning?: 'low' | 'medium'
           ) =>
             sendCompletion(
               modelId &&
@@ -914,43 +920,27 @@ export const useChat = () => {
               {
                 ...modelSettings,
                 ...(currentAssistant?.parameters || {}),
+                ...(autoReasoning ? { reasoning_effort: autoReasoning } : {}),
               } as unknown as Record<string, object>,
-              track
+              attemptTrack
             )
-          // Auto in the model picker: the Settings > General chat model, then
-          // its fallbacks; if one fails or stays silent, the same request
-          // goes to the next. A model picked by name answers alone. Claude is
-          // called directly with the judges' Anthropic key (text only).
-          const claude = anthropicConfig(
-            useModelProvider.getState().providers ?? []
-          )
-          const chain = useChatAuto.getState().auto
+          // Auto modes only use Groq and Cerebras. Manual selection keeps its provider.
+          const chain = autoState.auto
             ? autoChain()
-                .map((c) => ({
-                  ...c,
-                  provider:
-                    c.provider === 'anthropic'
-                      ? claude.apiKey &&
-                        streamReply &&
-                        !hasImages(requestMessages)
-                        ? ({
-                            provider: 'anthropic',
-                            api_key: claude.apiKey,
-                            base_url: claude.baseUrl,
-                          } as ModelProvider)
-                        : undefined
-                      : getProviderByName(c.provider),
-                }))
+                .map((c) => ({ ...c, provider: getProviderByName(c.provider) }))
                 .filter(
                   (c): c is typeof c & { provider: ModelProvider } =>
                     !!c.provider?.api_key
                 )
             : []
+          if (autoState.auto && !chain.length)
+            throw new Error(
+              'Configure a Groq or Cerebras API key to use Auto, or select a model manually'
+            )
           if (!chain.length && activeThread.model?.id)
             chain.push({
               provider: activeProvider,
               model: activeThread.model.id,
-              firstChunkMs: FIRST_CHUNK_TIMEOUT_MS,
             })
           const tries = chain
             // Image questions go to each provider's one vision model, so
@@ -976,30 +966,85 @@ export const useChat = () => {
                   content?: unknown
                 }[],
                 signal: controller.signal,
-              })) as unknown as AsyncIterable<unknown>
-            const res = await sendTo(c.provider, c.model, controller)
+              })) as unknown as AsyncIterable<chatCompletionChunk>
+            const attemptTrack: typeof track = {
+              attempts: track.attempts,
+              start: track.start,
+            }
+            attemptTracks.set(`${c.provider.provider}:${c.model}`, attemptTrack)
+            const res = await sendTo(
+              c.provider,
+              c.model,
+              controller,
+              attemptTrack,
+              autoState.auto && !hasImages(requestMessages)
+                ? autoState.mode === 'speed'
+                  ? 'low'
+                  : 'medium'
+                : undefined
+            )
             if (!res) throw new Error('No completion received')
-            return res as unknown as AsyncIterable<unknown>
+            return res as unknown as AsyncIterable<chatCompletionChunk>
           }
+          let winnerIndex = 0
           const completion =
-            streamReply && tries.length > 1
-              ? await streamWithFallback(
-                  tries.map(
-                    (c) => (controller: AbortController) =>
-                      attempt(c, controller)
-                  ),
+            autoState.auto &&
+            streamReply &&
+            tries.some(
+              (c) =>
+                c.provider.provider === 'groq' ||
+                c.provider.provider === 'cerebras'
+            )
+              ? await raceAutoAnswers(
+                  tries.map((c) => ({
+                    model: c.model,
+                    tier:
+                      c.model === 'openai/gpt-oss-20b'
+                        ? ('small' as const)
+                        : ('large' as const),
+                    run: (controller: AbortController) =>
+                      attempt(c, controller),
+                  })),
+                  autoState.mode,
                   abortController.signal,
-                  (i, why) => {
-                    streamTiming.fallbacks = [
-                      ...(streamTiming.fallbacks ?? []),
-                      `${tries[i].model} (${tries[i].provider.provider}): ${why}`,
+                  (index, event, reason) => {
+                    if (event === 'winner') {
+                      winnerIndex = index
+                      const events = streamTiming.autoEvents ?? []
+                      const first = events.find(
+                        (entry) =>
+                          entry.model === tries[index].model &&
+                          entry.provider === tries[index].provider.provider &&
+                          entry.event === 'first-chunk'
+                      )
+                      const ready = events.find(
+                        (entry) =>
+                          entry.model === tries[index].model &&
+                          entry.provider === tries[index].provider.provider &&
+                          entry.event === 'answer-ready'
+                      )
+                      if (first) {
+                        streamTiming.firstChunkAt = requestStart + first.atMs
+                        streamTiming.hiddenAtFirstChunk = first.hidden
+                      }
+                      if (ready)
+                        streamTiming.firstAnswerAt = requestStart + ready.atMs
+                    }
+                    streamTiming.autoEvents = [
+                      ...(streamTiming.autoEvents ?? []),
+                      {
+                        model: tries[index].model,
+                        provider: tries[index].provider.provider,
+                        event,
+                        ...(event === 'first-chunk'
+                          ? { hidden: pageHidden() }
+                          : {}),
+                        atMs: Date.now() - requestStart,
+                        ...(reason ? { reason } : {}),
+                      },
                     ]
-                  },
-                  // Sonnet gets longer to start than the fast models
-                  tries.map((c) => c.firstChunkMs),
-                  // Claude goes first, with the fallback already running
-                  { headStart: tries[0].provider.provider === 'anthropic' }
-                )
+                  }
+                ).then((result) => result.stream)
               : tries[0]?.provider.provider === 'anthropic'
                 ? await attempt(tries[0], abortController)
                 : await sendTo(
@@ -1009,15 +1054,12 @@ export const useChat = () => {
                   )
 
           if (!completion) throw new Error('No completion received')
-          // The model that answered: the one after every skipped one. Claude
-          // has no SDK request; the others' request shows a swapped-in
-          // vision model
-          const winner = tries[streamTiming.fallbacks?.length ?? 0]
-          const answered = winner
-            ? winner.provider.provider === 'anthropic'
-              ? winner.model
-              : (track.sent?.model ?? winner.model)
-            : track.sent?.model
+          const winner = tries[winnerIndex]
+          const winnerTrack = winner
+            ? attemptTracks.get(`${winner.provider.provider}:${winner.model}`)
+            : undefined
+          if (winnerTrack?.sent) track.sent = winnerTrack.sent
+          const answered = track.sent?.model ?? winner?.model
           const currentCall: ChatCompletionMessageToolCall | null = null
           const toolCalls: ChatCompletionMessageToolCall[] = []
           const timeToFirstToken = Date.now()
@@ -1140,7 +1182,7 @@ export const useChat = () => {
             {
               tokenSpeed: useAppState.getState().tokenSpeed,
               assistant: withoutDocuments(currentAssistant),
-              modelId: selectedModel?.id,
+              modelId: answered ?? selectedModel?.id,
               timings,
             }
           )

@@ -1,3 +1,4 @@
+import { AUTO_MODES, type AutoMode } from '@/lib/autoRace'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import {
@@ -26,7 +27,7 @@ import { useServiceHub } from '@/hooks/useServiceHub'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
 import { getLastUsedModel } from '@/utils/getModelToStart'
-import { chatModelInfo, getChatModel, useChatAuto } from '@/lib/chatModels'
+import { autoChain, useChatAuto } from '@/lib/chatModels'
 
 // The self-hosted web build only talks to Groq
 const WEB_DEFAULT_PROVIDER = 'groq'
@@ -72,6 +73,8 @@ const DropdownModelProvider = ({
   const [displayModel, setDisplayModel] = useState<string>('')
   const auto = useChatAuto((state) => state.auto)
   const setAuto = useChatAuto((state) => state.setAuto)
+  const autoMode = useChatAuto((state) => state.mode)
+  const setMode = useChatAuto((state) => state.setMode)
   const { updateCurrentThreadModel } = useThreads()
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -148,14 +151,16 @@ const DropdownModelProvider = ({
     [getProviderByName, updateProvider, serviceHub]
   )
 
-  // With Auto on, the Settings > General chat model (when its provider has a
-  // key) is selected, so its capabilities apply to the chat
+  // Auto selects an eligible Groq/Cerebras model for capability display.
   const autoModel = useCallback(() => {
     if (!useChatAuto.getState().auto) return undefined
-    const preferred = chatModelInfo(getChatModel())
-    return checkModelExists(preferred.provider, preferred.model) &&
-      getProviderByName(preferred.provider)?.api_key
-      ? { provider: preferred.provider, model: preferred.model }
+    const eligible = autoChain().find(
+      (candidate) =>
+        checkModelExists(candidate.provider, candidate.model) &&
+        getProviderByName(candidate.provider)?.api_key
+    )
+    return eligible
+      ? { provider: eligible.provider, model: eligible.model }
       : undefined
   }, [checkModelExists, getProviderByName])
 
@@ -270,13 +275,16 @@ const DropdownModelProvider = ({
   // Update display model when selection changes
   useEffect(() => {
     if (auto) {
-      setDisplayModel('Auto')
+      setDisplayModel(
+        AUTO_MODES.find((mode) => mode.value === autoMode)?.label ??
+          'Auto · Accuracy'
+      )
     } else if (selectedProvider && selectedModel) {
       setDisplayModel(getModelDisplayName(selectedModel))
     } else {
       setDisplayModel(t('common:selectAModel'))
     }
-  }, [auto, selectedProvider, selectedModel, t])
+  }, [auto, autoMode, selectedProvider, selectedModel, t])
 
   // Check vision capabilities for all llamacpp models
   useEffect(() => {
@@ -485,15 +493,19 @@ const DropdownModelProvider = ({
     ]
   )
 
-  const handleSelectAuto = useCallback(() => {
-    setSearchValue('')
-    setOpen(false)
-    setAuto(true)
-    const pick = autoModel()
-    if (!pick) return
-    selectModelProvider(pick.provider, pick.model)
-    updateCurrentThreadModel({ id: pick.model, provider: pick.provider })
-  }, [autoModel, selectModelProvider, setAuto, updateCurrentThreadModel])
+  const handleSelectAuto = useCallback(
+    (mode: AutoMode) => {
+      setMode(mode)
+      setSearchValue('')
+      setOpen(false)
+      setAuto(true)
+      const pick = autoModel()
+      if (!pick) return
+      selectModelProvider(pick.provider, pick.model)
+      updateCurrentThreadModel({ id: pick.model, provider: pick.provider })
+    },
+    [autoModel, selectModelProvider, setAuto, setMode, updateCurrentThreadModel]
+  )
 
   const currentModel = selectedModel?.id
     ? getModelBy(selectedModel?.id)
@@ -577,29 +589,44 @@ const DropdownModelProvider = ({
 
           {/* Model list */}
           <div className="max-h-[320px] overflow-y-auto">
-            {Object.keys(groupedItems).length === 0 && searchValue ? (
+            {Object.keys(groupedItems).length === 0 &&
+            searchValue &&
+            !AUTO_MODES.some((mode) =>
+              `${mode.label} ${mode.description}`
+                .toLowerCase()
+                .includes(searchValue.trim().toLowerCase())
+            ) ? (
               <div className="py-3 px-4 text-sm text-main-view-fg/60">
                 {t('common:noModelsFoundFor', { searchValue })}
               </div>
             ) : (
               <div className="py-1">
-                {/* Auto: the Settings > General chat model and its fallbacks */}
-                {'auto'.includes(searchValue.trim().toLowerCase()) && (
-                  <div
-                    title="Uses the chat model in Settings > General, then its fallbacks"
-                    onClick={handleSelectAuto}
+                {AUTO_MODES.filter((mode) =>
+                  `${mode.label} ${mode.description}`
+                    .toLowerCase()
+                    .includes(searchValue.trim().toLowerCase())
+                ).map((mode) => (
+                  <button
+                    type="button"
+                    key={mode.value}
+                    title={mode.description}
+                    onClick={() => handleSelectAuto(mode.value)}
                     className={cn(
-                      'mx-1.5 my-1 px-2 py-1.5 rounded-sm cursor-pointer flex flex-col transition-all duration-200',
+                      'mx-1.5 my-1 px-2 py-1.5 rounded-sm cursor-pointer flex flex-col text-left transition-all duration-200',
                       'hover:bg-main-view-fg/4',
-                      auto && 'bg-main-view-fg/8 hover:bg-main-view-fg/8'
+                      auto &&
+                        autoMode === mode.value &&
+                        'bg-main-view-fg/8 hover:bg-main-view-fg/8'
                     )}
                   >
-                    <span className="text-main-view-fg/80 text-sm">Auto</span>
-                    <span className="text-main-view-fg/50 text-xs">
-                      {chatModelInfo(getChatModel()).label}, with fallbacks
+                    <span className="text-main-view-fg/80 text-sm">
+                      {mode.label}
                     </span>
-                  </div>
-                )}
+                    <span className="text-main-view-fg/50 text-xs">
+                      {mode.description}
+                    </span>
+                  </button>
+                ))}
 
                 {/* Favorites section - only show when not searching */}
                 {!searchValue && favoriteItems.length > 0 && (

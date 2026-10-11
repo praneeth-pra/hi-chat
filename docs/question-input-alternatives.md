@@ -53,6 +53,11 @@ Left Option bindings; deploying the web app alone cannot change Hammerspoon.
 
 ## Can answers arrive sooner?
 
+The follow-on [Auto modes](auto-modes.md) implementation now provides Speed and
+Accuracy races using only Groq and Cerebras. The review below describes the
+previous ordered fallback design and the reasons for replacing it. Speaker input
+alternatives remain proposals; no replacement listener has been added.
+
 Yes, there are concrete opportunities. Streaming is **already enabled by default**:
 `useChat.ts` defaults `streamReply` to true unless the assistant explicitly sets
 `parameters.stream=false`; `completion.ts` uses streamed completions; the Claude
