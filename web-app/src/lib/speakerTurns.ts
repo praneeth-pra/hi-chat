@@ -1,7 +1,12 @@
-import type { TurnContext, TurnDecision } from './speakerTurnJudge'
+import {
+  hasQuestionCue,
+  type TurnContext,
+  type TurnDecision,
+} from './speakerTurnJudge'
 
 export const QUESTION_SETTLE_MS = 500
 export const UNFINISHED_TURN_SETTLE_MS = 1000
+export const SPEAKER_REVIEW_MS = 3000
 const MAX_DRAFT_CHARS = 24000
 
 export type QuestionDraft = {
@@ -10,6 +15,9 @@ export type QuestionDraft = {
   complete: boolean
   manual: boolean
   uncertain?: boolean
+  relation?: 'new' | 'update'
+  addition?: string
+  reviewUntil?: number
   reason: string
 }
 export type QuestionCommit = {
@@ -100,6 +108,9 @@ export function createQuestionTurns(options: Options) {
       timer = setTimeout(commit, waitMs)
     }
   }
+  const suggestQuestion = (text: string, reason?: string) => {
+    if (hasQuestionCue(text)) options.onSuggest(text, reason)
+  }
   const apply = (decision: TurnDecision) => {
     const { action, text, complete, reason } = decision
     if (action === 'skip' || !text.trim()) return
@@ -111,7 +122,7 @@ export function createQuestionTurns(options: Options) {
         draft.reason = reason
         publish()
       }
-      options.onSuggest(text, reason)
+      suggestQuestion(text, reason)
       return
     }
     if (draft && action === 'new-question') {
@@ -127,7 +138,7 @@ export function createQuestionTurns(options: Options) {
           origin: 'automatic',
         }
         options.onCommit({ ...active })
-      } else options.onSuggest(draft.text, draft.reason)
+      } else suggestQuestion(draft.text, draft.reason)
       draft = null
     }
     if (!draft) {
@@ -141,11 +152,17 @@ export function createQuestionTurns(options: Options) {
       }
     }
     draft.text = append(draft.text, text)
+    draft.relation = active?.id === draft.id ? 'update' : 'new'
+    draft.addition =
+      draft.relation === 'update'
+        ? draft.text.slice(active!.text.length).trim()
+        : undefined
+    draft.reviewUntil = Date.now() + SPEAKER_REVIEW_MS
     draft.complete = complete && action !== 'context'
     if (draft.complete) draft.uncertain = false
     draft.reason = reason
     if (draft.text.length > MAX_DRAFT_CHARS) {
-      options.onSuggest(draft.text, draft.reason)
+      suggestQuestion(draft.text, draft.reason)
       draft = null
       manualRequested = false
     }
@@ -217,6 +234,20 @@ export function createQuestionTurns(options: Options) {
         publish()
       }
     },
+    expireReview(id: string, text: string) {
+      if (
+        !draft ||
+        draft.id !== id ||
+        draft.text !== text ||
+        draft.complete ||
+        draft.relation !== 'update'
+      )
+        return
+      cancelTimer()
+      manualRequested = false
+      draft = null
+      publish()
+    },
     discard() {
       epoch++
       manualRequested = false
@@ -231,7 +262,7 @@ export function createQuestionTurns(options: Options) {
       // A manual click does not establish semantic relatedness or spoken order.
       // Preserve unsent context; never append a stale recommendation to an answer.
       if (draft && draft.text !== text)
-        options.onSuggest(draft.text, 'Unsent question context')
+        suggestQuestion(draft.text, 'Unsent question context')
       draft = null
       active = null
       manualOrigin = 'suggestion'

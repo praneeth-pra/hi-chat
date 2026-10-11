@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   IconCode,
   IconHeadphones,
@@ -36,7 +36,7 @@ import {
   getSmartTurn,
   SMART_TURN_HOLD_BELOW,
 } from '@/lib/smartTurn'
-import { createQuestionTurns } from '@/lib/speakerTurns'
+import { createQuestionTurns, SPEAKER_REVIEW_MS } from '@/lib/speakerTurns'
 import { judgeSpeakerTurn } from '@/lib/speakerTurnJudge'
 import { useThreads } from '@/hooks/useThreads'
 import { toast } from 'sonner'
@@ -69,21 +69,21 @@ const speakerKeyTerms = () =>
 setKeyTermsSource(speakerKeyTerms)
 
 const LABELS: Record<SpeakerStatus, string> = {
-  'off': 'Speaker off',
-  'starting': 'Starting…',
+  off: 'Speaker off',
+  starting: 'Starting…',
   'needs-click': 'Click to start listening',
-  'listening': 'Listening to speaker',
-  'hearing': 'Hearing…',
-  'transcribing': 'Transcribing…',
+  listening: 'Listening to speaker',
+  hearing: 'Hearing…',
+  transcribing: 'Transcribing…',
   'no-device': 'BlackHole not found',
-  'blocked': 'Allow audio access',
-  'unsupported': 'Not supported here',
-  'error': 'Speaker error',
+  blocked: 'Allow audio access',
+  unsupported: 'Not supported here',
+  error: 'Speaker error',
 }
 
 const ENGINE_NAMES: Record<string, string> = {
-  'elevenlabs': 'ElevenLabs',
-  'grok': 'Grok',
+  elevenlabs: 'ElevenLabs',
+  grok: 'Grok',
   'elevenlabs live': 'ElevenLabs live',
   'grok live': 'Grok live',
 }
@@ -190,6 +190,7 @@ export function SpeakerTranscriptionProvider() {
     })
     const unregisterControls = setQuestionControls({
       sendNow: turns.sendNow,
+      expireReview: turns.expireReview,
       keepListening: turns.keepListening,
       discard: () => {
         turns.discard()
@@ -285,9 +286,41 @@ export function SpeakerPendingQuestion() {
     pendingQuestion,
     sendingTurn,
     sendPendingQuestion,
-    keepListening,
     discardPendingQuestion,
   } = useSpeakerTranscription()
+  const [expired, setExpired] = useState('')
+  const reviewKey = pendingQuestion
+    ? `${pendingQuestion.id}:${pendingQuestion.text}:${pendingQuestion.reviewUntil ?? 0}`
+    : ''
+  useEffect(() => {
+    if (!enabled || !pendingQuestion || pendingQuestion.complete) return
+    const snapshot = pendingQuestion
+    const timer = setTimeout(
+      () => {
+        setExpired(reviewKey)
+        const current = useSpeakerTranscription.getState()
+        // Expired additions are never attached to an already answered question.
+        if (
+          snapshot.relation === 'update' &&
+          current.pendingQuestion?.id === snapshot.id &&
+          current.pendingQuestion.text === snapshot.text
+        )
+          current.expirePendingReview(snapshot.id, snapshot.text)
+      },
+      Math.max(
+        0,
+        (snapshot.reviewUntil ?? Date.now() + SPEAKER_REVIEW_MS) - Date.now()
+      )
+    )
+    return () => clearTimeout(timer)
+  }, [
+    enabled,
+    pendingQuestion?.id,
+    pendingQuestion?.text,
+    pendingQuestion?.complete,
+    pendingQuestion?.relation,
+    pendingQuestion?.reviewUntil,
+  ])
   if (isPlatformTauri() || !enabled) return null
   if (!pendingQuestion)
     return sendingTurn ? (
@@ -297,6 +330,7 @@ export function SpeakerPendingQuestion() {
           : 'Preparing answer…'}
       </div>
     ) : null
+  if (expired === reviewKey && !pendingQuestion.complete) return null
   return (
     <div
       className="m-2 rounded-md border border-main-view-fg/15 p-3 text-sm"
@@ -309,11 +343,23 @@ export function SpeakerPendingQuestion() {
             ? 'Waiting for clearer speech…'
             : pendingQuestion.complete
               ? 'Sending automatically…'
-              : 'Building question…'}
+              : pendingQuestion.relation === 'update'
+                ? 'Add to this question?'
+                : 'Building question…'}
       </div>
-      <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">
-        {pendingQuestion.text}
-      </p>
+      {!pendingQuestion.complete && (
+        <p className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">
+          {pendingQuestion.addition ?? pendingQuestion.text}
+        </p>
+      )}
+      {!pendingQuestion.complete && (
+        <p className="mt-1 text-xs text-main-view-fg/50">
+          {pendingQuestion.relation === 'update'
+            ? 'Addition to the current question'
+            : 'New question setup'}{' '}
+          · hides after 3 seconds
+        </p>
+      )}
       {pendingQuestion.uncertain && (
         <p className="mt-1 text-main-view-fg/60">{pendingQuestion.reason}</p>
       )}
@@ -323,17 +369,11 @@ export function SpeakerPendingQuestion() {
           className="text-accent"
           onClick={sendPendingQuestion}
         >
-          Send now
-        </button>
-        <button
-          type="button"
-          onClick={keepListening}
-          disabled={pendingQuestion.manual}
-        >
-          Keep listening
+          {pendingQuestion.relation === 'update' ? 'Add' : 'Send now'}{' '}
+          <kbd className="ml-1 text-xs">fn + →</kbd>
         </button>
         <button type="button" onClick={discardPendingQuestion}>
-          Discard
+          Discard <kbd className="ml-1 text-xs">fn + ←</kbd>
         </button>
       </div>
     </div>
@@ -344,12 +384,23 @@ export function SpeakerPendingQuestion() {
 export function SpeakerSuggestions() {
   const {
     enabled,
+    pendingQuestion,
     suggestions,
     suggestionReasons,
     acceptSuggestion,
     dismissSuggestion,
   } = useSpeakerTranscription()
-  if (isPlatformTauri() || !enabled || !suggestions.length) return null
+  const newestText = suggestions[0]
+  useEffect(() => {
+    if (!enabled || !newestText) return
+    const timer = setTimeout(
+      () => useSpeakerTranscription.getState().dismissSuggestion(newestText),
+      SPEAKER_REVIEW_MS
+    )
+    return () => clearTimeout(timer)
+  }, [enabled, newestText])
+  if (isPlatformTauri() || !enabled || pendingQuestion || !suggestions.length)
+    return null
   const card = (text: string, newest = false) => (
     <article
       key={text}
@@ -363,7 +414,7 @@ export function SpeakerSuggestions() {
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-main-view-fg/70">
-          {newest ? 'Latest recommendation' : 'Earlier recommendation'}
+          {newest ? 'New question?' : 'Earlier recommendation'}
         </span>
         <span className="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent">
           Needs review
@@ -396,7 +447,7 @@ export function SpeakerSuggestions() {
           )}
         </button>
         <span className="text-xs text-main-view-fg/50">
-          Starts a separate question
+          New question · hides after 3 seconds
         </span>
       </div>
     </article>
@@ -412,17 +463,6 @@ export function SpeakerSuggestions() {
         </span>
       </div>
       {card(suggestions[0], true)}
-      {suggestions.length > 1 && (
-        <details className="rounded-md px-1">
-          <summary className="cursor-pointer py-1 text-xs text-main-view-fg/60">
-            {suggestions.length - 1} earlier recommendation
-            {suggestions.length > 2 ? 's' : ''}
-          </summary>
-          <div className="mt-2 space-y-2">
-            {suggestions.slice(1).map((text) => card(text))}
-          </div>
-        </details>
-      )}
     </section>
   )
 }

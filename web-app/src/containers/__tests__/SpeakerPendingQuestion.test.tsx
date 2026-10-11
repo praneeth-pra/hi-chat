@@ -11,17 +11,26 @@ import {
 vi.mock('@/lib/platform/utils', () => ({ isPlatformTauri: () => false }))
 const sendNow = vi.fn(),
   keepListening = vi.fn(),
-  discard = vi.fn()
+  discard = vi.fn(),
+  expireReview = vi.fn()
 let unregister: () => void
 beforeEach(() => {
   vi.clearAllMocks()
   useSpeakerTranscription.getState().resetTurns()
   useSpeakerTranscription.getState().setEnabled(true)
-  unregister = setQuestionControls({ sendNow, keepListening, discard })
+  unregister = setQuestionControls({
+    sendNow,
+    keepListening,
+    discard,
+    expireReview,
+  })
 })
-afterEach(() => unregister())
+afterEach(() => {
+  unregister()
+  vi.useRealTimers()
+})
 describe('pending question controls', () => {
-  it('previews scenario text and exposes all three controls', () => {
+  it('shows the scenario with only two shortcut controls', () => {
     useSpeakerTranscription.getState().setPendingQuestion({
       id: 'q',
       text: 'Suppose three services fail.',
@@ -32,11 +41,12 @@ describe('pending question controls', () => {
     render(<SpeakerPendingQuestion />)
     expect(screen.getByText('Building question…')).toBeInTheDocument()
     expect(screen.getByText('Suppose three services fail.')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Send now' }))
+    fireEvent.click(screen.getByRole('button', { name: /Send now/ }))
     expect(sendNow).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Keep listening' }))
-    expect(keepListening).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(
+      screen.queryByRole('button', { name: 'Keep listening' })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Discard/ }))
     expect(discard).toHaveBeenCalledTimes(1)
   })
   it('keeps manual holds explicit and hides controls when disabled', () => {
@@ -49,9 +59,7 @@ describe('pending question controls', () => {
     })
     const { rerender } = render(<SpeakerPendingQuestion />)
     expect(screen.getByText('Waiting for you to send')).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Keep listening' })
-    ).toBeDisabled()
+    expect(screen.getByText('fn + →')).toBeInTheDocument()
     act(() => useSpeakerTranscription.getState().setEnabled(false))
     rerender(<SpeakerPendingQuestion />)
     expect(screen.queryByText('Scenario')).not.toBeInTheDocument()
@@ -81,9 +89,7 @@ describe('pending question controls', () => {
     expect(
       screen.getByText('Could not understand the judge decision')
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Keep listening' })
-    ).not.toBeDisabled()
+    expect(screen.getByText('fn + ←')).toBeInTheDocument()
   })
   it('shows why a transcript requires manual sending', () => {
     useSpeakerTranscription
@@ -94,7 +100,85 @@ describe('pending question controls', () => {
       screen.getByText('No judgement provider configured')
     ).toBeInTheDocument()
   })
-  it('shows a readable latest recommendation with distinct actions and collapses earlier ones', () => {
+  it('does not show recommendation cards alongside the question being built', () => {
+    useSpeakerTranscription
+      .getState()
+      .suggest('What is DNS?', 'Earlier failure')
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'Suppose services fail.',
+        complete: false,
+        manual: false,
+        reason: 'scenario',
+      })
+    render(
+      <>
+        <SpeakerPendingQuestion />
+        <SpeakerSuggestions />
+      </>
+    )
+    expect(screen.getByText('Building question…')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: 'Speaker recommendations' })
+    ).not.toBeInTheDocument()
+  })
+  it('expires review cards after three seconds without sending or losing a new scenario', () => {
+    vi.useFakeTimers()
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'Suppose services fail.',
+        complete: false,
+        manual: false,
+        relation: 'new',
+        reason: 'scenario',
+      })
+    render(<SpeakerPendingQuestion />)
+    act(() => vi.advanceTimersByTime(3000))
+    expect(screen.queryByText('Building question…')).not.toBeInTheDocument()
+    expect(sendNow).not.toHaveBeenCalled()
+    expect(discard).not.toHaveBeenCalled()
+    expect(useSpeakerTranscription.getState().pendingQuestion?.text).toBe(
+      'Suppose services fail.'
+    )
+  })
+  it('expires an unaccepted addition and never appends it', () => {
+    vi.useFakeTimers()
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'q',
+        text: 'How does DNS work? With caching.',
+        addition: 'With caching.',
+        complete: false,
+        manual: false,
+        relation: 'update',
+        reason: 'follow-up',
+      })
+    render(<SpeakerPendingQuestion />)
+    expect(screen.getByText('Add to this question?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add/ })).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(3000))
+    expect(expireReview).toHaveBeenCalledWith(
+      'q',
+      'How does DNS work? With caching.'
+    )
+    expect(discard).not.toHaveBeenCalled()
+    expect(sendNow).not.toHaveBeenCalled()
+  })
+  it('dismisses a new-question recommendation after three seconds', () => {
+    vi.useFakeTimers()
+    useSpeakerTranscription.getState().suggest('What is DNS?')
+    render(<SpeakerSuggestions />)
+    expect(screen.getByText('New question?')).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(3000))
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([])
+    expect(useSpeakerTranscription.getState().queue).toEqual([])
+  })
+  it('shows only the latest recommendation with distinct actions', () => {
     useSpeakerTranscription
       .getState()
       .suggest('Older question', 'Earlier failure')
@@ -116,12 +200,10 @@ describe('pending question controls', () => {
       latest.getByRole('button', { name: /Send as new/ })
     ).toBeInTheDocument()
     expect(screen.getByText('fn + →')).toBeInTheDocument()
-    expect(screen.getByText('1 earlier recommendation')).toBeInTheDocument()
+    expect(screen.queryByText('Older question')).not.toBeInTheDocument()
     fireEvent.click(
       latest.getByRole('button', { name: 'Discard recommendation' })
     )
-    expect(useSpeakerTranscription.getState().suggestions).toEqual([
-      'Older question',
-    ])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([])
   })
 })

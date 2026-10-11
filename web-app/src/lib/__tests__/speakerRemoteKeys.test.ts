@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useSpeakerTranscription } from '@/hooks/useSpeakerTranscription'
+import {
+  setQuestionControls,
+  useSpeakerTranscription,
+} from '@/hooks/useSpeakerTranscription'
 import {
   stepCode,
   listenForSpeakerKeys,
@@ -59,9 +62,7 @@ describe('speaker remote keys', () => {
     expect(useSpeakerTranscription.getState().queue).toEqual([
       'Latest question',
     ])
-    expect(useSpeakerTranscription.getState().suggestions).toEqual([
-      'Older question',
-    ])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([])
     stop()
     button.remove()
   })
@@ -76,13 +77,47 @@ describe('speaker remote keys', () => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'F18', shiftKey: true, repeat: true })
     )
-    expect(useSpeakerTranscription.getState().suggestions).toEqual([
-      'Older question',
-    ])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([])
     expect(useSpeakerTranscription.getState().coding).toBe(false)
     expect(useSpeakerTranscription.getState().enabled).toBe(true)
     expect(useSpeakerTranscription.getState().queue).toEqual([])
     stop()
+  })
+  it('fn arrow commands act on the pending question before older recommendations', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().suggest('What is DNS?')
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'building',
+        text: 'Suppose three services fail.',
+        complete: false,
+        manual: false,
+        reason: 'scenario',
+      })
+    const sendNow = vi.fn(),
+      discard = vi.fn()
+    const unregister = setQuestionControls({
+      sendNow,
+      discard,
+      keepListening: vi.fn(),
+    })
+    const stop = listenForSpeakerKeys()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F15', shiftKey: true })
+    )
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F18', shiftKey: true })
+    )
+    expect(sendNow).toHaveBeenCalledTimes(1)
+    expect(discard).toHaveBeenCalledTimes(1)
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'What is DNS?',
+    ])
+    expect(useSpeakerTranscription.getState().queue).toEqual([])
+    stop()
+    unregister()
+    useSpeakerTranscription.getState().resetTurns()
   })
   it('F15 sends the newest suggestion chip', () => {
     useSpeakerTranscription.setState({ queue: [], suggestions: [] })
@@ -96,9 +131,7 @@ describe('speaker remote keys', () => {
     press('F15')
     // No listener registered: the suggestion goes straight to the queue
     expect(useSpeakerTranscription.getState().queue).toEqual(['What is a pod?'])
-    expect(useSpeakerTranscription.getState().suggestions).toEqual([
-      'Can you show me?',
-    ])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([])
     stop()
   })
 

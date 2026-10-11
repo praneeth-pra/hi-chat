@@ -200,12 +200,12 @@ describe('question-turn coordination', () => {
     await turns.accept(['Unclear follow-up.'])
     await vi.advanceTimersByTimeAsync(10000)
     expect(onCommit).not.toHaveBeenCalled()
-    expect(onSuggest).toHaveBeenCalledWith('Unclear follow-up.', 'test')
+    expect(onSuggest).not.toHaveBeenCalled()
     turns.confirm('What about caching?')
     expect(onCommit.mock.calls[0][0].text).toBe('What about caching?')
     expect(onCommit.mock.calls[0][0].origin).toBe('suggestion')
   })
-  it('retains an incomplete scenario as a suggestion when a new topic begins', async () => {
+  it('does not recommend abandoned background without a question when a new topic begins', async () => {
     const { turns, judge, onCommit, onSuggest } = setup()
     judge
       .mockResolvedValueOnce(
@@ -217,10 +217,7 @@ describe('question-turn coordination', () => {
     await turns.accept(['Suppose three services fail.'])
     await turns.accept(['Explain garbage collection.'])
     await vi.advanceTimersByTimeAsync(500)
-    expect(onSuggest).toHaveBeenCalledWith(
-      'Suppose three services fail.',
-      'test'
-    )
+    expect(onSuggest).not.toHaveBeenCalled()
     expect(onCommit.mock.calls[0][0].text).toBe('Explain garbage collection.')
   })
   it('automatically recovers from temporary uncertainty when later speech completes the question', async () => {
@@ -313,6 +310,35 @@ describe('question-turn coordination', () => {
     expect(onCommit).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('expiring an addition preserves in-flight speech and excludes the expired fragment', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge
+      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
+      .mockResolvedValueOnce(decision('followup', 'With caching.'))
+    await turns.accept(['How does DNS work?'])
+    await vi.advanceTimersByTimeAsync(500)
+    await turns.accept(['With caching.'])
+    const draft = onDraft.mock.calls.at(-1)![0]!
+    expect(draft.relation).toBe('update')
+    expect(draft.addition).toBe('With caching.')
+    let resolve!: (decision: TurnDecision) => void
+    judge.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        })
+    )
+    const next = turns.accept(['What about TTL?'])
+    await Promise.resolve()
+    turns.expireReview(draft.id, draft.text)
+    resolve(decision('followup', 'What about TTL?', true))
+    await next
+    await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit.mock.calls.at(-1)![0].text).toBe(
+      'How does DNS work? What about TTL?'
+    )
+    expect(onCommit).toHaveBeenCalledTimes(2)
   })
   it('never appends an older recommendation or candidate answer to the active question', async () => {
     const { turns, judge, onCommit } = setup()

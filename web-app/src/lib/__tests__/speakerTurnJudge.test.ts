@@ -219,6 +219,42 @@ describe('speaker intent protocol', () => {
       ).action
     ).toBe('suggest')
   })
+  it('ignores candidate statements before calling the judge', async () => {
+    for (const text of [
+      'I work on tasks and automation.',
+      'We build scalable services.',
+      'My responsibilities include testing.',
+    ]) {
+      expect(
+        (await judgeSpeakerTurn([text], empty, { apiKey: 'test' })).action
+      ).toBe('skip')
+    }
+    expect(requestSpeakerJudge).not.toHaveBeenCalled()
+  })
+  it('does not turn missing providers or invalid judgements into recommendations for background speech', async () => {
+    expect(
+      (
+        await judgeSpeakerTurn(
+          ['Suppose three services share a queue.'],
+          empty,
+          {}
+        )
+      ).action
+    ).toBe('skip')
+    vi.mocked(requestSpeakerJudge).mockResolvedValue({
+      reply: '{}',
+      model: 'test',
+      ms: 10,
+    })
+    expect(
+      (
+        await judgeSpeakerTurn(['The database has two replicas.'], empty, {
+          apiKey: 'test',
+        })
+      ).action
+    ).toBe('skip')
+    expect(requestSpeakerJudge).toHaveBeenCalledTimes(1)
+  })
   it('automatically sends the reported question, updates its real follow-up and excludes the candidate answer', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)

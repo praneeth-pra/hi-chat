@@ -111,3 +111,5 @@ the app under Model Providers.
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE).
+
+Speaker review cards show only the latest item and disappear after three seconds. fn + Right accepts the visible pending card first (Add revises the current question; Send now submits a new setup), and fn + Left discards it. Unaccepted additions are dropped without restarting capture. New scenario background is retained silently after its card hides, so a later complete question can use the setup. Provider failures produce a recommendation only when there is question/task evidence; candidate-style statements are rejected before judging. Complete, validated questions still send automatically.
