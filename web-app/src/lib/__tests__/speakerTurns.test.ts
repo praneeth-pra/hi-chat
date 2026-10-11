@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  createQuestionTurns,
-  QUESTION_SETTLE_MS,
-  type QuestionDraft,
-} from '../speakerTurns'
+import { createQuestionTurns, type QuestionDraft } from '../speakerTurns'
 import type { TurnDecision } from '../speakerTurnJudge'
-
 const decision = (
   action: TurnDecision['action'],
   text: string,
@@ -27,9 +22,34 @@ afterEach(() => {
   listeners.splice(0).forEach((t) => t.stop())
   vi.useRealTimers()
 })
-
-describe('question-turn coordination', () => {
-  it('keeps a long scenario across gaps and sends all three parts once', async () => {
+describe('approval-only speaker turns', () => {
+  it('never sends the first complete question on silence or capture activity', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
+    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
+    turns.audioActivity(true)
+    turns.activity(true)
+    await turns.accept(['How does DNS work?'])
+    turns.audioActivity(false)
+    turns.activity(false)
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
+      complete: true,
+      requiresReview: true,
+    })
+    expect(turns.sendNow()).toBe(true)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit.mock.calls[0][0]).toMatchObject({
+      text: 'How does DNS work?',
+      origin: 'send-now',
+      relation: 'new',
+      version: 1,
+    })
+    turns.activity(true)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+  it('accumulates a scenario across long gaps and waits for approval after completion', async () => {
     const { turns, judge, onCommit } = setup()
     judge
       .mockResolvedValueOnce(
@@ -45,175 +65,55 @@ describe('question-turn coordination', () => {
     await vi.advanceTimersByTimeAsync(60000)
     await turns.accept(['Payment succeeds but delivery fails.'])
     await vi.advanceTimersByTimeAsync(30000)
-    expect(onCommit).not.toHaveBeenCalled()
     await turns.accept(['How do we keep them consistent?'])
-    await vi.advanceTimersByTimeAsync(QUESTION_SETTLE_MS)
-    expect(onCommit).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(onCommit).not.toHaveBeenCalled()
+    turns.sendNow()
     expect(onCommit.mock.calls[0][0].text).toBe(
       'Suppose we have three services. Payment succeeds but delivery fails. How do we keep them consistent?'
     )
   })
-  it('keeps a complete first question separate when its follow-up arrives before delivery', async () => {
-    const { turns, judge, onCommit, onDraft } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(
-        decision('followup', 'And what about caching?', true)
-      )
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(400)
-    await turns.accept(['And what about caching?'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onCommit.mock.calls[0][0].text).toBe('How does DNS work?')
-    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
-      requiresReview: true,
-      text: 'And what about caching?',
-    })
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0]).toMatchObject({
-      relation: 'new',
-      version: 1,
-      text: 'And what about caching?',
-    })
-    expect(onCommit.mock.calls[1][0].id).not.toBe(onCommit.mock.calls[0][0].id)
-  })
-  it('requires approval for follow-ups even after a long pause', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(
-        decision('followup', 'And what about caching?', true)
-      )
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(120000)
-    await turns.accept(['And what about caching?'])
-    await vi.advanceTimersByTimeAsync(120000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(judge.mock.calls[1][1]).toMatchObject({
-      active: 'How does DNS work?',
-    })
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0]).toMatchObject({
-      text: 'And what about caching?',
-      relation: 'new',
-      origin: 'send-now',
-    })
-  })
-  it('replaces a held follow-up with the new topic review without resending the old question', async () => {
-    const { turns, judge, onCommit, onSuggest, onDraft } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(decision('followup', 'With caching'))
-      .mockResolvedValueOnce(
-        decision('new-question', 'Explain garbage collection.', true)
-      )
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
-    await turns.accept(['With caching'])
-    await turns.accept(['Explain garbage collection.'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onSuggest).not.toHaveBeenCalled()
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
-      requiresReview: true,
-      text: 'Explain garbage collection.',
-    })
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0].text).toBe('Explain garbage collection.')
-  })
-  it('requires approval for new topics after the first question', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(
-        decision('new-question', 'Explain garbage collection.', true)
-      )
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
-    await turns.accept(['Explain garbage collection.'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0].id).not.toBe(onCommit.mock.calls[0][0].id)
-    expect(onCommit.mock.calls[1][0].text).toBe('Explain garbage collection.')
-  })
-  it('discarding a follow-up cannot re-enable automatic sending for the next question', async () => {
-    const { turns, judge, onCommit, onDraft } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'Explain DNS.', true))
-      .mockResolvedValueOnce(decision('followup', 'What about caching?', true))
-      .mockResolvedValueOnce(decision('new-question', 'Explain JVM.', true))
-    await turns.accept(['Explain DNS.'])
-    await vi.advanceTimersByTimeAsync(500)
-    await turns.accept(['What about caching?'])
-    turns.discard()
-    await turns.accept(['Explain JVM.'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
-      requiresReview: true,
-      text: 'Explain JVM.',
-    })
-  })
-  it('offers only the latest complete follow-up without appending earlier unaccepted questions', async () => {
+  it('offers only the newest complete unaccepted question', async () => {
     const { turns, judge, onCommit, onDraft } = setup()
     judge
       .mockResolvedValueOnce(decision('question', 'Compare ECS and EKS.', true))
       .mockResolvedValueOnce(
         decision('followup', 'Which one is cheaper?', true)
       )
-      .mockResolvedValueOnce(
-        decision('followup', 'Which one is easier to operate?', true)
-      )
     await turns.accept(['Compare ECS and EKS.'])
-    await vi.advanceTimersByTimeAsync(500)
     await turns.accept(['Which one is cheaper?'])
-    await turns.accept(['Which one is easier to operate?'])
-    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
-      text: 'Which one is easier to operate?',
-      requiresReview: true,
-    })
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0].text).toBe(
-      'Which one is easier to operate?'
-    )
-    expect(onCommit.mock.calls[0][0].text).toBe('Compare ECS and EKS.')
-  })
-  it('sends a complete judged question despite ongoing capture', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
-    turns.activity(true)
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    turns.activity(false)
-    await vi.advanceTimersByTimeAsync(20000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('keeps listening until manually committed and excludes chatter', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(decision('skip', 'Okay.'))
-    await turns.accept(['How does DNS work?'])
-    turns.keepListening()
-    await turns.accept(['Okay.'])
-    await vi.advanceTimersByTimeAsync(60000)
     expect(onCommit).not.toHaveBeenCalled()
+    expect(onDraft.mock.calls.at(-1)![0]?.text).toBe('Which one is cheaper?')
     turns.sendNow()
-    expect(onCommit.mock.calls[0][0].text).toBe('How does DNS work?')
+    expect(onCommit.mock.calls[0][0].text).toBe('Which one is cheaper?')
   })
-  it('lets Send now commit an incomplete scenario explicitly', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge.mockResolvedValue(
-      decision('context', 'Suppose we have three services.')
-    )
-    await turns.accept(['Suppose we have three services.'])
-    turns.sendNow()
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('waits for an in-flight transcript when Send now is pressed', async () => {
+  it.each(['followup', 'new-question'] as const)(
+    'requires approval for %s and creates a separate prompt',
+    async (action) => {
+      const { turns, judge, onCommit } = setup()
+      judge
+        .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
+        .mockResolvedValueOnce(decision(action, 'What about caching?', true))
+      await turns.accept(['How does DNS work?'])
+      turns.sendNow()
+      await turns.accept(['What about caching?'])
+      await vi.advanceTimersByTimeAsync(120000)
+      expect(onCommit).toHaveBeenCalledTimes(1)
+      expect(judge.mock.calls[1][1]).toMatchObject({
+        active: 'How does DNS work?',
+      })
+      turns.sendNow()
+      const [first, second] = onCommit.mock.calls.map((c) => c[0])
+      expect(second.id).not.toBe(first.id)
+      expect(second).toMatchObject({
+        text: 'What about caching?',
+        relation: 'new',
+        version: 1,
+        origin: 'send-now',
+      })
+    }
+  )
+  it('does not authorize unseen in-flight speech when no proposal exists', async () => {
     const { turns, judge, onCommit } = setup()
     let resolve!: (d: TurnDecision) => void
     judge.mockReturnValue(
@@ -221,44 +121,43 @@ describe('question-turn coordination', () => {
         resolve = r
       })
     )
-    const run = turns.accept(['Suppose we have three services.'])
+    const run = turns.accept(['How does DNS work?'])
     await Promise.resolve()
-    turns.sendNow()
-    expect(onCommit).not.toHaveBeenCalled()
-    resolve(decision('context', 'Suppose we have three services.'))
+    expect(turns.sendNow()).toBe(false)
+    resolve(decision('question', 'How does DNS work?', true))
     await run
-    expect(onCommit).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(onCommit).not.toHaveBeenCalled()
   })
-  it('accepts a visible draft immediately while later speech is being judged', async () => {
-    const { turns, judge, onCommit } = setup()
+  it('approves the visible draft immediately while later speech is judged', async () => {
+    const { turns, judge, onCommit, onDraft } = setup()
     judge.mockResolvedValueOnce(decision('context', 'How would you migrate it'))
     await turns.accept(['How would you migrate it'])
-    let resolve!: (value: TurnDecision) => void
-    judge.mockImplementationOnce(
-      () =>
-        new Promise((r) => {
-          resolve = r
-        })
+    let resolve!: (d: TurnDecision) => void
+    judge.mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r
+      })
     )
     const next = turns.accept(['with zero downtime?'])
-    await vi.advanceTimersByTimeAsync(0)
+    await Promise.resolve()
     turns.sendNow()
-    expect(onCommit).toHaveBeenCalledTimes(1)
+    expect(onCommit.mock.calls[0][0].text).toBe('How would you migrate it')
     resolve(decision('question', 'with zero downtime?', true))
     await next
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(10000)
     expect(onCommit).toHaveBeenCalledTimes(1)
-    turns.sendNow()
-    expect(onCommit.mock.calls[1][0]).toMatchObject({
-      relation: 'new',
-      version: 1,
+    expect(onDraft.mock.calls.at(-1)![0]).toMatchObject({
       text: 'with zero downtime?',
+      followsQuestion: onCommit.mock.calls[0][0].id,
     })
+    turns.sendNow()
+    expect(onCommit).toHaveBeenCalledTimes(2)
   })
-  it('discards an in-flight judgement and its queued continuation', async () => {
+  it('discard invalidates in-flight and queued speech without affecting later approval policy', async () => {
     const { turns, judge, onCommit, onDraft } = setup()
     let resolve!: (d: TurnDecision) => void
-    judge.mockReturnValue(
+    judge.mockReturnValueOnce(
       new Promise((r) => {
         resolve = r
       })
@@ -269,12 +168,16 @@ describe('question-turn coordination', () => {
     turns.discard()
     resolve(decision('question', 'How does DNS work?', true))
     await Promise.all([first, second])
-    await vi.advanceTimersByTimeAsync(10000)
     expect(judge).toHaveBeenCalledTimes(1)
-    expect(onCommit).not.toHaveBeenCalled()
     expect(onDraft).toHaveBeenLastCalledWith(null)
+    judge.mockResolvedValue(decision('new-question', 'Explain JVM.', true))
+    await turns.accept(['Explain JVM.'])
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).not.toHaveBeenCalled()
+    turns.sendNow()
+    expect(onCommit.mock.calls[0][0].text).toBe('Explain JVM.')
   })
-  it('stopping invalidates a delayed judgement', async () => {
+  it('stop invalidates a delayed judgement and manual sending', async () => {
     const { turns, judge, onCommit } = setup()
     let resolve!: (d: TurnDecision) => void
     judge.mockReturnValue(
@@ -287,295 +190,47 @@ describe('question-turn coordination', () => {
     turns.stop()
     resolve(decision('question', 'How does DNS work?', true))
     await run
-    await vi.advanceTimersByTimeAsync(10000)
+    expect(turns.sendNow()).toBe(false)
     expect(onCommit).not.toHaveBeenCalled()
   })
-  it('uncertain later speech cannot erase an already complete question', async () => {
-    const { turns, judge, onCommit, onSuggest } = setup()
-    judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(decision('suggest', 'Unclear follow-up.'))
-    await turns.accept(['How does DNS work?'])
-    await turns.accept(['Unclear follow-up.'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onCommit.mock.calls[0][0].text).toBe('How does DNS work?')
-    expect(onSuggest).not.toHaveBeenCalled()
-    turns.confirm('What about caching?')
-    expect(onCommit.mock.calls[1][0].text).toBe('What about caching?')
-    expect(onCommit.mock.calls[1][0].origin).toBe('suggestion')
-  })
-  it('does not recommend abandoned background without a question when a new topic begins', async () => {
-    const { turns, judge, onCommit, onSuggest } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('context', 'Suppose three services fail.')
-      )
-      .mockResolvedValueOnce(
-        decision('new-question', 'Explain garbage collection.', true)
-      )
-    await turns.accept(['Suppose three services fail.'])
-    await turns.accept(['Explain garbage collection.'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onSuggest).not.toHaveBeenCalled()
-    expect(onCommit.mock.calls[0][0].text).toBe('Explain garbage collection.')
-  })
-  it('automatically recovers from temporary uncertainty when later speech completes the question', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('context', 'Suppose three services fail.')
-      )
-      .mockResolvedValueOnce(decision('suggest', 'Unclear audio.'))
-      .mockResolvedValueOnce(decision('question', 'How do we recover?', true))
-    await turns.accept(['Suppose three services fail.'])
-    await turns.accept(['Unclear audio.'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).not.toHaveBeenCalled()
-    await turns.accept(['How do we recover?'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onCommit.mock.calls[0][0].text).toBe(
-      'Suppose three services fail. How do we recover?'
-    )
-  })
-  it('preserves an explicit Keep listening hold through later clear speech', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('context', 'Suppose three services fail.')
-      )
-      .mockResolvedValueOnce(decision('question', 'How do we recover?', true))
-    await turns.accept(['Suppose three services fail.'])
-    turns.keepListening()
-    await turns.accept(['How do we recover?'])
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).not.toHaveBeenCalled()
-    turns.sendNow()
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('overlaps settling with transcription instead of adding another full delay', async () => {
-    const { turns, judge, onCommit } = setup()
-    turns.audioActivity(true)
-    turns.activity(true)
-    turns.audioActivity(false)
-    await vi.advanceTimersByTimeAsync(700)
-    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
-    await turns.accept(['How does DNS work?'])
-    turns.activity(false)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('only waits the remainder when processing finishes within the settling window', async () => {
-    const { turns, judge, onCommit } = setup()
-    turns.audioActivity(true)
-    turns.audioActivity(false)
-    await vi.advanceTimersByTimeAsync(300)
-    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(199)
-    expect(onCommit).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('uses a bounded one-second acoustic hold that cannot expire an incomplete scenario', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('context', 'Suppose three services fail.')
-      )
-      .mockResolvedValueOnce(decision('question', 'How do we recover?', true))
-    await turns.accept(['Suppose three services fail.'], true)
-    await vi.advanceTimersByTimeAsync(10000)
-    expect(onCommit).not.toHaveBeenCalled()
-    await turns.accept(['How do we recover?'], true)
-    await vi.advanceTimersByTimeAsync(999)
-    expect(onCommit).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('later speech cannot restart a complete question settling clock', async () => {
-    const { turns, judge, onCommit } = setup()
-    turns.audioActivity(true)
-    turns.audioActivity(false)
-    await vi.advanceTimersByTimeAsync(300)
-    judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
-    await turns.accept(['How does DNS work?'])
-    turns.audioActivity(true)
-    turns.activity(true)
-    await vi.advanceTimersByTimeAsync(200)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-  })
-  it('a queued continuation requires review after the first question committed during judgement', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge.mockResolvedValueOnce(
-      decision('question', 'How does DNS work?', true)
-    )
-    await turns.accept(['How does DNS work?'])
-    let resolve!: (value: TurnDecision) => void
-    judge.mockImplementationOnce(
-      () =>
-        new Promise((r) => {
-          resolve = r
-        })
-    )
-    const next = turns.accept(['And what about caching?'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    resolve(decision('question', 'And what about caching?', true))
-    await next
-    await vi.advanceTimersByTimeAsync(0)
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    turns.sendNow()
-    const [first, second] = onCommit.mock.calls.map((c) => c[0])
-    expect(second.id).not.toBe(first.id)
-    expect(second).toMatchObject({
-      version: 1,
-      relation: 'new',
-      text: 'And what about caching?',
-    })
-  })
-  it('rejected candidate answers do not enter conversation history', async () => {
-    const { turns, judge } = setup()
-    judge
-      .mockResolvedValueOnce(decision('skip', 'I maintain pipelines.'))
-      .mockResolvedValueOnce(
-        decision('question', 'How do you test them?', true)
-      )
-    await turns.accept(['I maintain pipelines.'])
-    await turns.accept(['How do you test them?'])
-    expect(judge.mock.calls[1][1]).toMatchObject({ recent: [] })
-  })
-  it('hiding an addition retains it for completion without cancelling in-flight speech', async () => {
+  it('hiding retains scenario context without sending or cancelling later speech', async () => {
     const { turns, judge, onCommit, onDraft } = setup()
     judge
-      .mockResolvedValueOnce(decision('question', 'How does DNS work?', true))
-      .mockResolvedValueOnce(decision('followup', 'With caching.'))
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
-    await turns.accept(['With caching.'])
+      .mockResolvedValueOnce(decision('context', 'How would you migrate it'))
+      .mockResolvedValueOnce(decision('question', 'with zero downtime?', true))
+    await turns.accept(['How would you migrate it'])
     const draft = onDraft.mock.calls.at(-1)![0]!
-    expect(draft.requiresReview).toBe(true)
-    expect(draft.text).toBe('With caching.')
-    let resolve!: (decision: TurnDecision) => void
-    judge.mockImplementationOnce(
-      () =>
-        new Promise((done) => {
-          resolve = done
-        })
-    )
-    const next = turns.accept(['What about TTL?'])
-    await Promise.resolve()
     turns.expireReview(draft.id, draft.text)
-    resolve(decision('followup', 'What about TTL?', true))
-    await next
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onCommit).toHaveBeenCalledTimes(1)
+    await turns.accept(['with zero downtime?'])
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).not.toHaveBeenCalled()
     turns.sendNow()
-    expect(onCommit.mock.calls.at(-1)![0].text).toBe(
-      'With caching. What about TTL?'
-    )
-    expect(onCommit).toHaveBeenCalledTimes(2)
-  })
-  it('does not downgrade the completed Vault question when a held follow-up arrives', async () => {
-    const { turns, judge, onCommit, onDraft } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('question', 'How did you integrate Vault?', true)
-      )
-      .mockResolvedValueOnce(
-        decision('followup', 'Do you have it running in a container or on EC2?')
-      )
-      .mockResolvedValueOnce(
-        decision('skip', 'That is actually maintained by another team.')
-      )
-    await turns.accept(['How did you integrate Vault?'])
-    await turns.accept(['Do you have it running in a container or on EC2?'])
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onCommit.mock.calls[0][0].text).toBe('How did you integrate Vault?')
-    expect(onDraft.mock.calls.at(-1)![0]?.requiresReview).toBe(true)
-    await turns.accept(['That is actually maintained by another team.'])
-    expect(onCommit).toHaveBeenCalledTimes(1)
-    expect(onDraft.mock.calls.at(-1)![0]?.text).not.toContain('another team')
-  })
-  it('accumulates held scenario pieces despite repeated new clip labels', async () => {
-    const { turns, judge, onCommit, onSuggest } = setup()
-    judge
-      .mockResolvedValueOnce(
-        decision('new-question', 'Suppose three services share a queue.')
-      )
-      .mockResolvedValueOnce(
-        decision('new-question', 'One service fails during delivery.')
-      )
-      .mockResolvedValueOnce(
-        decision('question', 'How should we recover?', true)
-      )
-    await turns.accept(['Suppose three services share a queue.'])
-    await turns.accept(['One service fails during delivery.'])
-    await turns.accept(['How should we recover?'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onSuggest).not.toHaveBeenCalled()
     expect(onCommit.mock.calls[0][0].text).toBe(
-      'Suppose three services share a queue. One service fails during delivery. How should we recover?'
+      'How would you migrate it with zero downtime?'
     )
   })
-  it('keeps the committing clip timestamp immutable while later audio changes the quiet state', async () => {
-    const trace = vi.fn(),
-      onCommit = vi.fn()
-    const turns = createQuestionTurns({
-      judge: async () => decision('question', 'How does DNS work?', true),
-      onCommit,
-      onDraft: () => {},
-      onSuggest: () => {},
-      onTrace: trace,
+  it('uncertain recommendations only send through explicit confirmation', async () => {
+    const { turns, judge, onCommit, onSuggest } = setup()
+    judge.mockResolvedValue(decision('suggest', 'What about caching?'))
+    await turns.accept(['What about caching?'])
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(onSuggest).toHaveBeenCalledWith('What about caching?', 'test')
+    expect(onCommit).not.toHaveBeenCalled()
+    turns.confirm('What about caching?')
+    expect(onCommit.mock.calls[0][0]).toMatchObject({
+      text: 'What about caching?',
+      relation: 'new',
+      origin: 'suggestion',
     })
-    listeners.push(turns)
-    await turns.accept(['How does DNS work?'], false, {
-      clipId: 42,
-      captureEnd: Date.now() - 100,
-    })
-    const captured = Date.now() - 100
-    turns.audioActivity(true)
-    await vi.advanceTimersByTimeAsync(50)
-    turns.audioActivity(false)
-    await vi.advanceTimersByTimeAsync(500)
-    const commit = trace.mock.calls.find(([event]) => event === 'commit')![1]
-    expect(commit.captureEnd).toBe(captured)
-    expect(commit.clip).toBe(42)
-    expect(onCommit.mock.calls[0][0].captureEnd).toBe(captured)
   })
-  it('never appends an older recommendation or candidate answer to the active question', async () => {
-    const { turns, judge, onCommit } = setup()
-    judge.mockResolvedValue(
-      decision(
-        'question',
-        'Out of all of these things, what do you work regularly on?',
-        true
-      )
-    )
-    await turns.accept([
-      'Out of all of these things, what do you work regularly on?',
-    ])
-    await vi.advanceTimersByTimeAsync(500)
-    const first = onCommit.mock.calls[0][0]
-    turns.confirm('What is your strong zone?')
-    const second = onCommit.mock.calls[1][0]
-    expect(second.id).not.toBe(first.id)
-    expect(second.text).toBe('What is your strong zone?')
-    expect(second.origin).toBe('suggestion')
-    turns.confirm('I work on tasks and automation.')
-    expect(onCommit.mock.calls[2][0].text).toBe(
-      'I work on tasks and automation.'
-    )
-    expect(onCommit.mock.calls[2][0].relation).toBe('new')
-  })
-  it('distinguishes automatic and explicit Send now commits', async () => {
+  it('retains immutable per-clip capture timestamps when approved', async () => {
     const { turns, judge, onCommit } = setup()
     judge.mockResolvedValue(decision('question', 'How does DNS work?', true))
-    await turns.accept(['How does DNS work?'])
-    await vi.advanceTimersByTimeAsync(500)
-    expect(onCommit.mock.calls[0][0].origin).toBe('automatic')
-    await turns.accept(['Explain garbage collection.'])
+    const captureEnd = Date.now() - 1200
+    await turns.accept(['How does DNS work?'], false, { clipId: 8, captureEnd })
+    turns.audioActivity(true)
+    turns.audioActivity(false)
     turns.sendNow()
-    expect(onCommit.mock.calls[1][0].origin).toBe('send-now')
+    expect(onCommit.mock.calls[0][0]).toMatchObject({ clip: 8, captureEnd })
   })
 })

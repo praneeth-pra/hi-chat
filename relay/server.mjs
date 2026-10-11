@@ -91,6 +91,8 @@ export function transcribeAll(
     waitMs = SECOND_ENGINE_WAIT_MS,
     // Stop as soon as this many engines have answered (a race)
     need = Infinity,
+    // Dictation races require usable speech, not merely a successful request.
+    requireText = false,
   } = {}
 ) {
   return new Promise((resolve) => {
@@ -111,6 +113,7 @@ export function transcribeAll(
     let running = results.filter((r) => r === null).length
     let timer
     let done = false
+    const usable = (r) => r?.ok && (!requireText || !!r.text?.trim())
 
     const finish = () => {
       if (done) return
@@ -157,9 +160,8 @@ export function transcribeAll(
         })
         .finally(() => {
           running--
-          if (running === 0 || results.filter((r) => r?.ok).length >= need)
-            finish()
-          else if (!timer && results.some((r) => r?.ok))
+          if (running === 0 || results.filter(usable).length >= need) finish()
+          else if (!timer && results.some(usable))
             timer = setTimeout(finish, waitMs)
         })
     })
@@ -452,6 +454,7 @@ export function createRelay(options = {}) {
       const results = await transcribeAll(file, {
         ...options,
         engines: wanted.length ? wanted : all,
+        requireText: form.get('require_text') === '1',
         ...(Number.isInteger(need) && need > 0 ? { need } : {}),
         ...(Number.isFinite(wait) && wait >= 0 && form.get('wait_ms') !== null
           ? {

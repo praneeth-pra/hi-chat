@@ -29,8 +29,8 @@ import {
 } from '@/lib/dictationJudge'
 
 /**
- * Dictation: your own voice, recorded here and streamed to live
- * speech-to-text engines while you talk. Separate from the speaker, which
+ * Dictation: speech heard by your selected microphone, streamed to live
+ * speech-to-text engines while you record. Playback suppression is off by default. Separate from the speaker, which
  * listens to the interviewer. The text is sent like a question.
  */
 
@@ -73,6 +73,25 @@ export function setDictationEngine(engine: DictationEngine) {
   } catch {
     // Storage blocked
   }
+}
+
+const REDUCE_ECHO_STORAGE_KEY = 'dictation-reduce-echo'
+
+/** Off by default: retain speech played near the microphone, not only your voice. */
+export function getDictationReduceEcho(): boolean {
+  try {
+    return localStorage.getItem(REDUCE_ECHO_STORAGE_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
+export function setDictationReduceEcho(on: boolean) {
+  try {
+    localStorage.setItem(REDUCE_ECHO_STORAGE_KEY, on ? 'on' : 'off')
+  } catch {
+    /* Storage blocked */
+  }
+  switchMic()
 }
 
 const KEEP_MIC_STORAGE_KEY = 'dictation-keep-mic'
@@ -220,6 +239,7 @@ type Mic = {
   device: string
   /** Which input that was (its group), to notice when the default changes */
   deviceKey?: string
+  reduceEcho: boolean
 }
 let mic: Mic | undefined
 const PREROLL_BLOCKS = 3 // ~130 ms at 48 kHz
@@ -238,19 +258,25 @@ async function wantedMic() {
   return { device, key: device ? device.groupId || device.deviceId : undefined }
 }
 
-type MicStream = { stream: MediaStream; device: string; key?: string }
+type MicStream = {
+  stream: MediaStream
+  device: string
+  key?: string
+  reduceEcho: boolean
+}
 
 async function getMicStream(): Promise<MicStream> {
   const label = getDictationMic()
   const { device, key } = await wantedMic()
+  const reduceEcho = getDictationReduceEcho()
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       ...(device?.deviceId ? { deviceId: { exact: device.deviceId } } : {}),
-      echoCancellation: true,
-      noiseSuppression: true,
+      echoCancellation: reduceEcho,
+      noiseSuppression: reduceEcho,
     },
   })
-  return { stream, device: label, key }
+  return { stream, device: label, key, reduceEcho }
 }
 
 /** A mic stream opened when Jan loads, before any click allows audio. */
@@ -261,7 +287,12 @@ function takeEarlyStream(): MicStream | undefined {
   early = undefined
   if (!e) return undefined
   const live = e.stream.getAudioTracks().some((t) => t.readyState === 'live')
-  if (live && e.device === getDictationMic()) return e
+  if (
+    live &&
+    e.device === getDictationMic() &&
+    e.reduceEcho === getDictationReduceEcho()
+  )
+    return e
   e.stream.getTracks().forEach((t) => t.stop())
   return undefined
 }
@@ -269,7 +300,8 @@ function takeEarlyStream(): MicStream | undefined {
 // A new audio context each time the mic opens, made once the mic is open
 // (Safari doesn't reliably restart a suspended one, so it's never suspended).
 async function openMic(): Promise<Mic> {
-  const { stream, device, key } = takeEarlyStream() ?? (await getMicStream())
+  const { stream, device, key, reduceEcho } =
+    takeEarlyStream() ?? (await getMicStream())
   let ctx: AudioContext | undefined
   try {
     ctx = new AudioContext()
@@ -291,7 +323,15 @@ async function openMic(): Promise<Mic> {
   ctx.createMediaStreamSource(stream).connect(tap)
   // Outputs silence; the connection just keeps the node running.
   tap.connect(ctx.destination)
-  const m: Mic = { stream, ctx, tap, preroll: [], device, deviceKey: key }
+  const m: Mic = {
+    stream,
+    ctx,
+    tap,
+    preroll: [],
+    device,
+    deviceKey: key,
+    reduceEcho,
+  }
   tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
     if (recording) return onBlock(recording, e.data)
     m.preroll.push(e.data)
@@ -326,7 +366,11 @@ let opening: Promise<Mic> | undefined
 
 /** The mic is open, and on the input the Microphone setting picks. */
 function micReady(m: Mic) {
-  return micAlive(m) && m.device === getDictationMic()
+  return (
+    micAlive(m) &&
+    m.device === getDictationMic() &&
+    m.reduceEcho === getDictationReduceEcho()
+  )
 }
 
 /** The open mic, opening it if needed (one open at a time). */
@@ -420,6 +464,7 @@ async function transcribe(samples: Float32Array): Promise<string> {
   const body = new FormData()
   body.append('file', encodeWav(samples, TARGET_SAMPLE_RATE), 'dictation.wav')
   body.append('need', '1')
+  body.append('require_text', '1')
   const res = await fetch('/api/transcribe', { method: 'POST', body })
   const data = (await res.json().catch(() => ({}))) as {
     error?: string
@@ -429,7 +474,7 @@ async function transcribe(samples: Float32Array): Promise<string> {
     const errors = data.results?.map((r) => r.error).filter(Boolean)
     throw new Error(errors?.join('; ') || data.error || `status ${res.status}`)
   }
-  return (data.results?.find((r) => r.ok)?.text ?? '').trim()
+  return (data.results?.find((r) => r.ok && r.text?.trim())?.text ?? '').trim()
 }
 
 /** Takes one block from the mic; exported for tests. */

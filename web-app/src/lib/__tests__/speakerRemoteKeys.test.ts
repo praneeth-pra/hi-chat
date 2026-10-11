@@ -47,6 +47,7 @@ describe('speaker remote keys', () => {
   })
   it('Shift + F15 sends only the newest recommendation even when a typed draft can be sent', () => {
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     useSpeakerTranscription.getState().suggest('Older question')
     useSpeakerTranscription.getState().suggest('Latest question')
     const button = document.createElement('button')
@@ -68,6 +69,7 @@ describe('speaker remote keys', () => {
   })
   it('Shift + F18 discards one recommendation without toggling coding/listening or repeating', () => {
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     useSpeakerTranscription.getState().suggest('Older question')
     useSpeakerTranscription.getState().suggest('Latest question')
     const stop = listenForSpeakerKeys()
@@ -85,6 +87,7 @@ describe('speaker remote keys', () => {
   })
   it('fn arrow commands act on the pending question before older recommendations', () => {
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     useSpeakerTranscription.getState().suggest('What is DNS?')
     useSpeakerTranscription.getState().setPendingQuestion({
       id: 'building',
@@ -116,20 +119,20 @@ describe('speaker remote keys', () => {
     stop()
     unregister()
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
   })
   it('cannot send a complete review question after its card expired', () => {
     useSpeakerTranscription.getState().resetTurns()
-    useSpeakerTranscription
-      .getState()
-      .setPendingQuestion({
-        id: 'review',
-        text: 'Which one is cheaper?',
-        complete: true,
-        manual: false,
-        requiresReview: true,
-        reviewUntil: Date.now() - 1,
-        reason: 'follow-up',
-      })
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
+    useSpeakerTranscription.getState().setPendingQuestion({
+      id: 'review',
+      text: 'Which one is cheaper?',
+      complete: true,
+      manual: false,
+      requiresReview: true,
+      reviewUntil: Date.now() - 1,
+      reason: 'follow-up',
+    })
     const sendNow = vi.fn()
     const unregister = setQuestionControls({
       sendNow,
@@ -144,9 +147,26 @@ describe('speaker remote keys', () => {
     stop()
     unregister()
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
+  })
+  it('fn arrows never send or discard a hidden proposal while typing a draft', () => {
+    useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().suggest('What is DNS?')
+    useSpeakerTranscription.getState().setComposerReviewVisible(false)
+    const stop = listenForSpeakerKeys()
+    for (const key of ['F15', 'F18'])
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key, shiftKey: true })
+      )
+    expect(useSpeakerTranscription.getState().queue).toEqual([])
+    expect(useSpeakerTranscription.getState().suggestions).toEqual([
+      'What is DNS?',
+    ])
+    stop()
   })
   it('plain side arrows never control the speaker or prevent normal navigation', () => {
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
     useSpeakerTranscription.getState().suggest('What is DNS?')
     const stop = listenForSpeakerKeys()
     for (const key of ['ArrowLeft', 'ArrowRight']) {
@@ -160,6 +180,7 @@ describe('speaker remote keys', () => {
     expect(useSpeakerTranscription.getState().queue).toEqual([])
     stop()
     useSpeakerTranscription.getState().resetTurns()
+    useSpeakerTranscription.getState().setComposerReviewVisible(true)
   })
   it('F15 sends the newest suggestion chip', () => {
     useSpeakerTranscription.setState({ queue: [], suggestions: [] })

@@ -44,6 +44,8 @@ export function setQuestionControls(controls: QuestionControls) {
 }
 
 type SpeakerTranscriptionState = {
+  composerReviewVisible: boolean
+  setComposerReviewVisible: (visible: boolean) => void
   pendingQuestion: QuestionDraft | null
   setPendingQuestion: (draft: QuestionDraft | null) => void
   sendPendingQuestion: () => void
@@ -124,6 +126,9 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
         }
         set({ enabled })
       },
+      composerReviewVisible: false,
+      setComposerReviewVisible: (composerReviewVisible) =>
+        set({ composerReviewVisible }),
       pendingQuestion: null,
       setPendingQuestion: (pendingQuestion) => set({ pendingQuestion }),
       sendPendingQuestion: () => questionControls?.sendNow(),
@@ -164,6 +169,7 @@ export const useSpeakerTranscription = create<SpeakerTranscriptionState>()(
           turnVersions: {},
           sendingTurn: null,
           pendingQuestion: null,
+          composerReviewVisible: false,
           queue: [],
           revision: null,
           lastSent: null,

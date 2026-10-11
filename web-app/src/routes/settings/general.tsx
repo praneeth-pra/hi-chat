@@ -35,6 +35,8 @@ import { getLiveMode, setLiveMode } from '@/lib/speakerLive'
 import {
   DICTATION_ENGINES,
   getDictationEngine,
+  getDictationReduceEcho,
+  setDictationReduceEcho,
   getKeepMicReady,
   setDictationEngine,
   setKeepMicReady,
@@ -148,6 +150,8 @@ function General() {
   const [liveMode, setLiveModeState] = useState(getLiveMode)
   const [dictationEngine, setDictationEngineState] =
     useState(getDictationEngine)
+  const [reduceDictationEcho, setReduceDictationEchoState] =
+    useState(getDictationReduceEcho)
   const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [judgeModel, setJudgeModelState] = useState<JudgeModel>(getJudgeModel)
   const [secondJudge, setSecondJudgeState] = useState<JudgeModel | undefined>(
@@ -830,6 +834,19 @@ function General() {
                 }
               />
               <CardItem
+                title="Suppress playback through the microphone"
+                description="Off captures spoken audio played near your microphone as well as your voice. Turn on to reduce speaker echo and background noise. Choose MacBook Microphone above to use its built-in mic."
+                actions={
+                  <Switch
+                    checked={reduceDictationEcho}
+                    onCheckedChange={(on) => {
+                      setDictationReduceEcho(on)
+                      setReduceDictationEchoState(on)
+                    }}
+                  />
+                }
+              />
+              <CardItem
                 title="Keep the mic ready"
                 description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Hi-chat is open."
                 actions={
@@ -967,12 +984,12 @@ function General() {
                 }
               />
               <CardItem
-                title="Automatic speaker questions"
-                description="Scenario fragments stay pending across pauses. The first complete question sends automatically; later follow-ups and new questions require approval. Review cards send as separate prompts and never append to an existing question or replace its answer. fn + Right sends; fn + Left discards. Cards hide after three seconds."
+                title="Speaker question review"
+                description="Scenario fragments stay pending across pauses. Every question appears for approval in the prompt box. Send creates a separate prompt and never appends to an existing question or replaces its answer. fn + Right sends; fn + Left discards. Proposals hide after three seconds. Your typed draft is preserved."
               />
               <CardItem
                 title="Smart turn detection"
-                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn uses up to 1 s of settling for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
+                description="Listens to the interviewer's voice to help detect when they have finished. Questions still require your approval; unfinished scenarios stay pending. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
                 actions={
                   <Switch
                     checked={smartTurn}

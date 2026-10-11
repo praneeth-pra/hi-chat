@@ -6,6 +6,8 @@ import {
   useDictation,
   onBlock,
   getDictationEngine,
+  getDictationReduceEcho,
+  setDictationReduceEcho,
   setDictationEngine,
   setKeepMicReady,
   startDictation,
@@ -183,6 +185,47 @@ describe('dictation', () => {
     expect(rec.audio).toEqual([push.mock.calls[0][0]])
   })
 
+  it('captures playback through the microphone by default and can opt into suppression', async () => {
+    setKeepMicReady(false)
+    localStorage.removeItem('dictation-reduce-echo')
+    expect(getDictationReduceEcho()).toBe(false)
+    const mic = fakeMic()
+    mic.open()
+    await startDictation()
+    expect(mic.getUserMedia).toHaveBeenLastCalledWith({
+      audio: { echoCancellation: false, noiseSuppression: false },
+    })
+    cancelDictation()
+    setDictationReduceEcho(true)
+    expect(getDictationReduceEcho()).toBe(true)
+    await startDictation()
+    expect(mic.getUserMedia).toHaveBeenLastCalledWith({
+      audio: { echoCancellation: true, noiseSuppression: true },
+    })
+    cancelDictation()
+    localStorage.removeItem('dictation-reduce-echo')
+    vi.unstubAllGlobals()
+  })
+  it('reopens a warm microphone when processing preferences change', async () => {
+    setKeepMicReady(false)
+    localStorage.removeItem('dictation-reduce-echo')
+    const mic = fakeMic()
+    mic.open()
+    setKeepMicReady(true)
+    await startDictation()
+    cancelDictation()
+    // A preference changed in another tab must not reuse the old processed stream.
+    localStorage.setItem('dictation-reduce-echo', 'on')
+    await startDictation()
+    expect(mic.getUserMedia).toHaveBeenCalledTimes(2)
+    expect(mic.getUserMedia).toHaveBeenLastCalledWith({
+      audio: { echoCancellation: true, noiseSuppression: true },
+    })
+    cancelDictation()
+    setKeepMicReady(false)
+    localStorage.removeItem('dictation-reduce-echo')
+    vi.unstubAllGlobals()
+  })
   it('remembers the chosen engine, Auto by default', () => {
     localStorage.removeItem('dictation-engine')
     expect(getDictationEngine()).toBe('auto')
@@ -563,6 +606,26 @@ describe('dictation', () => {
       })
     })
 
+    it('requests usable speech in the batch race and ignores empty results before a valid transcript', async () => {
+      liveResult.finish = () => Promise.resolve('')
+      const fetchMock = vi.fn(
+        async (_url: string, _init: RequestInit) =>
+          new Response(
+            JSON.stringify({
+              results: [
+                { ok: true, text: '   ' },
+                { ok: true, text: 'Explain ECS pricing.' },
+              ],
+            })
+          )
+      )
+      vi.stubGlobal('fetch', fetchMock)
+      await dictate('auto')
+      expect(fetchMock.mock.calls[0][1].body).toBeInstanceOf(FormData)
+      const body = fetchMock.mock.calls[0][1].body as FormData
+      expect(body.get('require_text')).toBe('1')
+      expect(usePrompt.getState().prompt).toBe('Explain ECS pricing.')
+    })
     it('a live engine that heard nothing also falls back', async () => {
       const fetchMock = relay({ text: 'Run kubectl get pods.' })
       await dictate('elevenlabs')
