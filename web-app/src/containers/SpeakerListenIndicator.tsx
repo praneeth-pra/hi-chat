@@ -115,9 +115,7 @@ export function SpeakerTranscriptionProvider() {
       setStatus('off')
       return
     }
-    let check: CheckInfo | undefined
-    let words: { name: string; text: string }[] = []
-    let turnCheck: TurnCheck | null = null
+    const checks = new WeakMap<string[], CheckInfo>()
     // Hears from the interviewer's voice whether they have finished
     const newTurnListener = () =>
       createTurnListener(undefined, undefined, {
@@ -127,8 +125,12 @@ export function SpeakerTranscriptionProvider() {
           ),
       })
     let turnListener = getSmartTurn() ? newTurnListener() : null
-    const log = (clip: ClipLog) => {
-      const line = `${clip.sent ? 'sent' : clip.check?.type === 'skip' ? 'skipped' : 'buffered'} "${clip.text}" | ${describeClip(clip)}${clip.note ? ` | ${clip.note}` : ''}`
+    const log = (
+      clip: ClipLog,
+      words: { name: string; text: string }[],
+      turnCheck: TurnCheck | null
+    ) => {
+      const line = `${clip.sent ? 'sent' : 'buffered'} "${clip.text}" | ${describeClip(clip)}${clip.note ? ` | ${clip.note}` : ''}`
       // Each engine's own words, so their accuracy can be compared
       const heard = clip.engines.length
         ? words.map((w) => ` | ${w.name}: "${w.text}"`).join('')
@@ -173,7 +175,7 @@ export function SpeakerTranscriptionProvider() {
         reportClip(`stage=${event} ${JSON.stringify(fields)}`),
       judge: (texts, context) =>
         judgeSpeakerTurn(texts, context, getConfig(), (info) => {
-          check = info
+          checks.set(texts, info)
         }),
       onDraft: (draft) =>
         useSpeakerTranscription.getState().setPendingQuestion(draft),
@@ -193,8 +195,13 @@ export function SpeakerTranscriptionProvider() {
       next: turns.next,
       keepListening: turns.keepListening,
       discard: () => {
+        const pending = useSpeakerTranscription.getState().pendingQuestion
+        const assembling =
+          !pending || (!pending.complete && !pending.queuedQuestions)
         turns.discard()
-        session.restart()
+        // Discard the current recording only when it belongs to this draft.
+        // A later question being captured must survive review of an older one.
+        if (assembling) session.restart()
       },
     })
     let deliveryEpoch = useSpeakerTranscription.getState().deliveryEpoch
@@ -242,9 +249,6 @@ export function SpeakerTranscriptionProvider() {
         turn = null,
         capture
       ) => {
-        check = undefined
-        words = engineWords
-        turnCheck = turn
         const judgement = turns.accept(
           texts,
           !!(
@@ -256,14 +260,18 @@ export function SpeakerTranscriptionProvider() {
         )
         void judgement
           .then(() => {
-            const info = check as CheckInfo | undefined
-            log({
-              text: texts[0],
-              sent: false,
-              engines,
-              check: info,
-              note: info?.note ?? 'Added to question turn',
-            })
+            const info = checks.get(texts)
+            log(
+              {
+                text: texts[0],
+                sent: false,
+                engines,
+                check: info,
+                note: info?.note ?? 'Added to question turn',
+              },
+              engineWords,
+              turn
+            )
           })
           .catch(() => {})
         // Only the coordinator may send, never an individual capture clip.
