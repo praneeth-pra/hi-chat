@@ -23,6 +23,13 @@ microphone performance. No dictation behavior was changed in this review.
    queue. `ChatInput.tsx` sends when an answer is not streaming, attachments are
    ready, and a model is selected. This path works with Speaker disabled.
 
+Dictation captures a physical/default microphone and excludes BlackHole inputs.
+It enables echo cancellation and noise suppression. Playing a recording through
+computer speakers is therefore not a reliable dictation test: the computer's
+output is not captured directly, and playback reaching the microphone can be
+suppressed. Use Speaker with configured loopback for computer audio, or speak
+into the selected microphone when testing dictation.
+
 External dictation via F20 and paste uses a different path: it currently enters
 Speaker's legacy queue, bypasses the prompt preview, and depends on Speaker
 being enabled. It should eventually share the dedicated dictation delivery path.
@@ -31,6 +38,7 @@ being enabled. It should eventually share the dedicated dictation delivery path.
 
 | Priority | Finding | Feasible improvement | Expected effect / tradeoff |
 | --- | --- | --- | --- |
+| 1 | Reproduced: with `need=1`, the batch relay treats an empty successful response as the winner and aborts the other engine before it can return usable speech. | Count only nonempty transcripts toward the dictation race; preserve other consumers’ intended behavior. Select the first nonempty result in the client too. | Prevents false “heard nothing” when one provider is empty and another has text, without waiting once usable speech arrives. This is a confirmed code defect, not proof of the cause of any particular live recording. |
 | 1 | Live finalization can wait eight seconds before batch fallback begins. Relay engine timeout is 200 seconds and the browser batch request has no separate abort deadline. | Start a hedged batch request after a measured live-finalization deadline, perhaps 0.8–1.5 seconds initially; cancel the losing route and add a bounded batch deadline with retained audio. | Reduces slow-tail latency, with extra uploads/cost on slow clips. Do not shorten finalization blindly: late final words can be lost. Tune from live p95 data. |
 | 1 | Overall word agreement ignores punctuation/case and can exceed 0.93 despite an important technical word being wrong. The code's own example scores “S3 bucket” versus “Extra bucket” at 0.95 in a longer sentence. | Detect disagreement over numbers, negation, identifiers and supplied technical terms before bypassing the judge. Judge only those ambiguous spans; retain the rest verbatim. | Better semantic accuracy without putting an LLM on every dictation. A minority of clips pay extra latency. |
 | 1 | The judge is prompted to use only heard words, but runtime validation merely requires 0.6 overlap with the chosen vote. Its 2000-token output limit can truncate long dictation. | Validate edits against the union of transcript words and permitted dictionary corrections; reject unexplained omissions/insertions. Use bounded span corrections or chunk long transcripts. | Prevents invented details and dropped text. Keep the original transcript whenever validation fails. |

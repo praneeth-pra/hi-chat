@@ -967,12 +967,12 @@ function General() {
                 }
               />
               <CardItem
-                title="Automatic speaker questions"
-                description="Scenario fragments stay pending across pauses. Every question appears for approval in the prompt box. Send creates a separate prompt and never append to an existing question or replace its answer. fn + Right sends; fn + Left discards. Proposals hide after three seconds. Your typed draft is preserved."
+                title="Speaker question review"
+                description="Scenario fragments stay pending across pauses. Every question appears for approval in the prompt box. Send creates a separate prompt and never appends to an existing question or replaces its answer. fn + Right sends; fn + Left discards. Proposals hide after three seconds. Your typed draft is preserved."
               />
               <CardItem
                 title="Smart turn detection"
-                description="Listens to the interviewer's voice to tell whether they have finished. A complete question heard mid-turn uses up to 1 s of settling for the rest. This can extend settling for a complete question; incomplete scenarios always wait. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
+                description="Listens to the interviewer's voice to help detect when they have finished. Questions still require your approval; unfinished scenarios stay pending. Downloads a 32 MB model when enabled. A stalled load is reported as unavailable after 30 seconds; text judgement continues."
                 actions={
                   <Switch
                     checked={smartTurn}
