@@ -63,22 +63,23 @@ function sendScenario(): boolean {
 const CODE_STEP_MS = 1000
 let codeStep: { at: number; target: HTMLElement } | null = null
 
-/** Top of the area the chat scrolls in, as on screen. */
-function scrollerTop(el: HTMLElement): number {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const { overflowY } = getComputedStyle(p)
-    if (
-      (overflowY === 'auto' || overflowY === 'scroll') &&
-      p.scrollHeight > p.clientHeight
-    )
-      return p.getBoundingClientRect().top
-  }
-  return 0
+/**
+ * The area the chat scrolls in, as on screen. It is looked up by its marker:
+ * a code block's own <pre> also counts as scrollable.
+ */
+function chatView(): { top: number; bottom: number } {
+  const scroller = document.querySelector('[data-thread-scroller]')
+  if (!scroller) return { top: 0, bottom: window.innerHeight }
+  const { top, bottom } = scroller.getBoundingClientRect()
+  return { top, bottom }
 }
 
 /**
- * Scrolls to the next code block above (-1) or below (1) the one at the top
- * of the chat; returns true.
+ * Scrolls to the next code block above (-1) or below (1); returns true.
+ * While the block it last went to is still on screen (or it is still
+ * scrolling there), it steps on from that block, so presses near the end of
+ * the chat, where a block can't reach the top, still move on. Otherwise it
+ * starts from the block at the top of the chat.
  */
 export function stepCode(dir: -1 | 1, now = Date.now()): boolean {
   const blocks = Array.from(
@@ -88,17 +89,22 @@ export function stepCode(dir: -1 | 1, now = Date.now()): boolean {
     toast('No code in this chat')
     return true
   }
-  // Pressed again while still scrolling: step from where it was heading
-  const from =
-    codeStep && now >= codeStep.at && now - codeStep.at < CODE_STEP_MS
-      ? blocks.indexOf(codeStep.target)
-      : -1
+  const view = chatView()
+  const last = codeStep ? blocks.indexOf(codeStep.target) : -1
+  const onScreen = (b: HTMLElement) => {
+    const r = b.getBoundingClientRect()
+    return r.bottom > view.top && r.top < view.bottom
+  }
+  const follow =
+    last >= 0 &&
+    ((now >= codeStep!.at && now - codeStep!.at < CODE_STEP_MS) ||
+      onScreen(blocks[last]))
   let target: HTMLElement | undefined
-  if (from >= 0) {
-    target = blocks[from + dir]
+  if (follow) {
+    target = blocks[last + dir]
   } else {
     // Where a block sits once scrolled to (scroll-mt-4 leaves 16 px above)
-    const line = scrollerTop(blocks[0]) + 16
+    const line = view.top + 16
     const top = (b: HTMLElement) => b.getBoundingClientRect().top
     target =
       dir < 0

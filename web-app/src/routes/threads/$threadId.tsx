@@ -242,6 +242,7 @@ function ThreadDetail() {
       <div className="flex flex-col h-[calc(100%-40px)]">
         <div
           ref={scrollContainerRef}
+          data-thread-scroller
           className={cn(
             'flex flex-col h-full w-full overflow-auto pt-4 pb-3',
             // Mobile-first responsive padding
