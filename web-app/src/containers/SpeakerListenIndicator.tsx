@@ -138,7 +138,7 @@ export function SpeakerTranscriptionProvider() {
       const settings = [
         `judge=${getJudgeModel()}`,
         `second=${getSecondJudge() ?? 'off'}`,
-        'protocol=intent-v2',
+        'protocol=intent-v3',
         `endpoint_ms=${getWaitMode() ? 600 : 900}`,
         'turns=on',
         `live=${getLiveMode() ? 'on' : 'off'}`,
