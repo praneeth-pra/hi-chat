@@ -144,26 +144,52 @@ describe('pending question controls', () => {
     vi.useFakeTimers()
     useSpeakerTranscription.getState().setPendingQuestion({
       id: 'q',
-      text: 'How does DNS work? With caching.',
-      addition: 'With caching.',
+      text: 'With caching.',
+      requiresReview: true,
+      followsQuestion: 'previous',
       complete: false,
       manual: false,
-      relation: 'update',
+      relation: 'new',
       reason: 'follow-up',
     })
     render(<SpeakerPendingQuestion />)
-    expect(screen.getByText('Add to this question?')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Add/ })).toBeInTheDocument()
+    expect(screen.getByText('Follow-up question?')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Send as new/ })
+    ).toBeInTheDocument()
     act(() => vi.advanceTimersByTime(3000))
-    expect(expireReview).toHaveBeenCalledWith(
-      'q',
-      'How does DNS work? With caching.'
-    )
+    expect(expireReview).toHaveBeenCalledWith('q', 'With caching.')
     expect(discard).not.toHaveBeenCalled()
     expect(sendNow).not.toHaveBeenCalled()
-    expect(useSpeakerTranscription.getState().pendingQuestion?.addition).toBe(
+    expect(useSpeakerTranscription.getState().pendingQuestion?.text).toBe(
       'With caching.'
     )
+  })
+  it('shows a complete follow-up for approval and hides it after three seconds', () => {
+    vi.useFakeTimers()
+    useSpeakerTranscription
+      .getState()
+      .setPendingQuestion({
+        id: 'second',
+        text: 'Which one is cheaper?',
+        complete: true,
+        manual: false,
+        requiresReview: true,
+        followsQuestion: 'first',
+        relation: 'new',
+        reason: 'complete',
+      })
+    render(<SpeakerPendingQuestion />)
+    expect(screen.getByText('Follow-up question?')).toBeInTheDocument()
+    expect(screen.getByText('Which one is cheaper?')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /Add/ })
+    ).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(3000))
+    expect(screen.queryByText('Which one is cheaper?')).not.toBeInTheDocument()
+    expect(sendNow).not.toHaveBeenCalled()
+    expect(discard).not.toHaveBeenCalled()
+    expect(expireReview).toHaveBeenCalledWith('second', 'Which one is cheaper?')
   })
   it('dismisses a new-question recommendation after three seconds', () => {
     vi.useFakeTimers()

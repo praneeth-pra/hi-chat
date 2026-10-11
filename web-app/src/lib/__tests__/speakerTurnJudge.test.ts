@@ -484,7 +484,7 @@ describe('speaker intent protocol', () => {
       ).toBe('suggest')
     }
   })
-  it('automatically updates the active ECS/EKS question after a mislabelled held comparison', async () => {
+  it('offers the ECS/EKS follow-up as a separate question after a mislabelled held comparison', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)
       .mockResolvedValueOnce(reply('question'))
@@ -503,15 +503,16 @@ describe('speaker intent protocol', () => {
       'And what do you think which one is cheaper as compared to each other?',
     ])
     await vi.advanceTimersByTimeAsync(500)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     expect(onCommit).toHaveBeenCalledTimes(2)
     expect(onCommit.mock.calls[1][0]).toMatchObject({
-      id: onCommit.mock.calls[0][0].id,
-      relation: 'update',
-      origin: 'automatic',
+      relation: 'new',
+      origin: 'send-now',
     })
     turns.stop()
   })
-  it('automatically sends the reported question, updates its real follow-up and excludes the candidate answer', async () => {
+  it('automatically sends the first question, offers its real follow-up for review and excludes the candidate answer', async () => {
     vi.useFakeTimers()
     vi.mocked(requestSpeakerJudge)
       .mockResolvedValueOnce(reply('question'))
@@ -533,14 +534,15 @@ describe('speaker intent protocol', () => {
     await vi.advanceTimersByTimeAsync(500)
     await turns.accept(['I work on tasks and automation.'])
     await vi.advanceTimersByTimeAsync(10000)
+    expect(onCommit).toHaveBeenCalledTimes(1)
+    turns.sendNow()
     expect(onCommit).toHaveBeenCalledTimes(2)
     const [first, second] = onCommit.mock.calls.map(([turn]) => turn)
     expect(first.origin).toBe('automatic')
     expect(second).toMatchObject({
-      id: first.id,
-      version: 2,
-      origin: 'automatic',
-      text: 'What is your strong zone? Out of all of these things, what do you work regularly on?',
+      version: 1,
+      origin: 'send-now',
+      text: 'Out of all of these things, what do you work regularly on?',
     })
     turns.stop()
   })
