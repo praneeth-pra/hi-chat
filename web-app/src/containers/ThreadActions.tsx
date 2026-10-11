@@ -8,7 +8,7 @@ export function ThreadActions({ thread }: { thread: Thread }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const deleteThread = useThreads((state) => state.deleteThread)
   return (
-    <div className="flex items-center gap-1">
+    <div className="relative z-20 flex items-center gap-1">
       <ChatQuestionsDialog key={thread.id} thread={thread} />
       <button
         type="button"
