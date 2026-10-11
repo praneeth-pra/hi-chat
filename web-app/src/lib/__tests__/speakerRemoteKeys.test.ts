@@ -208,7 +208,7 @@ describe('speaker remote keys', () => {
       block.id = id
       block.setAttribute('data-code-block', '')
       block.getBoundingClientRect = () =>
-        ({ top: tops[id] - offset }) as DOMRect
+        ({ top: tops[id] - offset, bottom: tops[id] - offset + 50 }) as DOMRect
       document.body.appendChild(block)
     }
     const stop = listenForSpeakerKeys()
@@ -229,13 +229,22 @@ describe('speaker remote keys', () => {
     stepCode(-1, 10_900)
     expect(scrolled).toEqual(['three', 'three', 'two', 'one'])
 
-    // Later on, from the screen: block two at the top, so down goes to three
+    // Later on, with the last one off screen: block two is at the top, so
+    // down goes to three
     offset = 284
     stepCode(1, 20_000)
     expect(scrolled.at(-1)).toBe('three')
-    offset = 284
+    // Three is on screen: up steps on from it
     stepCode(-1, 30_000)
-    expect(scrolled.at(-1)).toBe('one')
+    expect(scrolled.at(-1)).toBe('two')
+
+    // At the end of the chat blocks can't reach the top: down still moves on
+    offset = 200
+    stepCode(1, 40_000)
+    expect(scrolled.at(-1)).toBe('three')
+    const count = scrolled.length
+    stepCode(1, 50_000)
+    expect(scrolled.length).toBe(count) // No code below
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
   })
 })
