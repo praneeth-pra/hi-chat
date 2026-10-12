@@ -12,10 +12,12 @@ provider and normal streaming/reasoning settings.
   candidates receive the same numbered source excerpts. The complete draft is
   held while a 120B reviewer, preferably the other provider, checks material
   claims against the question, conversation and sources. Claim spans, source
-  IDs and supporting excerpts must pass validation. Only an
-  approved, corrected or uncertainty-qualified answer is shown. Missing evidence
-  or failed review produces a clear error; unchecked text never becomes a
-  fallback answer. See [Accuracy setup and limitations](accuracy-mode.md).
+  IDs and supporting excerpts must pass validation for a completed audit. Normally
+  an approved, corrected or uncertainty-qualified answer is shown. Missing evidence
+  produces a clear error. A failed detailed audit uses a simpler source-based
+  correction from the second 120B provider, labelled as lacking a complete audit.
+  If neither reviewer produces a usable correction, the grounded draft is shown
+  with an explicit unverified warning. See [Accuracy setup and limitations](accuracy-mode.md).
 
 Configure Groq/Cerebras keys in Model Providers. Accuracy additionally requires
 `EXA_API_KEY` in Railway. A previous manual choice remains manual; Auto defaults

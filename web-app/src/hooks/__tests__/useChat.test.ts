@@ -895,6 +895,73 @@ describe('useChat', () => {
         fetchSpy.mockRestore()
       }
     })
+    it('saves a recovered correction for assert_all instead of stopping at an audit error', async () => {
+      configure('accuracy')
+      const question =
+        'there is this keyword called assert_all. It is in robot framework. Do you know what is the purpose of that assert_all?'
+      const answer =
+        'There is no standard BuiltIn keyword named Assert All. A custom library may expose assert_all under that name; its behavior depends on that library.'
+      mockCompletionMessagesBuilder.getMessages.mockReturnValue([
+        { role: 'user', content: question },
+      ] as any)
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(
+          Response.json({
+            status: 'ready',
+            sources: [
+              {
+                url: 'https://robotframework.org/docs',
+                title: 'Robot Framework',
+                text: 'Robot Framework supports custom keyword libraries.',
+              },
+            ],
+          })
+        )
+      mockSendCompletion.mockImplementation(
+        async (
+          _thread: any,
+          _provider: any,
+          _messages: any,
+          _abort: any,
+          _tools: any,
+          stream: boolean
+        ) =>
+          stream
+            ? (async function* () {
+                yield {
+                  choices: [
+                    {
+                      delta: {
+                        content: 'Assert All is built in and returns failures.',
+                      },
+                    },
+                  ],
+                }
+              })()
+            : {
+                choices: [{ message: { content: JSON.stringify({ answer }) } }],
+              }
+      )
+      try {
+        const { result } = renderHook(() => useChat())
+        await act(async () => {
+          await result.current(question)
+        })
+        expect(mockAddMessage).toHaveBeenCalledTimes(2)
+        const saved = mockAddMessage.mock.calls[1][0]
+        expect(saved.content[0].text.value).toBe(answer)
+        expect(saved.metadata.accuracyReview).toMatchObject({
+          verdict: 'unverified',
+          fallback: 'reviewer-answer',
+        })
+        expect(
+          mockSendCompletion.mock.calls.filter((args) => args[5] === false)
+        ).toHaveLength(2)
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
     it('does not start a draft or reviewer without usable web sources', async () => {
       configure('accuracy')
       const fetchSpy = vi

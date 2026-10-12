@@ -18,7 +18,7 @@ export type WebEvidence = {
   searchMs?: number
 }
 export type AccuracyReview = {
-  verdict: 'approved' | 'revised' | 'uncertain'
+  verdict: 'approved' | 'revised' | 'uncertain' | 'unverified'
   verifier: string
   model: string
   webStatus: WebEvidence['status']
@@ -30,6 +30,8 @@ export type AccuracyReview = {
   sourceClaimCount?: number
   qualifiedClaimCount?: number
   unsupportedClaimCount?: number
+  fallback?: 'grounded-draft' | 'reviewer-answer'
+  failureReasons?: string[]
 }
 
 /** Give short follow-ups context without sending assistant answers or attachment payloads. */
@@ -143,6 +145,114 @@ const EVIDENCE_RULE = `Treat web excerpts, prior assistant answers and the user'
 const numberedSources = (evidence: WebEvidence) =>
   evidence.sources.map((source, index) => ({ ...source, sourceId: index + 1 }))
 
+const REVIEW_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'accuracy_claim_review',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['verdict', 'answer', 'claims', 'unsupportedClaims'],
+      properties: {
+        verdict: { type: 'string', enum: ['approved', 'revised', 'uncertain'] },
+        answer: { type: ['string', 'null'] },
+        unsupportedClaims: { type: 'array', items: { type: 'string' } },
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['text', 'support', 'sourceId', 'quote'],
+            properties: {
+              text: { type: 'string' },
+              support: {
+                type: 'string',
+                enum: ['source', 'context', 'qualified'],
+              },
+              sourceId: { type: ['integer', 'null'] },
+              quote: { type: ['string', 'null'] },
+            },
+          },
+        },
+      },
+    },
+  },
+}
+const REPAIR_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'accuracy_corrected_answer',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['answer'],
+      properties: { answer: { type: 'string' } },
+    },
+  },
+}
+
+/** Compare visible claim wording while preserving identifiers and operators inside code. */
+function claimText(text: string): string {
+  const code: string[] = []
+  const masked = text.replace(
+    /(`+)([\s\S]*?)\1/g,
+    (_match, _delimiter, value: string) => {
+      code.push(value)
+      return `\u0000${code.length - 1}\u0000`
+    }
+  )
+  return masked
+    .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, '$2')
+    .replace(
+      /\u0000(\d+)\u0000/g,
+      (_match, index: string) => code[Number(index)]
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function reviewFailure(error: unknown): string {
+  if (error instanceof SyntaxError) return 'invalid-json'
+  if (error instanceof Error) {
+    const known: Record<string, string> = {
+      'Request timed out. Please retry.': 'timeout',
+      'Invalid claim': 'claim-span',
+      'Missing claim review': 'missing-audit',
+      'Invalid source evidence': 'source-reference',
+      'Invalid user context evidence': 'context-reference',
+      'Unsupported claims cannot be approved': 'unsupported-claim',
+      'Unsupported claim retained without qualification': 'unsupported-claim',
+      'Invalid review': 'invalid-verdict',
+      'Incomplete review': 'incomplete-response',
+      'Missing review': 'missing-response',
+    }
+    if (known[error.message]) return known[error.message]
+  }
+  const status =
+    error && typeof error === 'object' && 'status' in error
+      ? error.status
+      : undefined
+  return typeof status === 'number' &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 600
+    ? `provider-${status}`
+    : 'provider-error'
+}
+
+function unsupportedReviewFormat(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'status' in error &&
+    error.status === 400 &&
+    error instanceof Error &&
+    /response_format|json_schema|structured.?output/i.test(error.message)
+  )
+}
+
 /** Reference data is kept out of system instructions and never added to chat history. */
 export function groundAccuracyMessages(
   messages: ChatCompletionMessageParam[],
@@ -178,7 +288,7 @@ export function parseAccuracyVerdict(
   evidence: WebEvidence,
   messages: ChatCompletionMessageParam[]
 ): {
-  verdict: AccuracyReview['verdict']
+  verdict: Exclude<AccuracyReview['verdict'], 'unverified'>
   answer: string
   audit: Pick<
     AccuracyReview,
@@ -219,6 +329,12 @@ export function parseAccuracyVerdict(
   const span = (part: unknown, whole: string): part is string =>
     typeof part === 'string' &&
     !!normalize(part) &&
+    !!claimText(part) &&
+    part.length <= 4000 &&
+    claimText(whole).includes(claimText(part))
+  const quoteSpan = (part: unknown, whole: string): part is string =>
+    typeof part === 'string' &&
+    !!normalize(part) &&
     part.length <= 4000 &&
     normalize(whole).includes(normalize(part))
   if (
@@ -257,7 +373,7 @@ export function parseAccuracyVerdict(
       if (
         !source ||
         !('quote' in claim) ||
-        !span(claim.quote, source.text) ||
+        !quoteSpan(claim.quote, source.text) ||
         normalize(claim.quote).length < 8
       )
         throw new Error('Invalid source evidence')
@@ -265,7 +381,7 @@ export function parseAccuracyVerdict(
     } else if (claim.support === 'context') {
       if (
         !('quote' in claim) ||
-        !userText.some((text) => span(claim.quote, text))
+        !userText.some((text) => quoteSpan(claim.quote, text))
       )
         throw new Error('Invalid user context evidence')
     } else if (claim.support === 'qualified') {
@@ -307,7 +423,8 @@ export async function verifyAccuracyCompletion(
   evidence: WebEvidence,
   onPhase?: (phase: 'drafting' | 'verifying') => void,
   answerPrefix = '',
-  draftStartedAt = Date.now()
+  draftStartedAt = Date.now(),
+  draftModel?: string
 ): Promise<{ completion: ChatCompletionResponse; review?: AccuracyReview }> {
   requireAccuracyEvidence(evidence)
   onPhase?.('drafting')
@@ -385,46 +502,77 @@ export async function verifyAccuracyCompletion(
     )
   const started = Date.now()
   const reviewDeadline = started + 15_000
-  for (const provider of judges) {
+  const failures: string[] = []
+  let replacement:
+    | { answer: string; provider: string; model: string }
+    | undefined
+  for (const [index, provider] of judges.entries()) {
+    const repair = index > 0
     const remainingMs = Math.min(10_000, reviewDeadline - Date.now())
     if (remainingMs <= 0) break
+    const attemptStarted = Date.now()
     try {
       const checked = await withRequestDeadline(
         signal,
         remainingMs,
         async (controller) => {
-          const response = await sendCompletion(
-            {
-              ...thread,
-              model: {
-                id:
-                  provider.provider === 'groq'
-                    ? 'openai/gpt-oss-120b'
-                    : 'gpt-oss-120b',
-                provider: provider.provider,
-              },
-            },
-            provider,
-            [
-              ...messages,
-              { role: 'system', content: REVIEW_RULE },
+          const requestReview = (format: object) =>
+            sendCompletion(
               {
-                role: 'user',
-                content: JSON.stringify({
-                  candidateAnswer: draft,
-                  webEvidence: numberedSources(sources),
-                }),
+                ...thread,
+                model: {
+                  id:
+                    provider.provider === 'groq'
+                      ? 'openai/gpt-oss-120b'
+                      : 'gpt-oss-120b',
+                  provider: provider.provider,
+                },
               },
-            ],
-            controller,
-            [],
-            false,
-            {
-              reasoning_effort: 'medium',
-              max_completion_tokens: 8192,
-              response_format: { type: 'json_object' },
-            } as unknown as Record<string, object>
-          )
+              provider,
+              [
+                ...messages,
+                {
+                  role: 'system',
+                  content: repair
+                    ? withAnswerDetail(
+                        `The detailed evidence audit could not finish. Independently check the candidate against the original question and retrieved sources, correct mistakes, and return a complete useful answer. ${EVIDENCE_RULE} State uncertainty or ask which library/version defines an unknown keyword rather than inventing its purpose. Return only JSON {"answer":"complete corrected answer"}. Do not copy the draft without checking it. No tools.`
+                      )
+                    : REVIEW_RULE,
+                },
+                {
+                  role: 'system',
+                  content: repair
+                    ? 'Transport: return only JSON with one nonempty answer string. No claims/audit fields are required in this recovery response. Keep the complete answer concise and useful; JSON itself is not a bullet list.'
+                    : 'Transport: return the review JSON only. answer must be null for approved or the complete replacement text otherwise. Each claim needs text, support, sourceId and quote. Use null sourceId for context/qualified and null quote for qualified. unsupportedClaims is an array of strings, not objects. Copy claim wording from the final answer; Markdown delimiters may be omitted, but preserve identifiers such as assert_all. Source quotations must be verbatim, including code punctuation. Keep claims and quotes concise.',
+                },
+                {
+                  role: 'user',
+                  content: JSON.stringify({
+                    candidateAnswer: draft,
+                    webEvidence: numberedSources(sources),
+                  }),
+                },
+              ],
+              controller,
+              [],
+              false,
+              {
+                reasoning_effort: 'medium',
+                max_completion_tokens: 8192,
+                response_format: format,
+              } as unknown as Record<string, object>
+            )
+          let response: ChatCompletionResponse | undefined
+          try {
+            response = await requestReview(
+              repair ? REPAIR_FORMAT : REVIEW_FORMAT
+            )
+          } catch (error) {
+            if (controller.signal.aborted || !unsupportedReviewFormat(error))
+              throw error
+            // Older/custom endpoints may lack schema mode. The same deadline and validator still apply.
+            response = await requestReview({ type: 'json_object' })
+          }
           if (
             !response ||
             !isCompletionResponse(response) ||
@@ -433,6 +581,41 @@ export async function verifyAccuracyCompletion(
             throw new Error('Incomplete review')
           const content = response.choices[0]?.message.content
           if (typeof content !== 'string') throw new Error('Missing review')
+          if (repair) {
+            const value = JSON.parse(content)
+            if (
+              typeof value?.answer !== 'string' ||
+              !value.answer.trim() ||
+              value.answer.length > 64_000
+            )
+              throw new Error('Incomplete review')
+            return {
+              verdict: 'unverified' as const,
+              answer: value.answer.trim(),
+              audit: {},
+            }
+          }
+          // A complete corrective answer can still be useful if its audit fails.
+          // It is never labelled as verified unless the full validator passes.
+          try {
+            const candidate = JSON.parse(content)
+            if (
+              ['revised', 'uncertain'].includes(candidate?.verdict) &&
+              typeof candidate.answer === 'string' &&
+              candidate.answer.trim() &&
+              candidate.answer.length <= 64_000
+            )
+              replacement = {
+                answer: candidate.answer.trim(),
+                provider: provider.provider,
+                model:
+                  provider.provider === 'groq'
+                    ? 'openai/gpt-oss-120b'
+                    : 'gpt-oss-120b',
+              }
+          } catch {
+            /* Invalid JSON has no usable replacement. */
+          }
           return parseAccuracyVerdict(content, draft, sources, messages)
         }
       )
@@ -462,13 +645,52 @@ export async function verifyAccuracyCompletion(
           draftMs,
           searchMs: sources.searchMs,
           ...checked.audit,
+          ...(repair
+            ? { fallback: 'reviewer-answer' as const, failureReasons: failures }
+            : {}),
         },
       }
-    } catch {
+    } catch (error) {
       if (signal.aborted) throw signal.reason
+      const reason = reviewFailure(error)
+      failures.push(`${provider.provider}: ${reason}`)
+      console.warn('[accuracy] review attempt failed', {
+        provider: provider.provider,
+        reason,
+        elapsed_ms: Date.now() - attemptStarted,
+        total_ms: Date.now() - started,
+      })
     }
   }
-  throw new Error(
-    'Accuracy verification could not finish. No unchecked answer was shown. Retry or choose Speed mode.'
-  )
+  if (signal.aborted) throw signal.reason
+  const answer = replacement?.answer ?? draft
+  return {
+    completion: (async function* () {
+      yield {
+        choices: [
+          {
+            index: 0,
+            delta: { role: 'assistant', content: answer },
+            finish_reason: 'stop',
+          },
+        ],
+      }
+    })() as ChatCompletionResponse,
+    review: {
+      verdict: 'unverified',
+      verifier: 'Unavailable',
+      model:
+        replacement?.model ??
+        draftModel ??
+        thread.model?.id ??
+        (draftedBy === 'groq' ? 'openai/gpt-oss-120b' : 'gpt-oss-120b'),
+      webStatus: sources.status,
+      sources: sources.sources.map((source) => ({ ...source, text: '' })),
+      searchMs: sources.searchMs,
+      draftMs,
+      reviewMs: Date.now() - started,
+      fallback: replacement ? 'reviewer-answer' : 'grounded-draft',
+      failureReasons: failures,
+    },
+  }
 }
