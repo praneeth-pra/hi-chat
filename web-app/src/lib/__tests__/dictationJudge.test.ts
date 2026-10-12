@@ -150,4 +150,78 @@ describe('judgeDictation', () => {
     ).toBeUndefined()
     expect(fetcher).not.toHaveBeenCalled()
   })
+
+  it('brings in Groq when Cerebras is slow, and uses the first usable reply', async () => {
+    providers.cerebras = { api_key: 'csk' }
+    providers.groq = { api_key: 'gsk' }
+    vi.useFakeTimers()
+    try {
+      const fetcher = vi.fn((url: string, init: RequestInit) =>
+        url.includes('cerebras')
+          ? new Promise<Response>((_, reject) =>
+              init.signal?.addEventListener('abort', () =>
+                reject(new Error('aborted'))
+              )
+            )
+          : Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  choices: [{ message: { content: 'Run kubectl get pods.' } }],
+                })
+              )
+            )
+      )
+      const judged = judgeDictation(
+        results,
+        'Run kubectl get pods.',
+        [],
+        fetcher as unknown as typeof fetch
+      )
+      await vi.advanceTimersByTimeAsync(599)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(judged).resolves.toBe('Run kubectl get pods.')
+      expect(fetcher).toHaveBeenCalledTimes(2)
+      // The slow Cerebras request is cancelled
+      expect((fetcher.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(
+        true
+      )
+    } finally {
+      vi.useRealTimers()
+      delete providers.groq
+    }
+  })
+
+  it('asks Groq at once when Cerebras fails, and keeps the vote if both fail', async () => {
+    providers.cerebras = { api_key: 'csk' }
+    providers.groq = { api_key: 'gsk' }
+    try {
+      const fetcher = vi.fn(async (url: string) =>
+        url.includes('cerebras')
+          ? new Response('busy', { status: 503 })
+          : new Response(
+              JSON.stringify({
+                choices: [{ message: { content: 'Run kubectl get pods.' } }],
+              })
+            )
+      )
+      const started = Date.now()
+      await expect(
+        judgeDictation(
+          results,
+          'Run kubectl get pods.',
+          [],
+          fetcher as unknown as typeof fetch
+        )
+      ).resolves.toBe('Run kubectl get pods.')
+      expect(Date.now() - started).toBeLessThan(300)
+      const down = vi.fn(async () => new Response('busy', { status: 503 }))
+      await expect(
+        judgeDictation(results, 'v', [], down as unknown as typeof fetch)
+      ).resolves.toBeUndefined()
+      expect(down).toHaveBeenCalledTimes(2)
+    } finally {
+      delete providers.groq
+    }
+  })
 })
