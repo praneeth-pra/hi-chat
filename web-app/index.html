@@ -9,12 +9,19 @@
       content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0, viewport-fit=cover"
     />
     <title>Hi-chat</title>
-    <link rel="stylesheet" href="/src/loader.css" />
+    <style>
+      /* No startup animation; just the app background until it renders */
+      html {
+        background: rgb(244, 244, 242);
+      }
+      @media (prefers-color-scheme: dark) {
+        html {
+          background: rgb(17, 17, 19);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="initial-loader">
-      <img src="/images/hi-chat-logo.png" alt="Hi-chat" />
-    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
