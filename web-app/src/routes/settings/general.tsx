@@ -547,7 +547,7 @@ function General() {
               />
               <CardItem
                 title="Answer format"
-                description="Medium-length answers, mostly bullet points. Tables in answers are always displayed as lists."
+                description="Natural, conversational answers with bullets only when the question needs a list. Tables in answers are always displayed as lists."
               />
               <CardItem
                 title="Chat thinking"
