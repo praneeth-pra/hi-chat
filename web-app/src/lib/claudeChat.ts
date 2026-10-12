@@ -145,3 +145,53 @@ export async function streamClaude(opts: {
     }
   })()
 }
+
+/**
+ * One non-streaming Claude reply (the Accuracy reviewer). Thinking stays off
+ * (`between_tools` on Sonnet 5.5) and effort low, for speed.
+ */
+export async function completeClaude(opts: {
+  apiKey: string
+  baseUrl?: string
+  model: string
+  messages: OpenAIMessage[]
+  signal: AbortSignal
+  maxTokens?: number
+}): Promise<{ text: string; stopReason: string | null }> {
+  const { system, messages } = toClaudeMessages(opts.messages)
+  const base = (opts.baseUrl || 'https://api.anthropic.com')
+    .replace(/\/+$/, '')
+    .replace(/\/v1$/, '')
+  const res = await fetch(`${base}/v1/messages`, {
+    method: 'POST',
+    signal: opts.signal,
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': opts.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      max_tokens: opts.maxTokens ?? 8192,
+      thinking: { type: 'between_tools' },
+      output_config: { effort: 'low' },
+      ...(system ? { system } : {}),
+      messages,
+    }),
+  })
+  if (!res.ok)
+    throw Object.assign(new Error(`Claude ${res.status}`), {
+      status: res.status,
+    })
+  const data = (await res.json()) as {
+    content?: { type: string; text?: string }[]
+    stop_reason?: string | null
+  }
+  return {
+    text: (data.content ?? [])
+      .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
+      .join(''),
+    stopReason: data.stop_reason ?? null,
+  }
+}

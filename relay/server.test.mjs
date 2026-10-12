@@ -259,6 +259,17 @@ test('speech log: one capped line per clip', () => {
   assert.equal(speechLogLine(Buffer.from('not json')), null)
 })
 
+test('speech log: Accuracy lines keep only key=value tokens', () => {
+  const body = (o) => Buffer.from(JSON.stringify(o))
+  const line =
+    'accuracy: verdict=approved model=claude-sonnet-5-5 search=skipped total=4210ms failures=groq:timeout,cerebras:claim-span'
+  assert.equal(speechLogLine(body({ line })), line)
+  assert.equal(
+    speechLogLine(body({ line: 'accuracy: verdict=approved question="What is a pod?"' })),
+    'speech diagnostic text omitted'
+  )
+})
+
 test('HTTP: Grok runs with its key and the browser can shorten the wait', async () => {
   const calls = []
   const fetchImpl = async (url, init) => {

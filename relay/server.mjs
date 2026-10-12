@@ -387,6 +387,9 @@ export function speechLogLine(body, includeText = false) {
   const single = line.match(
     /^dictation (?:[\w-]+|fallback \((?:live failed|live empty)\)): \d+ ms after stop, \d+ chars$/
   )
+  // Accuracy answers: key=value tokens only (verdict, model, timings, failure categories).
+  const accuracy = line.match(/^accuracy:(?: [a-z_]+=[\w.:,-]{1,300}){1,20}$/)
+  if (accuracy) return accuracy[0]
   return `speech ${auto?.[0] ?? single?.[0] ?? 'diagnostic text omitted'}`
 }
 

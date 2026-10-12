@@ -588,9 +588,11 @@ function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
         <span>
           {' '}
           ·{' '}
-          {review.webStatus === 'unconfigured'
-            ? 'Web search not configured'
-            : 'Web evidence unavailable'}
+          {review.webStatus === 'skipped'
+            ? 'Personal question · checked against your profile'
+            : review.webStatus === 'unconfigured'
+              ? 'Web search not configured'
+              : 'Web evidence unavailable'}
         </span>
       )}
       {!!review.sources.length && (
