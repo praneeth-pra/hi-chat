@@ -6,6 +6,11 @@ import { useMessages } from '@/hooks/useMessages'
 import { useInterfaceSettings } from '@/hooks/useInterfaceSettings'
 import { THREAD_SCROLL_BEHAVIOR } from '@/constants/threadScroll'
 import { ThreadPadding } from '@/containers/ThreadPadding'
+import { useAppState } from '@/hooks/useAppState'
+import {
+  ThreadScrollProvider,
+  useThreadScrollState,
+} from '@/containers/ThreadScrollProvider'
 
 const THREAD_ID = 'thread-1'
 const VIEWPORT_HEIGHT = 600
@@ -14,20 +19,28 @@ const MESSAGE_HEIGHT = 100
 const message = (id: string, role: 'user' | 'assistant') =>
   ({ id, role, thread_id: THREAD_ID, content: [] }) as unknown as ThreadMessage
 
+function ScrollControl() {
+  const { scrollToBottom } = useThreadScrollState()
+  return <button onClick={() => scrollToBottom()}>Scroll</button>
+}
+
 // A thread view laid out the way the real one is: messages, then the padding.
 function Thread() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const messages = useMessages((state) => state.messages[THREAD_ID] ?? [])
   return (
-    <div ref={scrollContainerRef} data-testid="scroll-container">
-      {messages.map((item) => (
-        <div key={item.id} data-message-author-role={item.role} />
-      ))}
-      <ThreadPadding
-        threadId={THREAD_ID}
-        scrollContainerRef={scrollContainerRef}
-      />
-    </div>
+    <ThreadScrollProvider
+      threadId={THREAD_ID}
+      scrollContainerRef={scrollContainerRef}
+    >
+      <div ref={scrollContainerRef} data-testid="scroll-container">
+        {messages.map((item) => (
+          <div key={item.id} data-message-author-role={item.role} />
+        ))}
+        <ThreadPadding />
+        <ScrollControl />
+      </div>
+    </ThreadScrollProvider>
   )
 }
 
@@ -179,5 +192,33 @@ describe('useThreadScrolling (flow)', () => {
     })
 
     expect(layout.scrollTo).not.toHaveBeenCalled()
+  })
+  it('shares one sticky scroll controller and keeps its listener stable while tokens arrive', () => {
+    useInterfaceSettings.setState({
+      threadScrollBehavior: THREAD_SCROLL_BEHAVIOR.STICKY,
+    })
+    useAppState.setState({ streamingContent: message('live', 'assistant') })
+    const { getByTestId, unmount } = render(<Thread />)
+    const container = getByTestId('scroll-container')
+    const layout = mockLayout(container)
+    restoreLayout = layout.restore
+    const add = vi.spyOn(container, 'addEventListener')
+    const remove = vi.spyOn(container, 'removeEventListener')
+    layout.scrollTo.mockClear()
+    act(() =>
+      useAppState.setState({
+        streamingContent: {
+          ...message('live', 'assistant'),
+          content: [
+            { type: 'text', text: { value: 'Next words', annotations: [] } },
+          ] as any,
+        },
+      })
+    )
+    expect(layout.scrollTo).toHaveBeenCalledTimes(1)
+    expect(add).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    unmount()
+    useAppState.setState({ streamingContent: undefined })
   })
 })

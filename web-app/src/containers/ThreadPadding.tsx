@@ -1,14 +1,7 @@
-import { useThreadScrolling } from '@/hooks/useThreadScrolling'
+import { useThreadScrollState } from './ThreadScrollProvider'
 
-export const ThreadPadding = ({
-  threadId,
-  scrollContainerRef,
-}: {
-  threadId: string
-  scrollContainerRef: React.RefObject<HTMLDivElement | null>
-}) => {
-  // Get padding height for ChatGPT-style message positioning
-  const { paddingHeight } = useThreadScrolling(threadId, scrollContainerRef)
+export const ThreadPadding = () => {
+  const { paddingHeight } = useThreadScrollState()
   return (
     <div
       style={{ height: paddingHeight }}

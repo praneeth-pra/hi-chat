@@ -32,7 +32,7 @@ export function MessageMetadataDialog({
   const defaultTrigger = (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div 
+        <div
           className="outline-0 focus:outline-0 flex items-center gap-1 hover:text-accent transition-colors cursor-pointer group relative"
           role="button"
           tabIndex={0}
@@ -55,27 +55,31 @@ export function MessageMetadataDialog({
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger>{triggerElement || defaultTrigger}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('common:dialogs.messageMetadata.title')}</DialogTitle>
-          <div className="space-y-2 mt-4">
-            <div className="border border-main-view-fg/10 rounded-md">
-              <CodeEditor
-                value={JSON.stringify(metadata || {}, null, 2)}
-                language="json"
-                readOnly
-                data-color-mode="dark"
-                style={{
-                  fontSize: 12,
-                  backgroundColor: 'transparent',
-                  fontFamily: 'monospace',
-                }}
-                className="w-full h-full !text-sm "
-              />
+      {isOpen && (
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t('common:dialogs.messageMetadata.title')}
+            </DialogTitle>
+            <div className="space-y-2 mt-4">
+              <div className="border border-main-view-fg/10 rounded-md">
+                <CodeEditor
+                  value={JSON.stringify(metadata || {}, null, 2)}
+                  language="json"
+                  readOnly
+                  data-color-mode="dark"
+                  style={{
+                    fontSize: 12,
+                    backgroundColor: 'transparent',
+                    fontFamily: 'monospace',
+                  }}
+                  className="w-full h-full !text-sm "
+                />
+              </div>
             </div>
-          </div>
-        </DialogHeader>
-      </DialogContent>
+          </DialogHeader>
+        </DialogContent>
+      )}
     </Dialog>
   )
 }

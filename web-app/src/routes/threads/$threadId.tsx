@@ -1,5 +1,10 @@
-﻿import { useEffect, useMemo, useRef } from 'react'
-import { createFileRoute, useParams, redirect, useNavigate } from '@tanstack/react-router'
+﻿import { useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  createFileRoute,
+  useParams,
+  redirect,
+  useNavigate,
+} from '@tanstack/react-router'
 import cloneDeep from 'lodash.clonedeep'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -26,9 +31,14 @@ import { PlatformFeature } from '@/lib/platform/types'
 import ScrollToBottom from '@/containers/ScrollToBottom'
 import { PromptProgress } from '@/components/PromptProgress'
 import { ThreadPadding } from '@/containers/ThreadPadding'
+import { ThreadScrollProvider } from '@/containers/ThreadScrollProvider'
 import { TEMPORARY_CHAT_ID, TEMPORARY_CHAT_QUERY_ID } from '@/constants/chat'
 import { IconInfoCircle } from '@tabler/icons-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { syncThreadFromMessages } from '@/hooks/useThreadHygiene'
 
 const CONVERSATION_NOT_FOUND_EVENT = 'conversation-not-found'
@@ -103,7 +113,6 @@ function ThreadDetail() {
   const thread = useThreads(useShallow((state) => state.threads[threadId]))
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-
   // Listen for conversation not found events
   useEffect(() => {
     const handleConversationNotFound = (event: CustomEvent) => {
@@ -115,15 +124,21 @@ function ThreadDetail() {
         }
 
         toast.error(t('common:conversationNotAvailable'), {
-          description: t('common:conversationNotAvailableDescription')
+          description: t('common:conversationNotAvailableDescription'),
         })
         navigate({ to: '/', replace: true })
       }
     }
 
-    window.addEventListener(CONVERSATION_NOT_FOUND_EVENT, handleConversationNotFound as EventListener)
+    window.addEventListener(
+      CONVERSATION_NOT_FOUND_EVENT,
+      handleConversationNotFound as EventListener
+    )
     return () => {
-      window.removeEventListener(CONVERSATION_NOT_FOUND_EVENT, handleConversationNotFound as EventListener)
+      window.removeEventListener(
+        CONVERSATION_NOT_FOUND_EVENT,
+        handleConversationNotFound as EventListener
+      )
     }
   }, [threadId, navigate, t])
 
@@ -142,12 +157,15 @@ function ThreadDetail() {
       .fetchMessages(threadId)
       .then((fetchedMessages) => {
         if (fetchedMessages) {
-          const currentLocalMessages = useMessages.getState().getMessages(threadId)
+          const currentLocalMessages = useMessages
+            .getState()
+            .getMessages(threadId)
 
-          if (PlatformFeatures[PlatformFeature.FIRST_MESSAGE_PERSISTED_THREAD] &&
-              fetchedMessages.length === 0 &&
-              currentLocalMessages &&
-              currentLocalMessages.length > 0
+          if (
+            PlatformFeatures[PlatformFeature.FIRST_MESSAGE_PERSISTED_THREAD] &&
+            fetchedMessages.length === 0 &&
+            currentLocalMessages &&
+            currentLocalMessages.length > 0
           ) {
             return
           }
@@ -160,9 +178,10 @@ function ThreadDetail() {
             )
 
             if (localOnlyMessages.length > 0) {
-              const mergedMessages = [...fetchedMessages, ...localOnlyMessages].sort(
-                (a, b) => (a.created_at || 0) - (b.created_at || 0)
-              )
+              const mergedMessages = [
+                ...fetchedMessages,
+                ...localOnlyMessages,
+              ].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
               setMessages(threadId, mergedMessages)
               syncThreadFromMessages(threadId, mergedMessages)
               return
@@ -184,138 +203,143 @@ function ThreadDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const updateMessage = (
-    item: ThreadMessage,
-    message: string,
-    imageUrls?: string[]
-  ) => {
-    const newMessages: ThreadMessage[] = messages.map((m) => {
-      if (m.id === item.id) {
-        const msg: ThreadMessage = cloneDeep(m)
-        const newContent = [
-          {
-            type: ContentType.Text,
-            text: {
-              value: message,
-              annotations: m.content[0].text?.annotations ?? [],
-            },
-          },
-        ]
-        // Add image content if imageUrls are provided
-        if (imageUrls && imageUrls.length > 0) {
-          imageUrls.forEach((url) => {
-            newContent.push({
-              type: 'image_url' as ContentType,
-              image_url: {
-                url: url,
+  const updateMessage = useCallback(
+    (item: ThreadMessage, message: string, imageUrls?: string[]) => {
+      const currentMessages = useMessages.getState().getMessages(threadId)
+      const newMessages: ThreadMessage[] = currentMessages.map((m) => {
+        if (m.id === item.id) {
+          const msg: ThreadMessage = cloneDeep(m)
+          const newContent = [
+            {
+              type: ContentType.Text,
+              text: {
+                value: message,
+                annotations: m.content[0].text?.annotations ?? [],
               },
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } as any)
-          })
+            },
+          ]
+          // Add image content if imageUrls are provided
+          if (imageUrls && imageUrls.length > 0) {
+            imageUrls.forEach((url) => {
+              newContent.push({
+                type: 'image_url' as ContentType,
+                image_url: {
+                  url: url,
+                },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any)
+            })
+          }
+          msg.content = newContent
+          return msg
         }
-        msg.content = newContent
-        return msg
-      }
-      return m
-    })
-    setMessages(threadId, newMessages)
-  }
+        return m
+      })
+      setMessages(threadId, newMessages)
+    },
+    [threadId, setMessages]
+  )
 
   const threadModel = useMemo(() => thread?.model, [thread])
 
   if (!messages || !threadModel) return null
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))] md:h-[calc(100dvh-18px)]">
-      <HeaderPage>
-        <div className="flex items-center justify-between w-full pr-2">
-          <div>
-            {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-              <DropdownAssistant />
+    <ThreadScrollProvider
+      threadId={threadId}
+      scrollContainerRef={scrollContainerRef}
+    >
+      <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))] md:h-[calc(100dvh-18px)]">
+        <HeaderPage>
+          <div className="flex items-center justify-between w-full pr-2">
+            <div>
+              {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
+                <DropdownAssistant />
+              )}
+            </div>
+            <div className="flex-1 flex justify-center">
+              {threadId === TEMPORARY_CHAT_ID && (
+                <TemporaryChatIndicator t={t} />
+              )}
+            </div>
+            {thread && <ThreadActions key={thread.id} thread={thread} />}
+          </div>
+        </HeaderPage>
+        <div className="flex flex-col h-[calc(100%-48px)]">
+          <div
+            ref={scrollContainerRef}
+            data-thread-scroller
+            className={cn(
+              'flex flex-col h-full w-full overflow-auto pt-4 pb-3',
+              // Mobile-first responsive padding
+              isMobile ? 'px-3' : 'px-4'
             )}
+          >
+            <div
+              className={cn(
+                'mx-auto flex max-w-full flex-col grow',
+                // Mobile-first width constraints
+                // Mobile and small screens always use full width, otherwise compact chat uses constrained width
+                isMobile || isSmallScreen || chatWidth !== 'compact'
+                  ? 'w-full'
+                  : 'w-full md:w-4/6'
+              )}
+            >
+              {messages &&
+                messages.map((item, index) => {
+                  // Only pass isLastMessage to the last message in the array
+                  const isLastMessage = index === messages.length - 1
+                  return (
+                    <div
+                      key={item.id}
+                      data-test-id={`message-${item.role}-${item.id}`}
+                      data-message-author-role={item.role}
+                      className="mb-4"
+                    >
+                      <ThreadContent
+                        {...item}
+                        isLastMessage={isLastMessage}
+                        showAssistant={
+                          item.role === 'assistant' &&
+                          (index === 0 ||
+                            messages[index - 1]?.role !== 'assistant' ||
+                            !(
+                              messages[index - 1]?.metadata &&
+                              'tool_calls' in
+                                (messages[index - 1].metadata ?? {})
+                            ))
+                        }
+                        index={index}
+                        updateMessage={updateMessage}
+                      />
+                    </div>
+                  )
+                })}
+              <PromptProgress />
+              <StreamingContent
+                threadId={threadId}
+                data-test-id="thread-content-text"
+              />
+              {/* Persistent padding element for ChatGPT-style message positioning */}
+              <ThreadPadding />
+            </div>
           </div>
-          <div className="flex-1 flex justify-center">
-            {threadId === TEMPORARY_CHAT_ID && <TemporaryChatIndicator t={t} />}
-          </div>
-          {thread && <ThreadActions key={thread.id} thread={thread} />}
-        </div>
-      </HeaderPage>
-      <div className="flex flex-col h-[calc(100%-48px)]">
-        <div
-          ref={scrollContainerRef}
-          data-thread-scroller
-          className={cn(
-            'flex flex-col h-full w-full overflow-auto pt-4 pb-3',
-            // Mobile-first responsive padding
-            isMobile ? 'px-3' : 'px-4'
-          )}
-        >
           <div
             className={cn(
-              'mx-auto flex max-w-full flex-col grow',
-              // Mobile-first width constraints
-              // Mobile and small screens always use full width, otherwise compact chat uses constrained width
+              'mx-auto pt-2 pb-3 shrink-0 relative',
+              // Responsive padding and width
+              isMobile ? 'px-3' : 'px-2',
+              // Width: mobile/small screens or non-compact always full, compact desktop uses constrained
               isMobile || isSmallScreen || chatWidth !== 'compact'
                 ? 'w-full'
                 : 'w-full md:w-4/6'
             )}
           >
-            {messages &&
-              messages.map((item, index) => {
-                // Only pass isLastMessage to the last message in the array
-                const isLastMessage = index === messages.length - 1
-                return (
-                  <div
-                    key={item.id}
-                    data-test-id={`message-${item.role}-${item.id}`}
-                    data-message-author-role={item.role}
-                    className="mb-4"
-                  >
-                    <ThreadContent
-                      {...item}
-                      isLastMessage={isLastMessage}
-                      showAssistant={
-                        item.role === 'assistant' &&
-                        (index === 0 ||
-                          messages[index - 1]?.role !== 'assistant' ||
-                          !(
-                            messages[index - 1]?.metadata &&
-                            'tool_calls' in (messages[index - 1].metadata ?? {})
-                          ))
-                      }
-                      index={index}
-                      updateMessage={updateMessage}
-                    />
-                  </div>
-                )
-              })}
-            <PromptProgress />
-            <StreamingContent
-              threadId={threadId}
-              data-test-id="thread-content-text"
-            />
-            {/* Persistent padding element for ChatGPT-style message positioning */}
-           <ThreadPadding threadId={threadId} scrollContainerRef={scrollContainerRef} />
+            <ScrollToBottom threadId={threadId} />
+            <ChatInput model={threadModel} />
           </div>
         </div>
-        <div
-          className={cn(
-            'mx-auto pt-2 pb-3 shrink-0 relative',
-            // Responsive padding and width
-            isMobile ? 'px-3' : 'px-2',
-            // Width: mobile/small screens or non-compact always full, compact desktop uses constrained
-            isMobile || isSmallScreen || chatWidth !== 'compact'
-              ? 'w-full'
-              : 'w-full md:w-4/6'
-          )}
-        >
-          <ScrollToBottom
-            threadId={threadId}
-            scrollContainerRef={scrollContainerRef}
-          />
-          <ChatInput model={threadModel} />
-        </div>
       </div>
-    </div>
+    </ThreadScrollProvider>
   )
 }

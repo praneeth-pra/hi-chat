@@ -35,6 +35,7 @@ interface MarkdownProps {
   enableRawHtml?: boolean
   isUser?: boolean
   isWrapping?: boolean
+  isStreaming?: boolean
 }
 
 const markdownSchema: typeof defaultSchema = {
@@ -95,6 +96,7 @@ const CodeComponent = memo(
     codeBlockStyle,
     showLineNumbers,
     isWrapping,
+    isStreaming,
     onCopy,
     copiedId,
     ...props
@@ -106,6 +108,10 @@ const CodeComponent = memo(
     const isInline = !match || !language
 
     const code = String(children).replace(/\n$/, '')
+    const [highlightedCode, setHighlightedCode] = useState<string | null>(null)
+    // Tokenizing a large block creates thousands of spans on the UI thread.
+    const largeCode = code.length > 4000
+    const highlight = !isStreaming && (!largeCode || highlightedCode === code)
 
     // Generate a stable ID based on content hash instead of position
     const codeId = useMemo(() => {
@@ -149,6 +155,14 @@ const CodeComponent = memo(
           <span className="font-medium text-xs font-sans">
             {getReadableLanguageName(language)}
           </span>
+          {!isStreaming && largeCode && !highlight && (
+            <button
+              className="ml-auto mr-3 text-xs cursor-pointer"
+              onClick={() => setHighlightedCode(code)}
+            >
+              Highlight code
+            </button>
+          )}
           <button
             onClick={handleCopyClick}
             className="flex items-center gap-1 text-xs font-sans transition-colors cursor-pointer"
@@ -166,47 +180,57 @@ const CodeComponent = memo(
             )}
           </button>
         </div>
-        <Suspense
-          fallback={
-            <pre className="p-2 overflow-auto whitespace-pre-wrap">
-              <code>{code}</code>
-            </pre>
-          }
-        >
-          <CodeHighlight
-            codeBlockStyle={codeBlockStyle}
-            language={language}
-            showLineNumbers={showLineNumbers}
-            wrapLines={true}
-            // Wrap long lines by default so narrow windows never scroll sideways
-            lineProps={
-              isWrapping !== false
-                ? {
-                    style: { overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
-                  }
-                : {}
+        {highlight ? (
+          <Suspense
+            fallback={
+              <pre className="p-2 overflow-auto whitespace-pre-wrap">
+                <code>{code}</code>
+              </pre>
             }
-            codeTagProps={
-              isWrapping !== false
-                ? {
-                    style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
-                  }
-                : undefined
-            }
-            customStyle={{
-              margin: 0,
-              padding: '12px 8px',
-              borderRadius: 0,
-              overflow: 'auto',
-              border: 'none',
-            }}
-            PreTag="div"
-            CodeTag={'code'}
-            {...props}
           >
-            {code}
-          </CodeHighlight>
-        </Suspense>
+            <CodeHighlight
+              codeBlockStyle={codeBlockStyle}
+              language={language}
+              showLineNumbers={showLineNumbers}
+              wrapLines={true}
+              // Wrap long lines by default so narrow windows never scroll sideways
+              lineProps={
+                isWrapping !== false
+                  ? {
+                      style: {
+                        overflowWrap: 'anywhere',
+                        whiteSpace: 'pre-wrap',
+                      },
+                    }
+                  : {}
+              }
+              codeTagProps={
+                isWrapping !== false
+                  ? {
+                      style: {
+                        whiteSpace: 'pre-wrap',
+                        overflowWrap: 'anywhere',
+                      },
+                    }
+                  : undefined
+              }
+              customStyle={{
+                margin: 0,
+                padding: '12px 8px',
+                borderRadius: 0,
+                overflow: 'auto',
+                border: 'none',
+              }}
+              PreTag="div"
+              CodeTag={'code'}
+              {...props}
+            >
+              {code}
+            </CodeHighlight>
+          </Suspense>
+        ) : (
+          <PlainCode>{code}</PlainCode>
+        )}
       </div>
     )
   }
@@ -221,6 +245,7 @@ function RenderMarkdownComponent({
   isUser,
   components,
   isWrapping,
+  isStreaming = false,
 }: MarkdownProps) {
   const { codeBlockStyle: chosenCodeStyle, showLineNumbers } = useCodeblock()
   const isDark = useTheme((state) => state.isDark)
@@ -279,6 +304,7 @@ function RenderMarkdownComponent({
           codeBlockStyle={codeBlockStyle}
           showLineNumbers={showLineNumbers}
           isWrapping={isWrapping}
+          isStreaming={isStreaming}
           onCopy={handleCopy}
           copiedId={copiedId}
         />
@@ -291,6 +317,7 @@ function RenderMarkdownComponent({
       codeBlockStyle,
       showLineNumbers,
       isWrapping,
+      isStreaming,
       handleCopy,
       copiedId,
       components,

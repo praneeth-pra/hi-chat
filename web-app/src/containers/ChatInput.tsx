@@ -94,7 +94,14 @@ const ChatInput = ({
   const [isFocused, setIsFocused] = useState(false)
   const [rows, setRows] = useState(1)
   const serviceHub = useServiceHub()
-  const streamingContent = useAppState((state) => state.streamingContent)
+  // The composer only needs stream identity, not every token of the answer.
+  const streamingContent = useAppState(
+    useShallow((state) =>
+      state.streamingContent
+        ? { thread_id: state.streamingContent.thread_id }
+        : undefined
+    )
+  )
   const abortControllers = useAppState((state) => state.abortControllers)
   const loadingModel = useAppState((state) => state.loadingModel)
   const updateLoadingModel = useAppState((state) => state.updateLoadingModel)
