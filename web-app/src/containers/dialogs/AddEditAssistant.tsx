@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -7,51 +7,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  IconPlus,
-  IconTrash,
-  IconChevronDown,
-  IconMoodSmile,
-  IconFileText,
-  IconUpload,
-} from '@tabler/icons-react'
-import type { EmojiClickData, Theme } from 'emoji-picker-react'
-const EmojiPicker = lazy<(typeof import('emoji-picker-react'))['default']>(() =>
-  import('emoji-picker-react').catch(() => ({
-    default: () => (
-      <span role="status">Couldn’t load emojis. Reload to try again.</span>
-    ),
-  }))
-)
-
-import { Textarea } from '@/components/ui/textarea'
-import { dictionaryTerms, extractKeyTerms, parseKeyTerms } from '@/lib/keyTerms'
+import { IconFileText, IconUpload, IconX } from '@tabler/icons-react'
 import { useModelProvider } from '@/hooks/useModelProvider'
-import {
-  assistantName,
-  buildInstructions,
-  extractProfile,
-} from '@/lib/assistantSetup'
-import { paramsSettings } from '@/lib/predefinedParams'
-
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { useTheme } from '@/hooks/useTheme'
-import { teamEmoji } from '@/utils/teamEmoji'
-import { AvatarEmoji } from '@/containers/AvatarEmoji'
 import { useTranslation } from '@/i18n/react-i18next-compat'
-import { cn, isDev } from '@/lib/utils'
+import { setupAssistant, type SetupFile } from '@/lib/assistantSetup'
 import {
   ACCEPTED_DOCUMENT_TYPES,
-  AssistantDocument,
-  LARGE_DOCUMENTS_TOKENS,
-  MAX_DOCUMENT_CHARS,
-  estimateTokens,
   extractDocumentText,
 } from '@/lib/assistantDocuments'
 
@@ -63,6 +24,11 @@ interface AddEditAssistantProps {
   onSave: (assistant: Assistant) => void
 }
 
+/**
+ * An assistant is just a resume and an optional job description. The name,
+ * instructions, documents and key terms are worked out from them when the
+ * user saves (lib/assistantSetup.ts), so none of that is shown here.
+ */
 export default function AddEditAssistant({
   open,
   onOpenChange,
@@ -70,371 +36,112 @@ export default function AddEditAssistant({
   initialData,
   onSave,
 }: AddEditAssistantProps) {
-  const [avatar, setAvatar] = useState<string | undefined>(initialData?.avatar)
+  const { t } = useTranslation()
+  const editing = !!(editingKey && initialData)
+  // When editing, the first document is the resume and the second the JD
+  const savedResume = editing ? initialData?.documents?.[0] : undefined
+  const savedJd = editing ? initialData?.documents?.[1] : undefined
 
-  const [name, setName] = useState(initialData?.name || '')
-  const [description, setDescription] = useState<string | undefined>(
-    initialData?.description
-  )
-  const [instructions, setInstructions] = useState(
-    initialData?.instructions || ''
-  )
-  const [documents, setDocuments] = useState<AssistantDocument[]>(
-    initialData?.documents || []
-  )
-  const [documentStatus, setDocumentStatus] = useState<string | null>(null)
-  const [keyTerms, setKeyTerms] = useState(
-    (initialData?.keyterms ?? []).join('\n')
-  )
-  const [keyTermsStatus, setKeyTermsStatus] = useState<string | null>(null)
-  const documentInputRef = useRef<HTMLInputElement>(null)
-  const { isDark } = useTheme()
-  const [paramsKeys, setParamsKeys] = useState<string[]>([''])
-  const [paramsValues, setParamsValues] = useState<unknown[]>([''])
-  const [paramsTypes, setParamsTypes] = useState<string[]>(['string'])
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const emojiPickerRef = useRef<HTMLDivElement>(null)
-  const emojiPickerTriggerRef = useRef<HTMLButtonElement>(null)
-  const [nameError, setNameError] = useState<string | null>(null)
-  // Quick setup: resume plus optional job description
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [jdFile, setJdFile] = useState<File | null>(null)
-  const [jdText, setJdText] = useState('')
-  const [setupStatus, setSetupStatus] = useState<string | null>(null)
-  const [setupBusy, setSetupBusy] = useState(false)
+  const [jdRemoved, setJdRemoved] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const resumeInputRef = useRef<HTMLInputElement>(null)
   const jdInputRef = useRef<HTMLInputElement>(null)
-  // const [toolStepsInput, setToolStepsInput] = useState('20')
 
-  // Handle click outside emoji picker or trigger
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        emojiPickerRef.current &&
-        emojiPickerTriggerRef.current &&
-        !emojiPickerRef.current.contains(event.target as Node) &&
-        !emojiPickerTriggerRef.current.contains(event.target as Node)
-      ) {
-        setShowEmojiPicker(false)
-      }
-    }
-
-    if (showEmojiPicker) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showEmojiPicker])
-
-  // Reset form when modal opens/closes or editing key changes
-  useEffect(() => {
-    if (open && editingKey && initialData) {
-      setAvatar(initialData.avatar)
-      setName(initialData.name)
-      setDescription(initialData.description)
-      setInstructions(initialData.instructions)
-      setDocuments(initialData.documents || [])
-      setDocumentStatus(null)
-      setKeyTerms((initialData.keyterms ?? []).join('\n'))
-      setKeyTermsStatus(null)
-      setShowEmojiPicker(false)
-      // setToolStepsInput(String(initialData.tool_steps ?? 20))
-
-      // Convert parameters object to arrays of keys and values
-      const keys = Object.keys(initialData.parameters || {})
-      const values = Object.values(initialData.parameters || {})
-
-      // Determine parameter types based on values
-      const types = values.map((value) => {
-        if (typeof value === 'boolean') return 'boolean'
-        if (typeof value === 'number') return 'number'
-        if (typeof value === 'object') return 'json'
-        return 'string'
-      })
-
-      setParamsKeys(keys.length > 0 ? keys : [''])
-      setParamsValues(values.length > 0 ? values : [''])
-      setParamsTypes(types.length > 0 ? types : ['string'])
-    } else if (open) {
-      // Add mode - reset form
-      resetForm()
-    }
-  }, [open, editingKey, initialData])
-
-  const resetForm = () => {
-    setAvatar(undefined)
-    setName('')
-    setDescription(undefined)
-    setInstructions('')
-    setDocuments([])
-    setDocumentStatus(null)
-    setKeyTerms('')
-    setKeyTermsStatus(null)
-    setParamsKeys([''])
-    setParamsValues([''])
-    setParamsTypes(['string'])
-    setNameError(null)
-    setShowEmojiPicker(false)
+    if (!open) return
     setResumeFile(null)
     setJdFile(null)
-    setJdText('')
-    setSetupStatus(null)
-    setSetupBusy(false)
-    // setToolStepsInput('20')
+    setJdRemoved(false)
+    setStatus(null)
+    setBusy(false)
+  }, [open, editingKey])
+
+  const resumeName = resumeFile?.name ?? savedResume?.name
+  const jdName = jdFile?.name ?? (jdRemoved ? undefined : savedJd?.name)
+  const changed = !!resumeFile || !!jdFile || (jdRemoved && !!savedJd)
+  const canSave = !busy && !!resumeName && (!editing || changed)
+
+  const readFile = async (file: File): Promise<SetupFile> => {
+    const text = await extractDocumentText(file)
+    if (!text)
+      throw new Error(
+        `${file.name} has no readable text (a scanned PDF needs OCR first)`
+      )
+    return { name: file.name, text }
   }
 
-  const handleParameterChange = (
-    index: number,
-    value: unknown,
-    field: 'key' | 'value' | 'type'
-  ) => {
-    if (field === 'key') {
-      const newKeys = [...paramsKeys]
-      newKeys[index] = value as string
-      setParamsKeys(newKeys)
-    } else if (field === 'value') {
-      const newValues = [...paramsValues]
-
-      // Convert value based on parameter type
-      if (paramsTypes[index] === 'number' && typeof value === 'string') {
-        // Preserve raw string while typing (e.g., "0."), convert on save
-        newValues[index] = value
-      } else if (
-        paramsTypes[index] === 'boolean' &&
-        typeof value === 'boolean'
-      ) {
-        newValues[index] = value
-      } else if (paramsTypes[index] === 'json' && typeof value === 'string') {
-        try {
-          newValues[index] = value === '' ? {} : JSON.parse(value)
-        } catch {
-          // If JSON is invalid, keep as string
-          newValues[index] = value
-        }
-      } else {
-        newValues[index] = value
-      }
-
-      setParamsValues(newValues)
-    } else {
-      const newTypes = [...paramsTypes]
-      newTypes[index] = value as string
-
-      // Reset value based on the new type
-      const newValues = [...paramsValues]
-
-      if (value === 'string') {
-        newValues[index] = ''
-      } else if (value === 'number') {
-        newValues[index] = ''
-      } else if (value === 'boolean') {
-        newValues[index] = false
-      } else if (value === 'json') {
-        newValues[index] = {}
-      }
-
-      setParamsValues(newValues)
-      setParamsTypes(newTypes)
-    }
-  }
-
-  const handleAddParameter = () => {
-    setParamsKeys([...paramsKeys, ''])
-    setParamsValues([...paramsValues, ''])
-    setParamsTypes([...paramsTypes, 'string'])
-  }
-
-  const handleRemoveParameter = (index: number) => {
-    const newKeys = [...paramsKeys]
-    const newValues = [...paramsValues]
-    const newTypes = [...paramsTypes]
-    newKeys.splice(index, 1)
-    newValues.splice(index, 1)
-    newTypes.splice(index, 1)
-    setParamsKeys(newKeys.length > 0 ? newKeys : [''])
-    setParamsValues(newValues.length > 0 ? newValues : [''])
-    setParamsTypes(newTypes.length > 0 ? newTypes : ['string'])
-  }
-
-  const addDocuments = async (files: FileList | null) => {
-    if (!files?.length) return
-    const added: AssistantDocument[] = []
-    const problems: string[] = []
-    let used = documents.reduce((sum, d) => sum + d.text.length, 0)
-    for (const file of Array.from(files)) {
-      setDocumentStatus(`Reading ${file.name}…`)
-      try {
-        const text = await extractDocumentText(file)
-        if (!text) {
-          problems.push(
-            `${file.name} has no readable text (a scanned PDF needs OCR first)`
-          )
-        } else if (used + text.length > MAX_DOCUMENT_CHARS) {
-          problems.push(`${file.name} is too large to add`)
-        } else {
-          used += text.length
-          added.push({ name: file.name, text })
-        }
-      } catch (error) {
-        problems.push(
-          `${file.name}: ${error instanceof Error ? error.message : String(error)}`
-        )
-      }
-    }
-    setDocuments((current) => [
-      ...current.filter((d) => !added.some((a) => a.name === d.name)),
-      ...added,
-    ])
-    setDocumentStatus(problems.length ? problems.join('. ') : null)
-    // First documents: suggest key terms for dictation straight away
-    if (added.length && !keyTerms.trim()) {
-      suggestKeyTerms([...documents, ...added])
-    }
-  }
-
-  // Groq gpt-oss-20b picks the technical words from the instructions and
-  // documents; they bias dictation's live transcription.
-  const suggestKeyTerms = async (docs: AssistantDocument[] = documents) => {
-    const source = [instructions, ...docs.map((d) => d.text)]
-      .filter(Boolean)
-      .join('\n\n')
-    if (!source.trim()) {
-      setKeyTermsStatus('Add instructions or documents first')
-      return
-    }
-    setKeyTermsStatus('Finding key terms…')
+  const handleSave = async () => {
+    setBusy(true)
     try {
-      const groq = useModelProvider.getState().getProviderByName('groq')
-      const found = await extractKeyTerms(
-        source,
-        { apiKey: groq?.api_key, baseUrl: groq?.base_url },
-        dictionaryTerms()
-      )
-      setKeyTerms((current) =>
-        parseKeyTerms(`${current}\n${found.join('\n')}`).join('\n')
-      )
-      setKeyTermsStatus(found.length ? null : 'No key terms found')
-    } catch (error) {
-      setKeyTermsStatus(
-        `Couldn't suggest key terms: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-  }
-
-  const documentTokens = documents.reduce(
-    (sum, d) => sum + estimateTokens(d.text),
-    0
-  )
-
-  const handleSave = () => {
-    if (!name.trim()) {
-      setNameError(t('assistants:nameRequired'))
-      return
-    }
-    setNameError(null)
-    // Convert parameters arrays to object
-    const parameters: Record<string, unknown> = {}
-    paramsKeys.forEach((key, index) => {
-      if (!key) return
-      const value = paramsValues[index]
-      if (paramsTypes[index] === 'number') {
-        const parsed = Number(value as string)
-        parameters[key] = isNaN(parsed) ? 0 : parsed
-      } else {
-        parameters[key] = value
-      }
-    })
-
-    // const parsedToolSteps = Number(toolStepsInput)
-    const assistant: Assistant = {
-      avatar,
-      id: initialData?.id || Math.random().toString(36).substring(7),
-      name,
-      created_at: initialData?.created_at || Date.now(),
-      description,
-      instructions,
-      ...(documents.length ? { documents } : {}),
-      ...(parseKeyTerms(keyTerms).length
-        ? { keyterms: parseKeyTerms(keyTerms) }
-        : {}),
-      parameters: parameters || {},
-      // tool_steps: isNaN(parsedToolSteps) ? 20 : parsedToolSteps,
-    }
-    finishSave(assistant)
-  }
-
-  const finishSave = (assistant: Assistant) => {
-    onSave(assistant)
-    onOpenChange(false)
-    resetForm()
-  }
-
-  // Reads the files, works out the candidate, role and key terms, and saves
-  // the finished assistant, so picking the resume is all the user does.
-  const createFromResume = async () => {
-    if (!resumeFile) return
-    setSetupBusy(true)
-    try {
-      setSetupStatus('Reading the files…')
-      const resume = await extractDocumentText(resumeFile)
-      if (!resume)
-        throw new Error(
-          `${resumeFile.name} has no readable text (a scanned PDF needs OCR first)`
-        )
-      const jd = jdFile ? await extractDocumentText(jdFile) : jdText.trim()
-      const docs: AssistantDocument[] = [
-        { name: resumeFile.name, text: resume },
-        ...(jd ? [{ name: jdFile?.name ?? 'Job description', text: jd }] : []),
-      ]
-      setSetupStatus('Setting up the assistant…')
+      setStatus('Reading the files…')
+      const resume = resumeFile ? await readFile(resumeFile) : savedResume
+      if (!resume) throw new Error('Upload a resume first')
+      const jd = jdFile
+        ? await readFile(jdFile)
+        : jdRemoved
+          ? undefined
+          : savedJd
+      setStatus('Setting up the assistant…')
       const { getProviderByName } = useModelProvider.getState()
       const groq = getProviderByName('groq')
       const cerebras = getProviderByName('cerebras')
-      const [profile, terms] = await Promise.all([
-        extractProfile(resume, jd, [
-          {
-            apiKey: groq?.api_key,
-            baseUrl: groq?.base_url || 'https://api.groq.com/openai/v1',
-            model: 'openai/gpt-oss-120b',
-          },
-          {
-            apiKey: cerebras?.api_key,
-            baseUrl: cerebras?.base_url || 'https://api.cerebras.ai/v1',
-            model: 'gpt-oss-120b',
-          },
-        ]),
-        // Key terms only help dictation, so a failure doesn't stop setup
-        extractKeyTerms(
-          docs.map((d) => d.text).join('\n\n'),
-          { apiKey: groq?.api_key, baseUrl: groq?.base_url },
-          dictionaryTerms()
-        ).catch(() => [] as string[]),
-      ])
-      finishSave({
-        avatar: avatar ?? '🧑‍💼',
-        id: Math.random().toString(36).substring(7),
-        name: assistantName(profile),
-        created_at: Date.now(),
-        description: profile.summary,
-        instructions: buildInstructions(profile, !!jd),
-        documents: docs,
-        ...(terms.length ? { keyterms: terms } : {}),
-        parameters: {},
-      })
+      const assistant = await setupAssistant(
+        resume,
+        jd,
+        {
+          groq: { apiKey: groq?.api_key, baseUrl: groq?.base_url },
+          cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
+        },
+        editing ? initialData : undefined
+      )
+      onSave(assistant)
+      onOpenChange(false)
     } catch (error) {
-      setSetupStatus(
+      setStatus(
         `Couldn't set up the assistant: ${error instanceof Error ? error.message : String(error)}`
       )
-      setSetupBusy(false)
+    } finally {
+      setBusy(false)
     }
   }
 
-  const { t } = useTranslation()
+  const fileRow = (
+    label: string,
+    name: string | undefined,
+    onPick: () => void,
+    onRemove?: () => void
+  ) => (
+    <div className="flex items-center gap-2 rounded-lg border border-main-view-fg/10 px-3 py-2">
+      <IconFileText size={18} className="shrink-0 text-main-view-fg/50" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">{label}</div>
+        <div className="truncate text-xs text-main-view-fg/60" title={name}>
+          {name ?? 'Not uploaded'}
+        </div>
+      </div>
+      {name && onRemove && (
+        <button
+          type="button"
+          aria-label={`Remove ${label}`}
+          className="size-7 flex items-center justify-center rounded hover:bg-main-view-fg/10"
+          onClick={onRemove}
+          disabled={busy}
+        >
+          <IconX size={14} className="text-main-view-fg/50" />
+        </button>
+      )}
+      <Button variant="outline" size="sm" onClick={onPick} disabled={busy}>
+        <IconUpload size={14} />
+        {name ? 'Replace' : 'Upload'}
+      </Button>
+    </div>
+  )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
@@ -444,519 +151,56 @@ export default function AddEditAssistant({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
-          {!editingKey && (
-            <div className="space-y-2 rounded-lg border border-main-view-fg/10 p-3">
-              <div className="text-sm font-medium">Quick setup</div>
-              <div className="text-xs text-main-view-fg/60">
-                Pick the resume, and the job description if you have one. The
-                name, instructions, documents and key terms are all filled in
-                for you.
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => resumeInputRef.current?.click()}
-                  title={resumeFile?.name}
-                >
-                  <IconUpload size={14} />
-                  <span className="max-w-40 truncate">
-                    {resumeFile?.name ?? 'Resume'}
-                  </span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => jdInputRef.current?.click()}
-                  title={jdFile?.name}
-                >
-                  <IconUpload size={14} />
-                  <span className="max-w-48 truncate">
-                    {jdFile?.name ?? 'Job description (optional)'}
-                  </span>
-                </Button>
-                <input
-                  ref={resumeInputRef}
-                  type="file"
-                  accept={ACCEPTED_DOCUMENT_TYPES}
-                  className="hidden"
-                  aria-label="Resume file"
-                  onChange={(e) => {
-                    setResumeFile(e.target.files?.[0] ?? null)
-                    setSetupStatus(null)
-                    e.target.value = ''
-                  }}
-                />
-                <input
-                  ref={jdInputRef}
-                  type="file"
-                  accept={ACCEPTED_DOCUMENT_TYPES}
-                  className="hidden"
-                  aria-label="Job description file"
-                  onChange={(e) => {
-                    setJdFile(e.target.files?.[0] ?? null)
-                    e.target.value = ''
-                  }}
-                />
-              </div>
-              {!jdFile && (
-                <Textarea
-                  value={jdText}
-                  onChange={(e) => setJdText(e.target.value)}
-                  placeholder="Or paste the job description here (optional)"
-                  className="min-h-16 max-h-32 resize-none"
-                />
-              )}
-              <Button
-                size="sm"
-                disabled={!resumeFile || setupBusy}
-                onClick={createFromResume}
-              >
-                {setupBusy ? 'Setting up…' : 'Create assistant'}
-              </Button>
-              {setupStatus && (
-                <div className="text-xs text-main-view-fg/60">
-                  {setupStatus}
-                </div>
-              )}
+          {fileRow('Resume', resumeName, () => resumeInputRef.current?.click())}
+          {fileRow(
+            'Job description (optional)',
+            jdName,
+            () => jdInputRef.current?.click(),
+            () => {
+              setJdFile(null)
+              setJdRemoved(true)
+            }
+          )}
+          <input
+            ref={resumeInputRef}
+            type="file"
+            accept={ACCEPTED_DOCUMENT_TYPES}
+            className="hidden"
+            aria-label="Resume file"
+            onChange={(e) => {
+              setResumeFile(e.target.files?.[0] ?? null)
+              setStatus(null)
+              e.target.value = ''
+            }}
+          />
+          <input
+            ref={jdInputRef}
+            type="file"
+            accept={ACCEPTED_DOCUMENT_TYPES}
+            className="hidden"
+            aria-label="Job description file"
+            onChange={(e) => {
+              const file = e.target.files?.[0] ?? null
+              setJdFile(file)
+              if (file) setJdRemoved(false)
+              setStatus(null)
+              e.target.value = ''
+            }}
+          />
+          {status && (
+            <div className="text-xs text-main-view-fg/60" role="status">
+              {status}
             </div>
           )}
-          {!editingKey && (
-            <div className="text-xs text-main-view-fg/50 pt-1">
-              Or fill it in yourself:
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <label className="text-sm mb-2 inline-block">
-                {t('assistants:emoji')}
-              </label>
-              <button
-                type="button"
-                aria-label="Choose assistant emoji"
-                aria-expanded={showEmojiPicker}
-                className="border rounded-sm p-1 w-9 h-9 flex items-center justify-center border-main-view-fg/10 cursor-pointer"
-                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                ref={emojiPickerTriggerRef}
-              >
-                {avatar ? (
-                  <AvatarEmoji
-                    avatar={avatar}
-                    imageClassName="w-5 h-5 object-contain"
-                    textClassName=""
-                  />
-                ) : (
-                  <IconMoodSmile size={18} className="text-main-view-fg/50" />
-                )}
-              </button>
-              <div className="relative" ref={emojiPickerRef}>
-                {showEmojiPicker && (
-                  <Suspense
-                    fallback={<span role="status">Loading emojis…</span>}
-                  >
-                    <EmojiPicker
-                      open
-                      theme={isDark ? ('dark' as Theme) : ('light' as Theme)}
-                      className="!absolute !z-40 !overflow-y-auto top-2"
-                      height={350}
-                      customEmojis={isDev() ? teamEmoji : []}
-                      lazyLoadEmojis
-                      previewConfig={{ showPreview: false }}
-                      onEmojiClick={(emojiData: EmojiClickData) => {
-                        // For custom emojis, use the imageUrl instead of the emoji name
-                        if (emojiData.isCustom && emojiData.imageUrl) {
-                          setAvatar(emojiData.imageUrl)
-                        } else {
-                          setAvatar(emojiData.emoji)
-                        }
-                        setShowEmojiPicker(false)
-                      }}
-                    />
-                  </Suspense>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2 w-full">
-              <label className="text-sm mb-2 inline-block">
-                {t(`common:name`)}
-              </label>
-              <Input
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value)
-                  if (e.target.value.trim()) setNameError(null)
-                }}
-                placeholder={t('assistants:enterName')}
-                autoFocus
-              />
-            </div>
-          </div>
-
-          {nameError && (
-            <div className="ml-12 text-xs text-destructive mt-1">
-              {nameError}
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <label className="text-sm mb-2 inline-block">
-              {t('assistants:description')}
-            </label>
-            <Textarea
-              value={description || ''}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('assistants:enterDescription')}
-              className="resize-none"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm mb-2 inline-block">
-              {t('assistants:instructions')}
-            </label>
-            <Textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder={t('assistants:enterInstructions')}
-              className="resize-none"
-              rows={4}
-            />
-            <div className="text-xs text-main-view-fg/60">
-              {t('assistants:instructionsDateHint')}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm">Documents</label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => documentInputRef.current?.click()}
-              >
-                <IconUpload size={14} />
-                Upload
-              </Button>
-              <input
-                ref={documentInputRef}
-                type="file"
-                multiple
-                accept={ACCEPTED_DOCUMENT_TYPES}
-                className="hidden"
-                onChange={(e) => {
-                  const files = e.target.files
-                  addDocuments(files).finally(() => {
-                    e.target.value = ''
-                  })
-                }}
-              />
-            </div>
-            {documents.map((doc) => (
-              <div
-                key={doc.name}
-                className="flex items-center gap-2 text-sm border rounded-sm px-2 py-1 border-main-view-fg/10"
-              >
-                <IconFileText
-                  size={16}
-                  className="shrink-0 text-main-view-fg/50"
-                />
-                <span className="truncate flex-1" title={doc.name}>
-                  {doc.name}
-                </span>
-                <span className="text-xs text-main-view-fg/50 shrink-0">
-                  ~{estimateTokens(doc.text).toLocaleString()} tokens
-                </span>
-                <div
-                  className="size-6 cursor-pointer flex items-center justify-center rounded hover:bg-main-view-fg/10"
-                  title="Remove"
-                  onClick={() =>
-                    setDocuments((current) =>
-                      current.filter((d) => d.name !== doc.name)
-                    )
-                  }
-                >
-                  <IconTrash size={14} className="text-main-view-fg/50" />
-                </div>
-              </div>
-            ))}
-            {documentStatus && (
-              <div className="text-xs text-main-view-fg/60">
-                {documentStatus}
-              </div>
-            )}
-            <div
-              className={cn(
-                'text-xs text-main-view-fg/60',
-                documentTokens > LARGE_DOCUMENTS_TOKENS && 'text-destructive'
-              )}
-            >
-              {documentTokens > LARGE_DOCUMENTS_TOKENS
-                ? `About ${documentTokens.toLocaleString()} tokens are sent with every message. Replies will be slower and some models (like gpt-oss-20b on free limits) may refuse requests this large.`
-                : 'PDF, Word (.docx), text or Markdown. The text is sent with every message, so any model can use it.'}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm">Key terms</label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => suggestKeyTerms()}
-              >
-                Suggest from documents
-              </Button>
-            </div>
-            <Textarea
-              value={keyTerms}
-              onChange={(e) => setKeyTerms(e.target.value)}
-              placeholder={'VPC\nNAT gateway\nDirect Connect'}
-              className="min-h-20 max-h-40"
-            />
-            {keyTermsStatus && (
-              <div className="text-xs text-main-view-fg/60">
-                {keyTermsStatus}
-              </div>
-            )}
-            <div className="text-xs text-main-view-fg/60">
-              One per line (up to 100). Dictation's live transcription is biased
-              toward these words, and its transcript judge can fix misheard
-              terms. Suggest picks them from the documents and your dictionary
-              (Settings &gt; General). Left empty, the first 100 dictionary
-              words are used.
-            </div>
-          </div>
-
-          <div className="space-y-2 my-4 mt-6">
-            <div className="flex items-center justify-between">
-              <label className="text-sm">{t('common:settings')}</label>
-            </div>
-            {/* <div className="flex justify-between items-center gap-2">
-              <div className="w-full">
-                <p className="text-sm">{t('assistants:maxToolSteps')}</p>
-              </div>
-              <Input
-                value={toolStepsInput}
-                type="number"
-                min={0}
-                step="any"
-                onChange={(e) => {
-                  setToolStepsInput(e.target.value)
-                }}
-                placeholder="20"
-                className="w-18 text-right"
-              />
-            </div> */}
-          </div>
-
-          <div className="space-y-2 my-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm">
-                {t('assistants:predefinedParameters')}
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(paramsSettings).map(([key, setting]) => (
-                <div
-                  key={key}
-                  onClick={() => {
-                    // Check if parameter already exists
-                    const existingIndex = paramsKeys.findIndex(
-                      (k) => k === setting.key
-                    )
-                    if (existingIndex === -1) {
-                      // Add new parameter
-                      const newKeys = [...paramsKeys]
-                      const newValues = [...paramsValues]
-                      const newTypes = [...paramsTypes]
-
-                      // If the last param is empty, replace it, otherwise add new
-                      if (paramsKeys[paramsKeys.length - 1] === '') {
-                        newKeys[newKeys.length - 1] = setting.key
-                        newValues[newValues.length - 1] = setting.value
-                        newTypes[newTypes.length - 1] =
-                          typeof setting.value === 'boolean'
-                            ? 'boolean'
-                            : typeof setting.value === 'number'
-                              ? 'number'
-                              : 'string'
-                      } else {
-                        newKeys.push(setting.key)
-                        newValues.push(setting.value)
-                        newTypes.push(
-                          typeof setting.value === 'boolean'
-                            ? 'boolean'
-                            : typeof setting.value === 'number'
-                              ? 'number'
-                              : 'string'
-                        )
-                      }
-
-                      setParamsKeys(newKeys)
-                      setParamsValues(newValues)
-                      setParamsTypes(newTypes)
-                    }
-                  }}
-                  className={cn(
-                    'text-xs bg-main-view-fg/10 py-1 px-2 rounded-sm cursor-pointer',
-                    paramsKeys.includes(setting.key) && 'opacity-50'
-                  )}
-                >
-                  {setting.title}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm">{t('assistants:parameters')}</label>
-              <div
-                className="size-6 cursor-pointer flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out"
-                onClick={handleAddParameter}
-              >
-                <IconPlus size={18} className="text-main-view-fg/60" />
-              </div>
-            </div>
-
-            {paramsKeys.map((key, index) => (
-              <div key={index} className="flex items-center gap-4">
-                <div
-                  key={index}
-                  className="flex items-center flex-col sm:flex-row w-full gap-2"
-                >
-                  <Input
-                    value={key}
-                    onChange={(e) =>
-                      handleParameterChange(index, e.target.value, 'key')
-                    }
-                    placeholder={t('assistants:key')}
-                    className="w-full sm:w-24"
-                  />
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <div className="relative w-full sm:w-30">
-                        <Input
-                          value={
-                            paramsTypes[index].charAt(0).toUpperCase() +
-                            paramsTypes[index].slice(1)
-                          }
-                          readOnly
-                        />
-                        <IconChevronDown
-                          size={14}
-                          className="text-main-view-fg/50 absolute right-2 top-1/2 -translate-y-1/2"
-                        />
-                      </div>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-32" align="start">
-                      <DropdownMenuItem
-                        onClick={() =>
-                          handleParameterChange(index, 'string', 'type')
-                        }
-                      >
-                        {t('assistants:stringValue')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() =>
-                          handleParameterChange(index, 'number', 'type')
-                        }
-                      >
-                        {t('assistants:numberValue')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() =>
-                          handleParameterChange(index, 'boolean', 'type')
-                        }
-                      >
-                        {t('assistants:booleanValue')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() =>
-                          handleParameterChange(index, 'json', 'type')
-                        }
-                      >
-                        {t('assistants:jsonValue')}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  {paramsTypes[index] === 'boolean' ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <div className="relative sm:flex-1 w-full">
-                          <Input
-                            value={
-                              paramsValues[index]
-                                ? t('assistants:trueValue')
-                                : t('assistants:falseValue')
-                            }
-                            readOnly
-                          />
-                          <IconChevronDown
-                            size={14}
-                            className="text-main-view-fg/50 absolute right-2 top-1/2 -translate-y-1/2"
-                          />
-                        </div>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-24" align="start">
-                        <DropdownMenuItem
-                          onClick={() =>
-                            handleParameterChange(index, true, 'value')
-                          }
-                        >
-                          {t('assistants:trueValue')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() =>
-                            handleParameterChange(index, false, 'value')
-                          }
-                        >
-                          {t('assistants:falseValue')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : paramsTypes[index] === 'json' ? (
-                    <Input
-                      value={
-                        typeof paramsValues[index] === 'object'
-                          ? JSON.stringify(paramsValues[index], null, 2)
-                          : paramsValues[index]?.toString() || ''
-                      }
-                      onChange={(e) =>
-                        handleParameterChange(index, e.target.value, 'value')
-                      }
-                      placeholder={t('assistants:jsonValuePlaceholder')}
-                      className="sm:flex-1 h-[36px] w-full"
-                    />
-                  ) : (
-                    <Input
-                      value={paramsValues[index]?.toString() || ''}
-                      onChange={(e) =>
-                        handleParameterChange(index, e.target.value, 'value')
-                      }
-                      type={paramsTypes[index] === 'number' ? 'number' : 'text'}
-                      step={paramsTypes[index] === 'number' ? 'any' : undefined}
-                      placeholder={t('assistants:value')}
-                      className="sm:flex-1 h-[36px] w-full"
-                    />
-                  )}
-                </div>
-                <div
-                  className="size-6 cursor-pointer flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out"
-                  onClick={() => handleRemoveParameter(index)}
-                >
-                  <IconTrash size={18} className="text-destructive" />
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
-
         <DialogFooter>
-          <Button onClick={handleSave}>{t('assistants:save')}</Button>
+          <Button onClick={handleSave} disabled={!canSave}>
+            {busy
+              ? 'Setting up…'
+              : editing
+                ? t('assistants:save')
+                : 'Create assistant'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
