@@ -17,7 +17,7 @@ import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { ArrowRight } from 'lucide-react'
+import { ArrowUp } from 'lucide-react'
 import {
   IconAtom,
   IconTool,
@@ -1122,13 +1122,13 @@ const ChatInput = ({
       <div className="relative">
         <div
           className={cn(
-            'relative overflow-hidden p-[2px] rounded-lg',
+            'relative overflow-hidden p-[2px] rounded-[18px]',
             Boolean(streamingContent) && 'opacity-70'
           )}
         >
           {streamingContent && (
             <div className="absolute inset-0">
-              <MovingBorder rx="10%" ry="10%">
+              <MovingBorder rx="16px" ry="16px">
                 <div
                   className={cn(
                     'h-100 w-100 bg-[radial-gradient(var(--app-primary),transparent_60%)]'
@@ -1140,8 +1140,9 @@ const ChatInput = ({
 
           <div
             className={cn(
-              'relative z-20 px-0 pb-10 border border-main-view-fg/5 rounded-lg text-main-view-fg bg-main-view',
-              isFocused && 'ring-1 ring-main-view-fg/10',
+              'relative z-20 px-0 pb-12 border border-main-view-fg/10 rounded-2xl text-main-view-fg bg-main-view shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow]',
+              isFocused &&
+                'border-main-view-fg/20 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_12px_32px_-12px_rgba(0,0,0,0.18)]',
               isDragOver && 'ring-2 ring-accent border-accent'
             )}
             data-drop-zone={hasMmproj ? 'true' : undefined}
@@ -1274,7 +1275,7 @@ const ChatInput = ({
               data-gramm_editor={spellCheckChatInput}
               data-gramm_grammarly={spellCheckChatInput}
               className={cn(
-                'bg-transparent pt-4 w-full flex-shrink-0 border-none resize-none outline-0 px-4',
+                'bg-transparent pt-4 w-full flex-shrink-0 border-none resize-none outline-0 px-4 leading-relaxed placeholder:text-main-view-fg/40',
                 rows < maxRows && 'scrollbar-hide',
                 className
               )}
@@ -1282,7 +1283,7 @@ const ChatInput = ({
           </div>
         </div>
 
-        <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full p-2 ">
+        <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full p-2.5">
           <div className="flex justify-between items-center w-full">
             <div className="px-1 flex items-center gap-1 flex-1 min-w-0">
               <div
@@ -1310,7 +1311,7 @@ const ChatInput = ({
                       aria-label="Attach documents"
                       title="Attach documents"
                       onClick={handleAttachDocsIngest}
-                      className="h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1 cursor-pointer"
+                      className="h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1 cursor-pointer"
                     >
                       {ingestingDocs ? (
                         <IconLoader2
@@ -1330,7 +1331,7 @@ const ChatInput = ({
                     role="img"
                     aria-label="Embeddings"
                     title="Embeddings"
-                    className="h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1"
+                    className="h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1"
                   >
                     <IconCodeCircle2
                       size={18}
@@ -1342,7 +1343,7 @@ const ChatInput = ({
                   hasJanBrowserMCPConfig && (
                     <div
                       className={cn(
-                        'h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1 cursor-pointer',
+                        'h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1 cursor-pointer',
                         janBrowserMCPActive && 'bg-accent/10',
                         isJanBrowserMCPLoading &&
                           'opacity-70 cursor-not-allowed'
@@ -1392,7 +1393,7 @@ const ChatInput = ({
                           return (
                             <div
                               className={cn(
-                                'h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1 cursor-pointer',
+                                'h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1 cursor-pointer',
                                 isOpen && 'bg-main-view-fg/10',
                                 toolsCount > 0 && 'bg-accent/10'
                               )}
@@ -1415,7 +1416,7 @@ const ChatInput = ({
                     role="img"
                     aria-label="Web search"
                     title="Web search"
-                    className="h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1"
+                    className="h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1"
                   >
                     <IconWorld size={18} className="text-main-view-fg/50" />
                   </div>
@@ -1425,7 +1426,7 @@ const ChatInput = ({
                     role="img"
                     aria-label="Reasoning"
                     title="Reasoning"
-                    className="h-7 p-1 flex items-center justify-center rounded-sm hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out gap-1"
+                    className="h-7 p-1 flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors gap-1"
                   >
                     <IconAtom size={18} className="text-main-view-fg/50" />
                   </div>
@@ -1462,6 +1463,7 @@ const ChatInput = ({
                 <Button
                   variant="destructive"
                   size="icon"
+                  className="rounded-full"
                   aria-label="Stop the answer"
                   title="Stop the answer"
                   onClick={() =>
@@ -1475,6 +1477,10 @@ const ChatInput = ({
                 <Button
                   variant={!prompt.trim() ? null : 'default'}
                   size="icon"
+                  className={cn(
+                    'rounded-full',
+                    !prompt.trim() && 'bg-main-view-fg/[0.08]'
+                  )}
                   disabled={!prompt.trim() || ingestingAny}
                   data-test-id="send-message-button"
                   aria-label="Send"
@@ -1484,7 +1490,13 @@ const ChatInput = ({
                   {ingestingAny ? (
                     <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
                   ) : (
-                    <ArrowRight className="text-primary-fg" />
+                    <ArrowUp
+                      className={cn(
+                        prompt.trim()
+                          ? 'text-primary-fg'
+                          : 'text-main-view-fg/40'
+                      )}
+                    />
                   )}
                 </Button>
               )}

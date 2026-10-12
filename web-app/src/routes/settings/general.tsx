@@ -267,7 +267,7 @@ function General() {
       </HeaderPage>
       <div className="flex h-full w-full flex-col sm:flex-row">
         <SettingsMenu />
-        <div className="p-4 w-full h-[calc(100%-32px)] overflow-y-auto">
+        <div className="p-4 w-full h-[calc(100%-48px)] overflow-y-auto">
           <div className="flex flex-col justify-between gap-4 gap-y-3 w-full">
             {/* General */}
             <Card title={t('common:general')}>
@@ -524,7 +524,7 @@ function General() {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm"
+                        className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm"
                       >
                         {
                           AUTO_MODES.find((mode) => mode.value === autoMode)
@@ -557,7 +557,7 @@ function General() {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                        className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
                       >
                         {
                           CHAT_THINKING_LEVELS.find(
@@ -595,7 +595,7 @@ function General() {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
+                        className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium whitespace-nowrap"
                       >
                         {
                           DICTATION_ENGINES.find(
@@ -629,7 +629,7 @@ function General() {
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
-                        className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                        className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
                       >
                         {dictationMic || 'Mac default input'}
                       </button>

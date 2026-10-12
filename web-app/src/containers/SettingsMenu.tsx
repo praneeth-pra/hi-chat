@@ -164,7 +164,7 @@ const SettingsMenu = () => {
       </button>
       <div
         className={cn(
-          'h-full w-44 shrink-0 px-1.5 pt-3 border-r border-main-view-fg/5 bg-main-view',
+          'h-full w-48 shrink-0 px-2 pt-3 border-r border-main-view-fg/[0.06] bg-main-view',
           'sm:flex',
           isMenuOpen
             ? 'flex fixed sm:hidden top-[calc(10px+env(safe-area-inset-top))] z-10 m-1 h-[calc(100%-8px)] border-r-0 border-l bg-main-view right-0 py-8 rounded-tr-lg rounded-br-lg'
@@ -180,10 +180,10 @@ const SettingsMenu = () => {
               <div key={menu.title}>
                 <Link
                   to={menu.route}
-                  className="block px-2 gap-1.5 cursor-pointer hover:bg-main-view-fg/5 py-1 w-full rounded [&.active]:bg-main-view-fg/5"
+                  className="block px-2.5 gap-1.5 cursor-pointer hover:bg-main-view-fg/[0.05] py-1.5 w-full rounded-lg transition-colors [&.active]:bg-primary/[0.08] [&.active]:text-primary"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-main-view-fg/80">
+                    <span className="text-main-view-fg/80 in-[.active]:text-primary">
                       {t(menu.title)}
                     </span>
                     {menu.hasSubMenu && (
@@ -221,8 +221,8 @@ const SettingsMenu = () => {
                         <div key={provider.provider}>
                           <div
                             className={cn(
-                              'flex px-2 items-center gap-1.5 cursor-pointer hover:bg-main-view-fg/5 py-1 w-full rounded [&.active]:bg-main-view-fg/5 text-main-view-fg/80',
-                              isActive && 'bg-main-view-fg/5',
+                              'flex px-2.5 items-center gap-1.5 cursor-pointer hover:bg-main-view-fg/[0.05] py-1.5 w-full rounded-lg transition-colors [&.active]:bg-main-view-fg/5 text-main-view-fg/80',
+                              isActive && 'bg-primary/[0.08] text-primary',
                               // hidden for llama.cpp provider for setup remote provider
                               provider.provider === 'llama.cpp' &&
                                 stepSetupRemoteProvider &&

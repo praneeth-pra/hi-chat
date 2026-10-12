@@ -69,7 +69,7 @@ function ModelProviders() {
         </HeaderPage>
         <div className="flex h-full w-full flex-col sm:flex-row">
           <SettingsMenu />
-          <div className="p-4 w-full h-[calc(100%-32px)] overflow-y-auto flex items-center justify-center">
+          <div className="p-4 w-full h-[calc(100%-48px)] overflow-y-auto flex items-center justify-center">
             <div className="text-center">
               <h2 className="text-lg font-medium text-main-view-fg/80 mb-2">
                 {t('common:notAvailable')}
@@ -91,7 +91,7 @@ function ModelProviders() {
       </HeaderPage>
       <div className="flex h-full w-full flex-col sm:flex-row">
         <SettingsMenu />
-        <div className="p-4 w-full h-[calc(100%-32px)] overflow-y-auto">
+        <div className="p-4 w-full h-[calc(100%-48px)] overflow-y-auto">
           <div className="flex flex-col justify-between gap-4 gap-y-3 w-full">
             {/* Model Providers */}
             <Card

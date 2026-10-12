@@ -49,8 +49,8 @@
 
   /* Paragraphs and text */
   p {
-    line-height: 1.6;
-    margin-bottom: 1em;
+    line-height: 1.7;
+    margin-bottom: 0.9em;
   }
 
   strong {
@@ -68,8 +68,8 @@
   /* Lists */
   ul,
   ol {
-    line-height: 1.6;
-    margin-bottom: 1em;
+    line-height: 1.7;
+    margin-bottom: 0.9em;
     padding-left: 1.5em;
   }
 
@@ -78,7 +78,11 @@
   }
 
   ul > li {
-    list-style-type: circle;
+    list-style-type: disc;
+  }
+
+  li::marker {
+    @apply text-main-view-fg/40;
   }
 
   ol {
@@ -86,7 +90,8 @@
   }
 
   li {
-    margin-bottom: 0.5em;
+    margin-bottom: 0.4em;
+    padding-left: 0.15em;
   }
 
   li > ul,
@@ -105,8 +110,8 @@
 
   /* Blockquotes */
   blockquote {
-    line-height: 1.6;
-    border-left: 4px solid var(--color-accent);
+    line-height: 1.7;
+    border-left: 3px solid var(--color-primary);
     padding-left: 1em;
     margin-left: 0;
     margin-right: 0;
@@ -116,10 +121,13 @@
 
   /* Code */
   code {
-    font-family: monospace;
-    @apply bg-main-view-fg/6 text-main-view-fg;
-    padding: 0.2em 0.4em;
-    border-radius: 3px;
+    font-family:
+      ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
+      monospace;
+    font-size: 0.9em;
+    @apply bg-main-view-fg/[0.06] text-main-view-fg;
+    padding: 0.15em 0.4em;
+    border-radius: 5px;
   }
 
   pre {
@@ -189,9 +197,9 @@
   ol,
   ul {
     list-style: auto;
-    padding-left: 16px;
+    padding-left: 1.35em;
     white-space: normal;
-    list-style-position: inside;
+    list-style-position: outside;
     li {
       p {
         display: inline;
@@ -216,6 +224,17 @@
     margin: 2em 0;
   }
 }
+/* Highlighted code sets its own colours; plain tokens must not take the
+   page's text colour (dark text on a dark theme) */
+.markdown pre:has(> [data-code-block]) {
+  background-color: transparent;
+}
+
+.markdown [data-code-block] code {
+  color: inherit;
+  background-color: transparent;
+}
+
 [data-tool-call-block] + [data-tool-call-block] {
   margin-top: 16px;
 }

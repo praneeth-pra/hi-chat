@@ -114,18 +114,18 @@ function Index() {
           >
             <h1
               className={cn(
-                'font-editorialnew text-main-view-fg',
+                'font-semibold tracking-tight text-main-view-fg',
                 // Responsive title size
-                isMobile ? 'text-2xl sm:text-3xl' : 'text-4xl'
+                isMobile ? 'text-2xl sm:text-3xl' : 'text-[2rem] leading-tight'
               )}
             >
               {isTemporaryChat ? t('chat:temporaryChat') : t('chat:welcome')}
             </h1>
             <p
               className={cn(
-                'text-main-view-fg/70 mt-2',
+                'text-main-view-fg/55 mt-2',
                 // Responsive description size
-                isMobile ? 'text-base' : 'text-lg'
+                isMobile ? 'text-base' : 'text-base'
               )}
             >
               {isTemporaryChat

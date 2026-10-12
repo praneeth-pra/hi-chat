@@ -236,7 +236,7 @@ vi.mock('react-textarea-autosize', () => ({
 
 // Mock icons
 vi.mock('lucide-react', () => ({
-  ArrowRight: () => <svg data-testid="arrow-right-icon">ArrowRight</svg>,
+  ArrowUp: () => <svg data-testid="arrow-up-icon">ArrowUp</svg>,
 }))
 
 vi.mock('@tabler/icons-react', () => ({

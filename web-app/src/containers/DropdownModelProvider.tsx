@@ -517,7 +517,7 @@ const DropdownModelProvider = ({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <div className="bg-main-view-fg/5 hover:bg-main-view-fg/8 px-2 py-1 flex items-center gap-1.5 rounded-sm">
+      <div className="border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] hover:bg-main-view-fg/[0.07] px-2.5 py-1 flex items-center gap-1.5 rounded-full transition-colors">
         <PopoverTrigger asChild>
           <button
             type="button"

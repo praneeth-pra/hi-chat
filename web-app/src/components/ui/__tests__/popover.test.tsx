@@ -104,9 +104,9 @@ describe('Popover Components', () => {
         expect(content).toHaveClass('bg-main-view')
         expect(content).toHaveClass('text-main-view-fg')
         expect(content).toHaveClass('w-72')
-        expect(content).toHaveClass('rounded-md')
+        expect(content).toHaveClass('rounded-xl')
         expect(content).toHaveClass('border')
-        expect(content).toHaveClass('shadow-md')
+        expect(content).toHaveClass('shadow-[0_8px_30px_rgba(0,0,0,0.12)]')
       })
     })
 

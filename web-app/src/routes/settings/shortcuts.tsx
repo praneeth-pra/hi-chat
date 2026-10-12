@@ -91,7 +91,7 @@ function Shortcuts() {
       </HeaderPage>
       <div className="flex h-full w-full">
         <SettingsMenu />
-        <div className="p-4 w-full h-[calc(100%-32px)] overflow-y-auto">
+        <div className="p-4 w-full h-[calc(100%-48px)] overflow-y-auto">
           <div className="flex flex-col justify-between gap-4 gap-y-3 w-full">
             {/* Application */}
             <Card title={t('settings:shortcuts.application')}>

@@ -37,7 +37,7 @@ export default function LanguageSwitcher() {
       <DropdownMenuTrigger asChild>
         <span
           title={t('common:changeLanguage')}
-          className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium"
+          className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none text-main-view-fg font-medium"
         >
           {LANGUAGES.find(
             (lang: { value: string; label: string }) =>

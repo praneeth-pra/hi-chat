@@ -32,7 +32,7 @@ export function CardItem({
     <>
       <div
         className={cn(
-          'flex justify-between mt-2 first:mt-0 border-b border-main-view-fg/5 pb-3 last:border-none last:pb-0 gap-8',
+          'flex justify-between mt-3 first:mt-0 border-b border-main-view-fg/[0.06] pb-3.5 last:border-none last:pb-0 gap-8',
           descriptionOutside && 'border-0',
           align === 'start' && 'items-start',
           align === 'center' && 'items-center',
@@ -42,9 +42,9 @@ export function CardItem({
         )}
       >
         <div className="space-y-1.5">
-          <h1 className="font-medium">{title}</h1>
+          <h1 className="font-medium text-main-view-fg">{title}</h1>
           {description && (
-            <span className="text-main-view-fg/70 leading-normal">
+            <span className="text-main-view-fg/55 leading-relaxed text-[0.93em]">
               {description}
             </span>
           )}
@@ -72,9 +72,9 @@ export function CardItem({
 
 export function Card({ title, children, header }: CardProps) {
   return (
-    <div className="bg-main-view-fg/3 p-4 rounded-lg text-main-view-fg/90 w-full">
+    <div className="bg-main-view border border-main-view-fg/[0.08] p-5 rounded-xl text-main-view-fg/90 w-full shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
       {title && (
-        <h1 className="text-main-view-fg font-medium text-base mb-4">
+        <h1 className="text-main-view-fg font-semibold text-base mb-4 tracking-tight">
           {title}
         </h1>
       )}

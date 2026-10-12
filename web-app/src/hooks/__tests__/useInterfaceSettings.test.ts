@@ -47,9 +47,9 @@ describe('useInterfaceSettings', () => {
     expect(result.current.fontSize).toBe('15px')
     expect(result.current.chatWidth).toBe('compact')
     expect(result.current.appBgColor).toEqual({
-      r: 25,
-      g: 25,
-      b: 25,
+      r: 17,
+      g: 17,
+      b: 19,
       a: 1,
     })
     expect(result.current.threadScrollBehavior).toBe(THREAD_SCROLL_BEHAVIOR.FLOW)
@@ -176,9 +176,9 @@ describe('useInterfaceSettings', () => {
     // Note: resetInterface doesn't reset chatWidth, only visual properties
     expect(result.current.chatWidth).toBe('full')
     expect(result.current.appBgColor).toEqual({
-      r: 255,
-      g: 255,
-      b: 255,
+      r: 244,
+      g: 244,
+      b: 242,
       a: 1,
     })
   })

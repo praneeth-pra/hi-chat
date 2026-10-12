@@ -312,7 +312,7 @@ function HubContent() {
         {searchValue.length === 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger>
-              <span className="flex cursor-pointer items-center gap-1 px-2 py-1 rounded-sm bg-main-view-fg/15 text-sm outline-none text-main-view-fg font-medium">
+              <span className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none text-main-view-fg font-medium">
                 {
                   sortOptions.find((option) => option.value === sortSelected)
                     ?.name
@@ -383,7 +383,7 @@ function HubContent() {
               </div>
             </div>
           </HeaderPage>
-          <div className="p-4 w-full h-[calc(100%-32px)] !overflow-y-auto first-step-setup-local-provider">
+          <div className="p-4 w-full h-[calc(100%-48px)] !overflow-y-auto first-step-setup-local-provider">
             <div className="flex flex-col h-full justify-between gap-4 gap-y-3 w-full md:w-4/5 mx-auto">
               {loading && !filteredModels.length ? (
                 <div className="flex items-center justify-center">

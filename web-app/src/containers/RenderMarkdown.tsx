@@ -8,6 +8,7 @@ import { lazy, Suspense, memo, useState, useMemo, useCallback } from 'react'
 import { getReadableLanguageName } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useCodeblock } from '@/hooks/useCodeblock'
+import { useTheme } from '@/hooks/useTheme'
 import 'katex/dist/katex.min.css'
 import { IconCopy, IconCopyCheck } from '@tabler/icons-react'
 import rehypeRaw from 'rehype-raw'
@@ -132,7 +133,7 @@ const CodeComponent = memo(
     return (
       <div
         data-code-block
-        className="relative overflow-hidden border rounded-md border-main-view-fg/2 scroll-mt-4"
+        className="relative overflow-hidden border rounded-xl border-main-view-fg/[0.08] scroll-mt-4 my-1"
       >
         <style>
           {`
@@ -144,7 +145,7 @@ const CodeComponent = memo(
         }
       `}
         </style>
-        <div className="flex items-center justify-between px-4 py-2 bg-main-view/10">
+        <div className="flex items-center justify-between px-4 py-2 bg-main-view-fg/[0.04] text-main-view-fg/60 border-b border-main-view-fg/[0.06]">
           <span className="font-medium text-xs font-sans">
             {getReadableLanguageName(language)}
           </span>
@@ -194,8 +195,8 @@ const CodeComponent = memo(
             }
             customStyle={{
               margin: 0,
-              padding: '8px',
-              borderRadius: '0 0 4px 4px',
+              padding: '12px 8px',
+              borderRadius: 0,
               overflow: 'auto',
               border: 'none',
             }}
@@ -221,7 +222,14 @@ function RenderMarkdownComponent({
   components,
   isWrapping,
 }: MarkdownProps) {
-  const { codeBlockStyle, showLineNumbers } = useCodeblock()
+  const { codeBlockStyle: chosenCodeStyle, showLineNumbers } = useCodeblock()
+  const isDark = useTheme((state) => state.isDark)
+  // The default dark code theme sits oddly in a light page: light mode
+  // shows the matching light theme unless another style was picked
+  const codeBlockStyle =
+    chosenCodeStyle === 'vsc-dark-plus' && !isDark
+      ? 'one-light'
+      : chosenCodeStyle
 
   // State for tracking which code block has been copied
   const [copiedId, setCopiedId] = useState<string | null>(null)

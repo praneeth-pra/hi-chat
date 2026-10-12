@@ -54,7 +54,7 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
   return (
     <div
       className={cn(
-        'h-10 text-main-view-fg flex items-center shrink-0 border-b border-main-view-fg/5',
+        'h-12 text-main-view-fg flex items-center shrink-0 border-b border-main-view-fg/[0.06]',
         // Mobile-first responsive padding
         isMobile ? 'px-3' : 'px-4',
         // macOS-specific padding when panel is closed
@@ -72,16 +72,16 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
         {!open && (
           <button
             className={cn(
-              'cursor-pointer flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out data-[state=open]:bg-main-view-fg/10',
+              'cursor-pointer flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors data-[state=open]:bg-main-view-fg/10',
               // Larger touch target on mobile
-              isMobile ? 'size-8 min-w-8' : 'size-5'
+              isMobile ? 'size-8 min-w-8' : 'size-7'
             )}
             onClick={() => setLeftPanel(!open)}
             aria-label="Toggle sidebar"
           >
             <IconLayoutSidebar
               size={18}
-              className="text-main-view-fg relative z-20"
+              className="text-main-view-fg/70 relative z-20"
             />
           </button>
         )}
@@ -98,7 +98,7 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
         {PlatformFeatures[PlatformFeature.TEMPORARY_CHAT] && isHomePage && (
           <div className="ml-auto">
             <button
-              className="size-8 cursor-pointer flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out relative z-20"
+              className="size-8 cursor-pointer flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors relative z-20"
               onClick={handleChatToggle}
               title={
                 isTemporaryChat
@@ -109,7 +109,7 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
               {isTemporaryChat ? (
                 <IconMessageFilled size={18} className="text-main-view-fg" />
               ) : (
-                <IconMessage size={18} className="text-main-view-fg" />
+                <IconMessage size={18} className="text-main-view-fg/70" />
               )}
             </button>
           </div>
