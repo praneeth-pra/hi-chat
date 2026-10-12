@@ -1043,7 +1043,14 @@ describe('useChat', () => {
         await act(async () => {
           await result.current('Explain DNS.')
         })
-        expect(fetchSpy).not.toHaveBeenCalled()
+        // Only the timing log line is sent; no search or review.
+        expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual([
+          '/api/speech-log',
+        ])
+        expect(
+          JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body))
+            .line
+        ).toMatch(/^speed: model=\S+ total=\d+ms /)
         expect(
           mockSendCompletion.mock.calls.every((args) => args[5] === true)
         ).toBe(true)

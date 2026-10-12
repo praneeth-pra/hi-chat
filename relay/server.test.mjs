@@ -659,3 +659,18 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
     direct
   )
 })
+
+test('speech log: Speed lines keep timings and reject anything else', () => {
+  const body = (line) => Buffer.from(JSON.stringify({ line }))
+  const line =
+    'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 route=direct hidden=no'
+  assert.equal(speechLogLine(body(line)), line)
+  assert.equal(
+    speechLogLine(body(line.replace('hidden=no', 'hidden=no question=secret'))),
+    'speech diagnostic text omitted'
+  )
+  assert.equal(
+    speechLogLine(body(line.replace('openai_gpt-oss-20b', 'private_text'))),
+    'speech diagnostic text omitted'
+  )
+})

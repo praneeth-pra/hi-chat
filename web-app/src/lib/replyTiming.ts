@@ -133,3 +133,30 @@ export function describeTiming(
     provider_generation_s: u.completion_time,
   }
 }
+
+/**
+ * One Railway log line per Auto · Speed reply, with timings only (no question
+ * or answer text): `speed: model=… total=…ms first_byte=…ms first_words=…ms
+ * answer=…ms tokens=N route=direct|server|none hidden=yes|no`.
+ */
+export function speedLogLine(timings: ReturnType<typeof describeTiming>) {
+  const ms = (s: number | undefined) =>
+    typeof s === 'number' && Number.isFinite(s)
+      ? `${Math.max(0, Math.round(s * 1000))}ms`
+      : 'none'
+  const first = (timings.wait_for_first_byte_s ?? 0) + (timings.thinking_s ?? 0)
+  const route =
+    [...(timings.requests ?? [])].reverse().find((attempt) => attempt.route)
+      ?.route ?? 'none'
+  return [
+    'speed:',
+    `model=${(timings.model_used ?? 'none').replace(/[^\w.:,-]/g, '_')}`,
+    `total=${ms(timings.total_s)}`,
+    `first_byte=${ms(timings.wait_for_first_byte_s)}`,
+    `first_words=${timings.wait_for_first_byte_s === undefined ? 'none' : ms(first)}`,
+    `answer=${ms(timings.answer_s)}`,
+    `tokens=${Math.max(0, Math.round(Number(timings.completion_tokens) || 0))}`,
+    `route=${route}`,
+    `hidden=${timings.tab_hidden_at_send ? 'yes' : 'no'}`,
+  ].join(' ')
+}

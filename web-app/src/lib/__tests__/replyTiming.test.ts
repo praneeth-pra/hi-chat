@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { describeTiming, trackFetch, type FetchAttempt } from '../replyTiming'
+import {
+  describeTiming,
+  speedLogLine,
+  trackFetch,
+  type FetchAttempt,
+} from '../replyTiming'
 
 describe('describeTiming', () => {
   it('names the model that answered as Settings does', () => {
@@ -84,5 +89,33 @@ describe('describeTiming', () => {
       trackFetch(failing, attempts, Date.now())('https://example.test')
     ).rejects.toThrow('Failed to fetch')
     expect(attempts[0].error).toBe('Failed to fetch')
+  })
+})
+
+describe('speedLogLine', () => {
+  it('logs timings, route and tab state with no text', () => {
+    const t = describeTiming(
+      1000,
+      2830,
+      {
+        firstChunkAt: 1210,
+        firstAnswerAt: 1420,
+        hiddenAtStart: false,
+        usage: { completion_tokens: 312 },
+        attempts: [
+          { sent_at_s: 0, headers_after_s: 0.2, status: 200, route: 'direct' },
+        ],
+      },
+      { messages: 3, chars: 400, tools: 0, model: 'openai/gpt-oss-20b' }
+    )
+    expect(speedLogLine(t)).toBe(
+      'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 route=direct hidden=no'
+    )
+  })
+  it('marks missing timings as none', () => {
+    const t = describeTiming(0, 500, {}, { messages: 1, chars: 1, tools: 0 })
+    expect(speedLogLine(t)).toBe(
+      'speed: model=none total=500ms first_byte=none first_words=none answer=none tokens=0 route=none hidden=no'
+    )
   })
 })
