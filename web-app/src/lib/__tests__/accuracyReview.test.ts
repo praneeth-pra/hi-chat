@@ -203,6 +203,137 @@ describe('Accuracy review gate', () => {
     })
     expect(sendCompletion).toHaveBeenCalledTimes(2)
   })
+  it('uses Claude Sonnet 5.5 as the main reviewer with a gpt-oss hedge', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        stop_reason: 'end_turn',
+        content: [
+          {
+            type: 'text',
+            text:
+              'Here is the review:\n' +
+              JSON.stringify({
+                verdict: 'approved',
+                answer: null,
+                unsupportedClaims: [],
+                claims: [{ text: 'Unverified draft', support: 'qualified' }],
+              }),
+          },
+        ],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    let hedgeSignal: AbortSignal | undefined
+    vi.mocked(sendCompletion).mockImplementation(
+      (_thread, _provider, _messages, controller) => {
+        hedgeSignal = controller.signal
+        return new Promise(() => {})
+      }
+    )
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      [
+        ...providers,
+        {
+          provider: 'Claude',
+          base_url: 'https://api.anthropic.com/v1',
+          api_key: 'sk-ant',
+        } as ModelProvider,
+      ],
+      'groq',
+      new AbortController().signal,
+      evidence
+    )
+    expect(await text(checked.completion)).toBe('Unverified draft')
+    expect(checked.review).toMatchObject({
+      verdict: 'approved',
+      verifier: 'Claude Sonnet 5.5',
+      model: 'claude-sonnet-5-5',
+    })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect(url).toBe('https://api.anthropic.com/v1/messages')
+    const body = JSON.parse(String(init.body))
+    expect(body).toMatchObject({
+      model: 'claude-sonnet-5-5',
+      thinking: { type: 'between_tools' },
+    })
+    expect(body.messages.at(-1).content).toContain('candidateAnswer')
+    // The gpt-oss hedge ran on the other provider and was cancelled.
+    expect(vi.mocked(sendCompletion).mock.calls[0][1]).toMatchObject({
+      provider: 'cerebras',
+    })
+    expect(hedgeSignal?.aborted).toBe(true)
+  })
+  it('falls back to the gpt-oss hedge when the Claude review fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 529, json: async () => ({}) }))
+    )
+    vi.mocked(sendCompletion).mockResolvedValue(
+      response({
+        verdict: 'approved',
+        answer: null,
+        unsupportedClaims: [],
+        claims: [{ text: 'Unverified draft', support: 'qualified' }],
+      })
+    )
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      [
+        ...providers,
+        { provider: 'anthropic', api_key: 'sk-ant' } as ModelProvider,
+      ],
+      'groq',
+      new AbortController().signal,
+      evidence
+    )
+    expect(checked.review).toMatchObject({
+      verdict: 'approved',
+      verifier: 'cerebras 120B',
+      failureReasons: ['claude: provider-529'],
+    })
+  })
+  it('reviews a personal question without web sources', async () => {
+    vi.mocked(sendCompletion).mockResolvedValue(
+      response({
+        verdict: 'approved',
+        answer: null,
+        unsupportedClaims: [],
+        claims: [
+          {
+            text: 'Unverified draft',
+            support: 'context',
+            sourceId: null,
+            quote: 'Unverified draft experience',
+          },
+        ],
+      })
+    )
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [{ role: 'system', content: 'Resume: Unverified draft experience' }],
+      providers,
+      'groq',
+      new AbortController().signal,
+      { status: 'skipped', sources: [], searchMs: 0 }
+    )
+    expect(checked.review).toMatchObject({
+      verdict: 'approved',
+      webStatus: 'skipped',
+      sources: [],
+    })
+    const sent = vi.mocked(sendCompletion).mock.calls[0][2]
+    expect(String(sent.at(-1)?.content)).toContain('Personal question')
+  })
   it('asks the provider for schema-constrained output and still validates source references', async () => {
     vi.mocked(sendCompletion).mockResolvedValue(
       response({

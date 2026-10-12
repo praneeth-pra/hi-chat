@@ -4,6 +4,9 @@ import {
   groundAccuracyMessages,
   buildAccuracyQuery,
   verifyAccuracyCompletion,
+  isPersonalQuestion,
+  personalEvidence,
+  accuracyLogLine,
   type WebEvidence,
   type AccuracyReview,
 } from '@/lib/accuracyReview'
@@ -67,6 +70,7 @@ import { titleFromMessage } from '@/lib/chatList'
 import { autoChain, useChatAuto } from '@/lib/chatModels'
 import { hasImages } from '@/lib/visionModels'
 import { streamClaude } from '@/lib/claudeChat'
+import { reportSpeech } from '@/lib/speechServices'
 import { useAttachmentIngestionPrompt } from './useAttachmentIngestionPrompt'
 import {
   describeTiming,
@@ -880,10 +884,13 @@ export const useChat = () => {
               phase: webEvidence ? 'drafting' : 'searching',
             })
             if (!webEvidence) {
-              webEvidence = await getWebEvidence(
-                buildAccuracyQuery(message, getMessages(activeThread.id)),
-                abortController.signal
-              )
+              // Web pages can't answer questions about the candidate themselves.
+              webEvidence = isPersonalQuestion(message)
+                ? personalEvidence()
+                : await getWebEvidence(
+                    buildAccuracyQuery(message, getMessages(activeThread.id)),
+                    abortController.signal
+                  )
             }
             if (abortController.signal.aborted)
               throw abortController.signal.reason
@@ -1080,6 +1087,10 @@ export const useChat = () => {
             )
             completion = checked.completion
             accuracyReview = checked.review
+            if (accuracyReview)
+              reportSpeech(
+                accuracyLogLine(accuracyReview, Date.now() - requestStart)
+              )
             if (accuracyReview) accumulatedTextRef.value = ''
             // Draft readiness is not the time the verified answer becomes visible.
             if (accuracyReview) {

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   groundAccuracyMessages,
   parseAccuracyVerdict,
+  isPersonalQuestion,
+  personalEvidence,
+  accuracyLogLine,
   type WebEvidence,
 } from '../accuracyReview'
 
@@ -168,6 +171,90 @@ describe('Accuracy claim evidence validation', () => {
         { role: 'user', content: 'I built this.' },
       ]).verdict
     ).toBe('approved')
+  })
+  it('accepts experience quoted from the assistant instructions and resume', () => {
+    const answer = 'I built a Selenium framework with TestNG at Infosys.'
+    const review = {
+      verdict: 'approved',
+      unsupportedClaims: [],
+      claims: [
+        {
+          text: answer,
+          support: 'context',
+          quote: 'Built a Selenium framework with TestNG at Infosys',
+        },
+      ],
+    }
+    expect(
+      parseAccuracyVerdict(JSON.stringify(review), answer, evidence, [
+        {
+          role: 'system',
+          content:
+            'You are answering as the candidate.\n\nResume: Built a Selenium framework with TestNG at Infosys (2021-2024).',
+        },
+        { role: 'user', content: 'Tell me about your last project.' },
+      ]).verdict
+    ).toBe('approved')
+    expect(() =>
+      parseAccuracyVerdict(JSON.stringify(review), answer, evidence, [
+        { role: 'system', content: 'You are answering as the candidate.' },
+      ])
+    ).toThrow('Invalid user context evidence')
+  })
+  it('grounds a personal question in the profile without web sources', () => {
+    const messages = [
+      { role: 'system' as const, content: 'Resume text' },
+      { role: 'user' as const, content: 'Tell me about yourself' },
+    ]
+    const grounded = groundAccuracyMessages(messages, personalEvidence())
+    expect(grounded).toHaveLength(3)
+    expect(grounded.at(-1)).toMatchObject({ role: 'system' })
+    expect(String(grounded.at(-1)?.content)).toContain('no web search')
+    expect(JSON.stringify(grounded)).not.toContain('referenceDataOnly')
+  })
+  it('recognises personal and behavioural interview questions only', () => {
+    for (const question of [
+      'Tell me about yourself',
+      'Can you introduce yourself?',
+      'Walk me through your resume',
+      'Tell me about a time you handled a production defect',
+      'Describe a situation where you disagreed with your manager',
+      'What are your strengths and weaknesses?',
+      'What is your role in your current project?',
+      'Why are you looking for a change?',
+      'What is your notice period?',
+      'How did you handle a tight deadline?',
+    ])
+      expect(isPersonalQuestion(question), question).toBe(true)
+    for (const question of [
+      'What is the difference between TestNG and JUnit?',
+      'How do you handle stale element exceptions in Selenium?',
+      'Explain the Page Object Model',
+      'Write a Java program to reverse a string',
+      'What is a Kubernetes pod?',
+    ])
+      expect(isPersonalQuestion(question), question).toBe(false)
+  })
+  it('writes an Accuracy log line with no question or answer text', () => {
+    const line = accuracyLogLine(
+      {
+        verdict: 'unverified',
+        verifier: 'Unavailable',
+        model: 'gpt-oss-120b',
+        webStatus: 'ready',
+        sources: [{ url: 'https://x', title: 'secret title', text: '' }],
+        reviewMs: 3200.4,
+        draftMs: 2100,
+        searchMs: 410,
+        fallback: 'reviewer-answer',
+        failureReasons: ['claude: provider-429', 'groq: claim-span'],
+      },
+      6000
+    )
+    expect(line).toBe(
+      'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=1 total=6000ms search_time=410ms draft=2100ms review=3200ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=claude:provider-429,groq:claim-span'
+    )
+    expect(line).not.toContain('secret')
   })
   it('bounds claim lists and rejects empty or unknown claim support', () => {
     for (const claims of [
