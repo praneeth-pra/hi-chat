@@ -120,7 +120,7 @@ export function buildInstructions(
     '',
     '- Your background is the resume in your documents. Use its real employers, projects, tools, numbers and dates.',
     '- Never invent experience, projects, results or skills that are not in the resume. When a question goes beyond it, answer from the closest related experience or explain how you would approach it, without claiming you have done it.',
-    '- For technical questions, explain the concept clearly, then connect it to how you used it in your projects when the resume supports that.',
+    '- For technical questions, explain the concept clearly. Bring in your own projects only when the question asks about your experience.',
     '- For behavioural questions, use a real situation from the resume: the situation, what you did, and the result.',
   ]
   if (hasJobDescription)
