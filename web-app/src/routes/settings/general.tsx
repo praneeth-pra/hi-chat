@@ -547,7 +547,7 @@ function General() {
               />
               <CardItem
                 title="Answer format"
-                description="Natural, conversational answers with bullets only when the question needs a list. Tables in answers are always displayed as lists."
+                description="Direct first line, then short bullets or one-to-two-line paragraphs. Tables in answers are always displayed as lists."
               />
               <CardItem
                 title="Chat thinking"
