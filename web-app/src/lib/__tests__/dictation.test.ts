@@ -23,10 +23,7 @@ import {
   switchMic,
   type Recording,
 } from '../dictation'
-import {
-  DICTATION_MIC_STORAGE_KEY,
-  setDictationMic,
-} from '@/lib/micActivity'
+import { DICTATION_MIC_STORAGE_KEY, setDictationMic } from '@/lib/micActivity'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useDictationDelivery } from '../dictationDelivery'
 
@@ -402,6 +399,34 @@ describe('dictation', () => {
           { engine: 'cartesia', text: Promise.reject(new Error('no key')) },
         ])
       ).rejects.toThrow('cartesia: no key')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Auto waits less once an engine has come back empty', async () => {
+    vi.useFakeTimers()
+    try {
+      let soniox!: (t: string) => void
+      const results = gatherAuto([
+        { engine: 'cartesia', text: Promise.resolve('') },
+        { engine: 'soniox', text: new Promise((r) => (soniox = r)) },
+        { engine: 'elevenlabs', text: Promise.resolve('What is EKS?') },
+      ])
+      await vi.advanceTimersByTimeAsync(499)
+      soniox('What is EKS?')
+      // Soniox still in time: it agrees and is kept
+      await expect(results).resolves.toHaveLength(3)
+      const late = gatherAuto([
+        { engine: 'cartesia', text: Promise.resolve('') },
+        { engine: 'soniox', text: new Promise(() => {}) },
+        { engine: 'elevenlabs', text: Promise.resolve('What is EKS?') },
+      ])
+      await vi.advanceTimersByTimeAsync(500)
+      await expect(late).resolves.toEqual([
+        { engine: 'cartesia', text: '' },
+        { engine: 'elevenlabs', text: 'What is EKS?' },
+      ])
     } finally {
       vi.useRealTimers()
     }

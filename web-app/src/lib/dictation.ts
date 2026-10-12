@@ -124,6 +124,12 @@ const LIVE_FINISH_MS = 8000
  * questions all three live engines answered within 0.6 s of stopping.
  */
 const AUTO_GRACE_MS = 1000
+/**
+ * The grace once another engine has already come back empty or failed: with
+ * only two engines left, a slow Soniox held three clips in the 12 Oct mock
+ * interview for 1.0-1.5 s although ElevenLabs had answered in 0.35-0.8 s.
+ */
+const AUTO_SHORT_GRACE_MS = 500
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -597,7 +603,13 @@ export function gatherAuto(
             )
           done.push({ engine, text })
           if (agreed) finish()
-          else if (text && !grace) grace = setTimeout(finish, AUTO_GRACE_MS)
+          else if (text && !grace)
+            grace = setTimeout(
+              finish,
+              errors.length || done.some((d) => !d.text)
+                ? AUTO_SHORT_GRACE_MS
+                : AUTO_GRACE_MS
+            )
         })
         .catch((err) => errors.push(`${engine}: ${(err as Error).message}`))
         .finally(() => {

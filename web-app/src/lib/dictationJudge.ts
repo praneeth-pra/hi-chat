@@ -40,6 +40,11 @@ export function textAgreement(a: string, b: string): number {
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 1500
 /**
+ * Groq's judge joins if Cerebras hasn't answered by now. In the 12 Oct mock
+ * interview Cerebras judged in 0.37-1.04 s but twice ran past the timeout.
+ */
+export const JUDGE_HEDGE_MS = 600
+/**
  * Texts this alike skip the judge and the vote is sent. On P's questions,
  * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
  * vs "Extra bucket" 0.95 (the first engine right both times); a real mix-up
@@ -58,68 +63,106 @@ const ENGINE_NAMES: Record<string, string> = {
   cartesia: 'Cartesia',
 }
 
-function judgeTarget() {
+function judgeTargets() {
   const providers = useModelProvider.getState()
+  const targets: {
+    url: string
+    key: string
+    model: string
+    extra: Record<string, unknown>
+  }[] = []
   const cerebras = providers.getProviderByName('cerebras')
   if (cerebras?.api_key)
-    return {
+    targets.push({
       url: `${cerebras.base_url || 'https://api.cerebras.ai/v1'}/chat/completions`,
       key: cerebras.api_key,
       model: 'gpt-oss-120b',
       extra: {},
-    }
+    })
   const groq = providers.getProviderByName('groq')
   if (groq?.api_key)
-    return {
+    targets.push({
       url: `${viaGroqProxy(groq.base_url || 'https://api.groq.com/openai/v1')}/chat/completions`,
       key: groq.api_key,
       model: 'openai/gpt-oss-20b',
       extra: { include_reasoning: false },
-    }
-  return undefined
+    })
+  return targets
 }
 
-/** Sends one prompt to the judge; the reply's text, or undefined. */
+/**
+ * Sends one prompt to the judge and returns the first reply `accept` takes.
+ * Cerebras goes first; Groq joins after JUDGE_HEDGE_MS, or at once if
+ * Cerebras fails, so one slow provider no longer runs into the timeout.
+ */
 async function askJudge(
   system: string,
   user: string,
   fetcher: typeof fetch,
-  timeoutMs: number
+  timeoutMs: number,
+  accept: (text: string) => boolean = (text) => !!text
 ): Promise<string | undefined> {
-  const target = judgeTarget()
-  if (!target) return undefined
+  const targets = judgeTargets()
+  if (!targets.length) return undefined
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timers: ReturnType<typeof setTimeout>[] = []
   try {
-    const res = await fetcher(target.url, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${target.key}`,
-      },
-      body: JSON.stringify({
-        model: target.model,
-        temperature: 0,
-        max_tokens: 2000,
-        reasoning_effort: 'low',
-        ...target.extra,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      }),
+    return await new Promise<string | undefined>((resolve) => {
+      let pending = 0
+      let started = 0
+      const ask = async (target: (typeof targets)[number]) => {
+        started++
+        pending++
+        try {
+          const res = await fetcher(target.url, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${target.key}`,
+            },
+            body: JSON.stringify({
+              model: target.model,
+              temperature: 0,
+              max_tokens: 2000,
+              reasoning_effort: 'low',
+              ...target.extra,
+              messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: user },
+              ],
+            }),
+          })
+          if (!res.ok) throw new Error(`status ${res.status}`)
+          const data = (await res.json()) as {
+            choices?: { message?: { content?: string } }[]
+          }
+          const text = (data.choices?.[0]?.message?.content ?? '').trim()
+          if (accept(text)) return resolve(text)
+          throw new Error('reply not usable')
+        } catch (err) {
+          if (!controller.signal.aborted)
+            console.warn(
+              `Dictation judge (${target.model}) skipped:`,
+              (err as Error).message
+            )
+          // A failed first judge brings the backup in straight away
+          if (started < targets.length) next()
+        } finally {
+          if (--pending === 0 && started === targets.length) resolve(undefined)
+        }
+      }
+      const next = () => {
+        const target = targets[started]
+        if (target) void ask(target)
+      }
+      next()
+      if (targets.length > 1) timers.push(setTimeout(next, JUDGE_HEDGE_MS))
+      timers.push(setTimeout(() => resolve(undefined), timeoutMs))
     })
-    if (!res.ok) throw new Error(`status ${res.status}`)
-    const data = (await res.json()) as {
-      choices?: { message?: { content?: string } }[]
-    }
-    return (data.choices?.[0]?.message?.content ?? '').trim()
-  } catch (err) {
-    console.warn('Dictation judge skipped:', (err as Error).message)
-    return undefined
   } finally {
-    clearTimeout(timer)
+    timers.forEach(clearTimeout)
+    controller.abort()
   }
 }
 
@@ -157,8 +200,14 @@ export async function judgeDictation(
     .filter((r) => r.text)
     .map((r) => `${ENGINE_NAMES[r.engine] ?? r.engine}: "${r.text}"`)
     .join('\n')}`
-  const reply = await askJudge(DICTATION_JUDGE_PROMPT, user, fetcher, timeoutMs)
-  const text = reply?.replace(/^"(.*)"$/s, '$1').trim()
-  if (!text || textAgreement(text, vote) < MIN_AGREEMENT) return undefined
-  return text
+  const clean = (reply: string) => reply.replace(/^"(.*)"$/s, '$1').trim()
+  const reply = await askJudge(
+    DICTATION_JUDGE_PROMPT,
+    user,
+    fetcher,
+    timeoutMs,
+    (reply) =>
+      !!clean(reply) && textAgreement(clean(reply), vote) >= MIN_AGREEMENT
+  )
+  return reply === undefined ? undefined : clean(reply)
 }
