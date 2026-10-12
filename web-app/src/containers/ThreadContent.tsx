@@ -576,6 +576,8 @@ function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
             ? 'Revised answer · Detailed evidence check unavailable'
             : 'Review unavailable · Answer not fully verified'}
         </span>
+      ) : review.verdict === 'direct' ? (
+        <>Answered by {review.verifier}</>
       ) : (
         <>Reviewed with {review.verifier}</>
       )}

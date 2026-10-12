@@ -895,6 +895,56 @@ describe('useChat', () => {
         fetchSpy.mockRestore()
       }
     })
+    it("streams Claude's answer in Accuracy when a Claude provider is set up", async () => {
+      configure('accuracy')
+      autoProviders.anthropic = {
+        provider: 'anthropic',
+        api_key: 'sk-ant',
+        models: [],
+      }
+      mockCompletionMessagesBuilder.getMessages.mockReturnValue([
+        { role: 'user', content: 'Explain DNS.' },
+      ] as any)
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (url: any) =>
+          String(url) === '/api/search'
+            ? Response.json({
+                status: 'ready',
+                sources: [
+                  {
+                    url: 'https://docs.example.com',
+                    title: 'Docs',
+                    text: 'Evidence',
+                  },
+                ],
+              })
+            : String(url).includes('anthropic.com')
+              ? new Response(
+                  `data: ${JSON.stringify({
+                    type: 'content_block_delta',
+                    delta: { type: 'text_delta', text: 'Claude answer [1]' },
+                  })}\n\ndata: {"type":"message_stop"}\n\n`
+                )
+              : new Response('{}')
+        )
+      try {
+        const { result } = renderHook(() => useChat())
+        await act(async () => {
+          await result.current('Explain DNS.')
+        })
+        expect(mockSendCompletion).not.toHaveBeenCalled()
+        const saved = mockAddMessage.mock.calls[1][0]
+        expect(saved.content[0].text.value).toBe('Claude answer [1]')
+        expect(saved.metadata.accuracyReview).toMatchObject({
+          verdict: 'direct',
+          model: 'claude-sonnet-5-5',
+        })
+      } finally {
+        fetchSpy.mockRestore()
+        delete autoProviders.anthropic
+      }
+    })
     it('saves a recovered correction for assert_all instead of stopping at an audit error', async () => {
       configure('accuracy')
       const question =

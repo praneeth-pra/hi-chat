@@ -70,6 +70,8 @@ import { titleFromMessage } from '@/lib/chatList'
 import { autoChain, useChatAuto } from '@/lib/chatModels'
 import { hasImages } from '@/lib/visionModels'
 import { streamClaude } from '@/lib/claudeChat'
+import { claudeAccuracyAnswer } from '@/lib/accuracyClaude'
+import { anthropicConfig } from '@/lib/anthropicProvider'
 import { reportSpeech } from '@/lib/speechServices'
 import { useAttachmentIngestionPrompt } from './useAttachmentIngestionPrompt'
 import {
@@ -904,6 +906,47 @@ export const useChat = () => {
             })
           }
           const draftStartedAt = Date.now()
+          // With a Claude provider, Accuracy streams Claude's answer from the
+          // same sources. Images and attached chat documents (which need tools
+          // Claude isn't given here) keep the gpt-oss draft and review, as
+          // does any Claude error or slow start.
+          const claudeKey =
+            autoState.auto && autoState.mode === 'accuracy'
+              ? anthropicConfig(useModelProvider.getState().providers)
+              : {}
+          let claudeDirect:
+            | Awaited<ReturnType<typeof claudeAccuracyAnswer>>
+            | undefined
+          if (
+            claudeKey.apiKey &&
+            webEvidence &&
+            !hasImages(requestMessages) &&
+            !hasDocuments &&
+            !continueFromMessageId
+          ) {
+            try {
+              claudeDirect = await claudeAccuracyAnswer({
+                apiKey: claudeKey.apiKey,
+                baseUrl: claudeKey.baseUrl,
+                messages: requestMessages as {
+                  role: string
+                  content?: unknown
+                }[],
+                evidence: webEvidence,
+                signal: abortController.signal,
+                requestStart,
+                onDone: (review) =>
+                  reportSpeech(
+                    accuracyLogLine(review, Date.now() - requestStart)
+                  ),
+              })
+            } catch (error) {
+              if (abortController.signal.aborted) throw error
+              console.warn('[accuracy] Claude answer failed, using gpt-oss', {
+                reason: error instanceof Error ? error.message : 'unknown',
+              })
+            }
+          }
           // Auto's first-answer race requires streaming; manual models retain their setting.
           const streamReply =
             autoState.auto || currentAssistant?.parameters?.stream !== false
@@ -999,14 +1042,15 @@ export const useChat = () => {
             return res as unknown as AsyncIterable<chatCompletionChunk>
           }
           let winnerIndex = 0
-          let completion =
-            autoState.auto &&
-            streamReply &&
-            tries.some(
-              (c) =>
-                c.provider.provider === 'groq' ||
-                c.provider.provider === 'cerebras'
-            )
+          let completion = claudeDirect
+            ? (claudeDirect.completion as unknown as AsyncIterable<chatCompletionChunk>)
+            : autoState.auto &&
+                streamReply &&
+                tries.some(
+                  (c) =>
+                    c.provider.provider === 'groq' ||
+                    c.provider.provider === 'cerebras'
+                )
               ? await raceAutoAnswers(
                   tries.map((c) => ({
                     model: c.model,
@@ -1068,7 +1112,10 @@ export const useChat = () => {
           if (!completion) throw new Error('No completion received')
           const winner = tries[winnerIndex]
           let accuracyReview: AccuracyReview | undefined
-          if (autoState.auto && autoState.mode === 'accuracy') {
+          if (claudeDirect) {
+            accuracyReview = claudeDirect.review
+            useAppState.getState().setAccuracyStatus(undefined)
+          } else if (autoState.auto && autoState.mode === 'accuracy') {
             const checked = await verifyAccuracyCompletion(
               completion,
               activeThread,

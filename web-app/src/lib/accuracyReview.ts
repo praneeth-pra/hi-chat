@@ -20,7 +20,8 @@ export type WebEvidence = {
   searchMs?: number
 }
 export type AccuracyReview = {
-  verdict: 'approved' | 'revised' | 'uncertain' | 'unverified'
+  /** `direct`: Claude wrote the answer from the sources; no separate audit. */
+  verdict: 'approved' | 'revised' | 'uncertain' | 'unverified' | 'direct'
   verifier: string
   model: string
   webStatus: WebEvidence['status']
@@ -36,6 +37,8 @@ export type AccuracyReview = {
   failureReasons?: string[]
   /** Per reviewer: `name:12ms:ok`, `name:12ms:reason` or `name:cancelled`. */
   reviewAttempts?: string[]
+  /** Time from the answer request to its first visible words. */
+  firstTokenMs?: number
 }
 
 /** Give short follow-ups context without sending assistant answers or attachment payloads. */
@@ -380,7 +383,7 @@ export function parseAccuracyVerdict(
   evidence: WebEvidence,
   messages: ChatCompletionMessageParam[]
 ): {
-  verdict: Exclude<AccuracyReview['verdict'], 'unverified'>
+  verdict: Exclude<AccuracyReview['verdict'], 'unverified' | 'direct'>
   answer: string
   audit: Pick<
     AccuracyReview,
@@ -979,5 +982,8 @@ export function accuracyLogLine(
     `fallback=${token(review.fallback ?? 'none')}`,
     `failures=${token((review.failureReasons ?? []).map((f) => f.replace(/\s+/g, '')).join(',') || 'none')}`,
     `reviewers=${token((review.reviewAttempts ?? []).join(',') || 'none')}`,
+    ...(review.firstTokenMs !== undefined
+      ? [`first=${ms(review.firstTokenMs)}`]
+      : []),
   ].join(' ')
 }
