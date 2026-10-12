@@ -49,8 +49,10 @@ Groq 120B and Cerebras 120B. Speed races all three with Low reasoning. Accuracy
 races the two 120B models with Medium reasoning (20B is draft recovery) after
 retrieving mandatory Exa Fast evidence. All draft candidates receive the sources;
 a 120B reviewer checks the full answer with a validated claim audit before showing
-it. Set `EXA_API_KEY` securely in Railway for Accuracy; missing sources or failed
-review produces an error rather than an unchecked answer. Speed streams the
+it. Set `EXA_API_KEY` securely in Railway for Accuracy; missing sources block
+generation. If the detailed audit fails, a second reviewer produces a corrected
+answer with an incomplete-audit notice. If both reviews fail, the grounded draft
+is shown with an explicit unverified warning. Speed streams the
 first useful winner immediately. Manual model choices remain available. Parallel
 requests and review increase API usage; checking does not guarantee correctness.
 See [Auto modes](docs/auto-modes.md) and [Accuracy setup](docs/accuracy-mode.md).

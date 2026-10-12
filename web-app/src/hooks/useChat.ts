@@ -1075,7 +1075,8 @@ export const useChat = () => {
                   .getState()
                   .setAccuracyStatus({ threadId: activeThread.id, phase }),
               accumulatedTextRef.value,
-              draftStartedAt
+              draftStartedAt,
+              winner?.model
             )
             completion = checked.completion
             accuracyReview = checked.review
@@ -1226,7 +1227,10 @@ export const useChat = () => {
                       claim_count: accuracyReview.claimCount,
                       source_claim_count: accuracyReview.sourceClaimCount,
                       qualified_claim_count: accuracyReview.qualifiedClaimCount,
-                      unsupported_claim_count: accuracyReview.unsupportedClaimCount,
+                      unsupported_claim_count:
+                        accuracyReview.unsupportedClaimCount,
+                      fallback: accuracyReview.fallback,
+                      failure_reasons: accuracyReview.failureReasons,
                     },
                   },
                 ]

@@ -570,7 +570,15 @@ export const ThreadContent = memo(
 function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
   return (
     <div className="text-xs text-main-view-fg/50 mt-2">
-      Reviewed with {review.verifier}
+      {review.verdict === 'unverified' ? (
+        <span className="text-amber-500">
+          {review.fallback === 'reviewer-answer'
+            ? 'Revised answer · Detailed evidence check unavailable'
+            : 'Review unavailable · Answer not fully verified'}
+        </span>
+      ) : (
+        <>Reviewed with {review.verifier}</>
+      )}
       {review.verdict === 'revised'
         ? ' · Draft revised'
         : review.verdict === 'uncertain'

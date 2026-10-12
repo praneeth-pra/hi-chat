@@ -41,6 +41,37 @@ const parse = (review: unknown, answer = invented) =>
   parseAccuracyVerdict(JSON.stringify(review), answer, evidence, [])
 
 describe('Accuracy claim evidence validation', () => {
+  it('accepts visible claim wording when Markdown marks a keyword or bold text', () => {
+    const answer =
+      '- **I cannot confirm** `assert_all` as a standard keyword. Which library defines it?'
+    const review = {
+      verdict: 'uncertain',
+      answer,
+      unsupportedClaims: [],
+      claims: [
+        {
+          text: 'I cannot confirm assert_all as a standard keyword.',
+          support: 'qualified',
+        },
+      ],
+    }
+    expect(parse(review).answer).toBe(answer)
+  })
+  it('preserves underscore identifiers and literal code operators when matching claims', () => {
+    for (const [answer, text] of [
+      ['Use `assert_all`.', 'Use assertall.'],
+      ['Use `a ** b`.', 'Use a b.'],
+    ]) {
+      expect(() =>
+        parse({
+          verdict: 'uncertain',
+          answer,
+          unsupportedClaims: [],
+          claims: [{ text, support: 'qualified' }],
+        })
+      ).toThrow('Invalid claim')
+    }
+  })
   it('does not accept a bare approval of the invented Assert All claim', () => {
     expect(() => parse({ verdict: 'approved' })).toThrow('Missing claim review')
   })
