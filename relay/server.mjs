@@ -390,7 +390,7 @@ export function speechLogLine(body, includeText = false) {
   // Allow only known diagnostic fields and values, not arbitrary key=value text.
   if (line.startsWith('accuracy:')) {
     const reason =
-      '(?:invalid-json|claim-span|missing-audit|source-reference|context-reference|unsupported-claim|invalid-verdict|incomplete-response|missing-response|timeout|provider-4xx|provider-5xx|provider-error)'
+      '(?:invalid-json|claim-span|missing-audit|source-reference|context-reference|unsupported-claim|invalid-verdict|incomplete-response|missing-response|timeout|provider-[45]\\d\\d|provider-error)'
     const rules = {
       verdict: /^(approved|revised|uncertain|unverified)$/,
       model:

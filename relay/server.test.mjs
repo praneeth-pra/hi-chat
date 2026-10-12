@@ -636,4 +636,19 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
   const line =
     'accuracy: verdict=revised model=gpt-oss-120b search=ready sources=5 total=4210ms search_time=300ms draft=500ms review=3410ms claims=4 context_claims=1 unsupported=0 fallback=none failures=groq:timeout reviewers=cerebras:3400ms:ok,claude:cancelled'
   assert.equal(speechLogLine(Buffer.from(JSON.stringify({ line }))), line)
+  // The client logs the provider's actual HTTP status (provider-400, provider-529).
+  const statusLine =
+    'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=5 total=12844ms search_time=1066ms draft=1751ms review=10023ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=cerebras:source-reference,groq:provider-400,claude:provider-529 reviewers=cerebras:1520ms:source-reference,groq:4178ms:provider-400,claude:7770ms:provider-529,cerebras-repair:10022ms:ok'
+  assert.equal(
+    speechLogLine(Buffer.from(JSON.stringify({ line: statusLine }))),
+    statusLine
+  )
+  assert.equal(
+    speechLogLine(
+      Buffer.from(
+        JSON.stringify({ line: 'accuracy: failures=groq:provider-4000' })
+      )
+    ),
+    'speech diagnostic text omitted'
+  )
 })
