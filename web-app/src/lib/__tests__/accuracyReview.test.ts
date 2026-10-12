@@ -3,6 +3,7 @@ import {
   verifyAccuracyCompletion,
   getWebEvidence,
   buildAccuracyQuery,
+  CLAUDE_WINDOW_MS,
 } from '../accuracyReview'
 import { sendCompletion } from '../completion'
 import type { ChatCompletionResponse } from '../completion'
@@ -68,12 +69,12 @@ describe('Accuracy review gate', () => {
     expect(query).not.toContain('Private answer content')
     expect(query.length).toBeLessThanOrEqual(4000)
   })
-  it('holds the entire draft until a second 120B provider approves it', async () => {
-    let finish!: (value: ChatCompletionResponse) => void
+  it('holds the entire draft until a 120B reviewer approves it', async () => {
+    const finish: Record<string, (value: ChatCompletionResponse) => void> = {}
     vi.mocked(sendCompletion).mockImplementation(
-      () =>
+      (_thread, provider) =>
         new Promise((resolve) => {
-          finish = resolve
+          finish[provider.provider] = resolve
         })
     )
     const result = verifyAccuracyCompletion(
@@ -89,7 +90,8 @@ describe('Accuracy review gate', () => {
     void result.then(() => {
       shown = true
     })
-    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(1))
+    // Both providers audit at once; the other provider is listed first.
+    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(2))
     expect(shown).toBe(false)
     const args = vi.mocked(sendCompletion).mock.calls[0]
     expect(args[0].model).toEqual({
@@ -98,7 +100,7 @@ describe('Accuracy review gate', () => {
     })
     expect(JSON.stringify(args[2])).toContain('Original question')
     expect(args[4]).toEqual([])
-    finish(
+    finish.groq(
       response({
         verdict: 'approved',
         claims: [
@@ -201,7 +203,8 @@ describe('Accuracy review gate', () => {
       verdict: 'unverified',
       fallback: 'grounded-draft',
     })
-    expect(sendCompletion).toHaveBeenCalledTimes(2)
+    // Two parallel audits, then one recovery answer.
+    expect(sendCompletion).toHaveBeenCalledTimes(3)
   })
   it('uses Claude Sonnet 5.5 as the main reviewer with a gpt-oss hedge', async () => {
     const fetchMock = vi.fn(async () => ({
@@ -269,6 +272,46 @@ describe('Accuracy review gate', () => {
       provider: 'cerebras',
     })
     expect(hedgeSignal?.aborted).toBe(true)
+  })
+  it('shows a valid gpt-oss audit once the Claude window passes', async () => {
+    let claudeSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        claudeSignal = init.signal ?? undefined
+        return new Promise(() => {})
+      })
+    )
+    vi.mocked(sendCompletion).mockResolvedValue(
+      response({
+        verdict: 'approved',
+        answer: null,
+        unsupportedClaims: [],
+        claims: [{ text: 'Unverified draft', support: 'qualified' }],
+      })
+    )
+    const started = Date.now()
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      [
+        ...providers,
+        { provider: 'anthropic', api_key: 'sk-ant' } as ModelProvider,
+      ],
+      'groq',
+      new AbortController().signal,
+      evidence
+    )
+    const waited = Date.now() - started
+    expect(waited).toBeGreaterThanOrEqual(CLAUDE_WINDOW_MS - 50)
+    expect(waited).toBeLessThan(CLAUDE_WINDOW_MS + 1000)
+    expect(checked.review).toMatchObject({
+      verdict: 'approved',
+      verifier: 'cerebras 120B',
+    })
+    expect(checked.review?.reviewAttempts).toContain('claude:cancelled')
+    expect(claudeSignal?.aborted).toBe(true)
   })
   it('falls back to the gpt-oss hedge when the Claude review fails', async () => {
     vi.stubGlobal(
@@ -399,8 +442,8 @@ describe('Accuracy review gate', () => {
       draft(),
       thread,
       [],
-      providers,
-      'groq',
+      [providers[1]],
+      'cerebras',
       new AbortController().signal,
       evidence
     )
@@ -431,12 +474,13 @@ describe('Accuracy review gate', () => {
       expect(checked.review?.failureReasons).toEqual([
         'cerebras: provider-429',
         'groq: provider-429',
+        'cerebras: provider-429',
       ])
       expect(checked.review?.verdict).toBe('unverified')
       expect(JSON.stringify(warning.mock.calls)).not.toContain(
         'secret-test-key'
       )
-      expect(sendCompletion).toHaveBeenCalledTimes(2)
+      expect(sendCompletion).toHaveBeenCalledTimes(3)
     } finally {
       warning.mockRestore()
     }
@@ -471,9 +515,12 @@ describe('Accuracy review gate', () => {
   it('delivers the Robot Framework correction from the simpler recovery review', async () => {
     const answer =
       'There is no standard BuiltIn keyword named Assert All. A custom library may expose assert_all under that name; its behavior depends on that library.'
-    vi.mocked(sendCompletion)
-      .mockResolvedValueOnce(response({ verdict: 'approved' }))
-      .mockResolvedValueOnce(response({ answer }))
+    vi.mocked(sendCompletion).mockImplementation(async (...args) =>
+      (args[6]?.response_format as any).json_schema.name ===
+      'accuracy_corrected_answer'
+        ? response({ answer })
+        : response({ verdict: 'approved' })
+    )
     const checked = await verifyAccuracyCompletion(
       draft(),
       thread,
@@ -488,7 +535,7 @@ describe('Accuracy review gate', () => {
       verdict: 'unverified',
       fallback: 'reviewer-answer',
     })
-    const recovery = vi.mocked(sendCompletion).mock.calls[1]
+    const recovery = vi.mocked(sendCompletion).mock.calls[2]
     expect((recovery[6]?.response_format as any).json_schema.name).toBe(
       'accuracy_corrected_answer'
     )
@@ -544,10 +591,10 @@ describe('Accuracy review gate', () => {
       controller.signal,
       evidence
     )
-    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(2))
     controller.abort(new Error('Stopped'))
     await expect(result).rejects.toThrow('Stopped')
-    expect(sendCompletion).toHaveBeenCalledTimes(1)
+    expect(sendCompletion).toHaveBeenCalledTimes(2)
   })
   it('requires search and blocks memory-only answers when Exa is unconfigured or fails', async () => {
     for (const status of ['unconfigured', 'unavailable', 'empty'] as const) {

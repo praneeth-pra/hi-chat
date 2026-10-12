@@ -904,20 +904,18 @@ describe('useChat', () => {
       mockCompletionMessagesBuilder.getMessages.mockReturnValue([
         { role: 'user', content: question },
       ] as any)
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockResolvedValue(
-          Response.json({
-            status: 'ready',
-            sources: [
-              {
-                url: 'https://robotframework.org/docs',
-                title: 'Robot Framework',
-                text: 'Robot Framework supports custom keyword libraries.',
-              },
-            ],
-          })
-        )
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json({
+          status: 'ready',
+          sources: [
+            {
+              url: 'https://robotframework.org/docs',
+              title: 'Robot Framework',
+              text: 'Robot Framework supports custom keyword libraries.',
+            },
+          ],
+        })
+      )
       mockSendCompletion.mockImplementation(
         async (
           _thread: any,
@@ -957,7 +955,7 @@ describe('useChat', () => {
         })
         expect(
           mockSendCompletion.mock.calls.filter((args) => args[5] === false)
-        ).toHaveLength(2)
+        ).toHaveLength(3)
       } finally {
         fetchSpy.mockRestore()
       }
