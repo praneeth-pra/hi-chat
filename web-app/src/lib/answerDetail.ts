@@ -6,3 +6,27 @@ export function withAnswerDetail(instructions: string | undefined): string {
     ? `${instructions}\n\n${ANSWER_DETAIL_RULE}`
     : ANSWER_DETAIL_RULE
 }
+
+/**
+ * gpt-oss-20b follows the style rule but stops early (12 Oct: noticeably
+ * shorter answers than 120B), so it gets an explicit length target.
+ */
+export const MEDIUM_LENGTH_RULE = `Answer length: match the question, and default to a medium-length answer. For an open interview, technical, design, behavioural or "how/why" question, give the direct opening sentence plus about 4 to 7 substantive bullets or short paragraphs with concrete details, examples and tradeoffs. Only a simple fact or a narrow yes/no follow-up gets 2 to 4 lines. Never answer an open question with just one or two sentences.`
+
+type RequestMessage = { role: string; content?: unknown }
+
+/** Adds the length target to the system message for gpt-oss-20b. */
+export function withMediumLength<T extends RequestMessage>(
+  messages: T[],
+  model: string | undefined
+): T[] {
+  if (model !== 'openai/gpt-oss-20b') return messages
+  const i = messages.findIndex(
+    (m) => m.role === 'system' && typeof m.content === 'string'
+  )
+  if (i === -1)
+    return [{ role: 'system', content: MEDIUM_LENGTH_RULE } as T, ...messages]
+  return messages.map((m, j) =>
+    j === i ? { ...m, content: `${m.content}\n\n${MEDIUM_LENGTH_RULE}` } : m
+  )
+}
