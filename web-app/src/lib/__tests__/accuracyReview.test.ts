@@ -90,8 +90,9 @@ describe('Accuracy review gate', () => {
     void result.then(() => {
       shown = true
     })
-    // Both providers audit at once; the other provider is listed first.
-    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(2))
+    // Both providers audit at once (the other provider listed first) while
+    // Cerebras writes a recovery answer alongside.
+    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(3))
     expect(shown).toBe(false)
     const args = vi.mocked(sendCompletion).mock.calls[0]
     expect(args[0].model).toEqual({
@@ -341,8 +342,8 @@ describe('Accuracy review gate', () => {
     expect(checked.review).toMatchObject({
       verdict: 'approved',
       verifier: 'cerebras 120B',
-      failureReasons: ['claude: provider-529'],
     })
+    expect(checked.review?.failureReasons).toContain('claude: provider-529')
   })
   it('reviews a personal question without web sources', async () => {
     vi.mocked(sendCompletion).mockResolvedValue(
@@ -417,27 +418,24 @@ describe('Accuracy review gate', () => {
       'Which library defines assert_all?'
     )
   })
-  it('uses validated JSON mode only if the endpoint specifically rejects schema support', async () => {
-    vi.mocked(sendCompletion)
-      .mockRejectedValueOnce(
-        Object.assign(new Error('response_format json_schema is unsupported'), {
-          status: 400,
-        })
-      )
-      .mockResolvedValueOnce(
-        response({
-          verdict: 'approved',
-          unsupportedClaims: [],
-          claims: [
-            {
-              text: 'Unverified draft',
-              support: 'source',
-              sourceId: 1,
-              quote: 'Technical evidence',
-            },
-          ],
-        })
-      )
+  it('retries in validated JSON mode when the endpoint rejects the schema request', async () => {
+    // Groq answers 400 without naming the schema, so any 400 retries.
+    vi.mocked(sendCompletion).mockImplementation(async (...args) => {
+      if ((args[6]?.response_format as any).type === 'json_schema')
+        throw Object.assign(new Error('Groq 400'), { status: 400 })
+      return response({
+        verdict: 'approved',
+        unsupportedClaims: [],
+        claims: [
+          {
+            text: 'Unverified draft',
+            support: 'source',
+            sourceId: 1,
+            quote: 'Technical evidence',
+          },
+        ],
+      })
+    })
     const checked = await verifyAccuracyCompletion(
       draft(),
       thread,
@@ -447,12 +445,96 @@ describe('Accuracy review gate', () => {
       new AbortController().signal,
       evidence
     )
-    expect(
-      vi
-        .mocked(sendCompletion)
-        .mock.calls.map((args) => (args[6]?.response_format as any).type)
-    ).toEqual(['json_schema', 'json_object'])
+    const types = vi
+      .mocked(sendCompletion)
+      .mock.calls.map((args) => (args[6]?.response_format as any).type)
+    expect(types.slice(0, 2)).toEqual(['json_schema', 'json_schema'])
+    expect(types).toContain('json_object')
     expect(await text(checked.completion)).toBe('Unverified draft')
+    expect(checked.review?.verdict).toBe('approved')
+  })
+  it('does not retry a non-format provider error', async () => {
+    vi.mocked(sendCompletion).mockRejectedValue(
+      Object.assign(new Error('Groq 401'), { status: 401 })
+    )
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      [providers[1]],
+      'cerebras',
+      new AbortController().signal,
+      evidence
+    )
+    expect(sendCompletion).toHaveBeenCalledTimes(2)
+    expect(checked.review?.fallback).toBe('grounded-draft')
+  })
+  it('shows the parallel recovery answer as soon as every audit fails', async () => {
+    vi.mocked(sendCompletion).mockImplementation(async (...args) =>
+      (args[6]?.response_format as any).json_schema?.name ===
+      'accuracy_corrected_answer'
+        ? response({ answer: 'Recovered answer' })
+        : response({ verdict: 'approved', claims: 'bad' })
+    )
+    const started = Date.now()
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      providers,
+      'groq',
+      new AbortController().signal,
+      evidence
+    )
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(sendCompletion).toHaveBeenCalledTimes(3)
+    expect(await text(checked.completion)).toBe('Recovered answer')
+    expect(checked.review).toMatchObject({
+      verdict: 'unverified',
+      verifier: 'cerebras 120B',
+      fallback: 'reviewer-answer',
+    })
+    expect(checked.review?.reviewAttempts).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^cerebras-repair:\d+ms:ok$/),
+      ])
+    )
+  })
+  it('waits out the Claude window before showing the recovery answer', async () => {
+    let claudeSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        claudeSignal = init.signal ?? undefined
+        return new Promise(() => {})
+      })
+    )
+    vi.mocked(sendCompletion).mockImplementation(async (...args) =>
+      (args[6]?.response_format as any).json_schema?.name ===
+      'accuracy_corrected_answer'
+        ? response({ answer: 'Recovered answer' })
+        : response({ verdict: 'approved', claims: 'bad' })
+    )
+    const started = Date.now()
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      [
+        ...providers,
+        { provider: 'anthropic', api_key: 'sk-ant' } as ModelProvider,
+      ],
+      'groq',
+      new AbortController().signal,
+      evidence
+    )
+    const waited = Date.now() - started
+    expect(waited).toBeGreaterThanOrEqual(CLAUDE_WINDOW_MS - 50)
+    expect(waited).toBeLessThan(CLAUDE_WINDOW_MS + 1000)
+    expect(await text(checked.completion)).toBe('Recovered answer')
+    expect(checked.review?.fallback).toBe('reviewer-answer')
+    expect(checked.review?.reviewAttempts).toContain('claude:cancelled')
+    expect(claudeSignal?.aborted).toBe(true)
   })
   it('reports safe failure categories without echoing provider bodies or sensitive details', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -591,10 +673,10 @@ describe('Accuracy review gate', () => {
       controller.signal,
       evidence
     )
-    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(sendCompletion).toHaveBeenCalledTimes(3))
     controller.abort(new Error('Stopped'))
     await expect(result).rejects.toThrow('Stopped')
-    expect(sendCompletion).toHaveBeenCalledTimes(2)
+    expect(sendCompletion).toHaveBeenCalledTimes(3)
   })
   it('requires search and blocks memory-only answers when Exa is unconfigured or fails', async () => {
     for (const status of ['unconfigured', 'unavailable', 'empty'] as const) {

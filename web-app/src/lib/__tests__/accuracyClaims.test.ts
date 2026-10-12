@@ -5,6 +5,7 @@ import {
   isPersonalQuestion,
   personalEvidence,
   accuracyLogLine,
+  nearSpan,
   type WebEvidence,
 } from '../accuracyReview'
 
@@ -109,6 +110,68 @@ describe('Accuracy claim evidence validation', () => {
     expect(
       parse(review, sourceReview.claims[0].text).audit.sourceClaimCount
     ).toBe(1)
+  })
+  it('tolerates prose wording drift but never in code, numbers or short spans', () => {
+    const source =
+      'Robot Framework is a generic open source automation framework [1]. It can be used for test automation and robotic process automation (RPA).'
+    // Case, quote marks, dashes, Markdown and citation markers.
+    expect(
+      nearSpan(
+        'robot framework is a **generic open-source** automation framework.',
+        source
+      )
+    ).toBe(true)
+    // One word in ten may differ in a long span.
+    expect(
+      nearSpan(
+        'It can be used for test automation and also robotic process automation',
+        source
+      )
+    ).toBe(true)
+    // Short spans must match word for word.
+    expect(nearSpan('Robot Framework is a commercial framework', source)).toBe(
+      false
+    )
+    expect(nearSpan('generic open source tool', source)).toBe(false)
+    // Code and numbers are never relaxed.
+    expect(
+      nearSpan('Use `assert_all` in the generic open source framework', source)
+    ).toBe(false)
+    expect(
+      nearSpan(
+        'Selenium 4 supports relative locators and the W3C protocol by default',
+        'Selenium 3 supports relative locators and the W3C protocol by default'
+      )
+    ).toBe(false)
+    // Words in a different order or from elsewhere in the text do not match.
+    expect(
+      nearSpan(
+        'automation framework is a generic open source Robot Framework',
+        source
+      )
+    ).toBe(false)
+  })
+  it('accepts a source quote copied with small formatting differences', () => {
+    expect(
+      parseAccuracyVerdict(
+        JSON.stringify({
+          verdict: 'approved',
+          unsupportedClaims: [],
+          claims: [
+            {
+              text: 'Custom libraries can be implemented in Python.',
+              support: 'source',
+              sourceId: 1,
+              quote:
+                'user keywords can be created in "resource files" — custom libraries can be implemented in Python',
+            },
+          ],
+        }),
+        'Custom libraries can be implemented in Python.',
+        evidence,
+        []
+      ).verdict
+    ).toBe('approved')
   })
   it('rejects nonexistent sources and fabricated quotations', () => {
     for (const patch of [

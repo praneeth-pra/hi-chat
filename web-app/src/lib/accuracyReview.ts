@@ -252,6 +252,53 @@ function claimText(text: string): string {
     .trim()
 }
 
+// Prose wording drifts slightly when a reviewer copies it (case, quote marks,
+// dashes, Markdown, [n] citation markers). Text with code is never relaxed.
+const CODE_LIKE = /[`=<>{}\[\];*|\\]|\w\(|!\w/
+const tokens = (text: string) =>
+  text
+    .replace(/\[\d+\]/g, ' ')
+    .toLowerCase()
+    .match(/[\p{L}\p{N}_]+/gu) ?? []
+
+/**
+ * True when `part` appears in `whole` once wording differences are ignored:
+ * the same words in order, with at most one edited word per ten for spans of
+ * ten words or more. Words containing digits must match exactly.
+ */
+export function nearSpan(part: string, whole: string): boolean {
+  if (CODE_LIKE.test(part.replace(/\*\*|__|\[\d+\]/g, ''))) return false
+  const a = tokens(part)
+  const b = tokens(whole)
+  if (a.length < 6 || !b.length) return false
+  const allowed = a.length >= 10 ? Math.floor(a.length / 10) : 0
+  const strict = a.map((word) => /\d/.test(word))
+  const blocked = a.length + 1
+  // Semi-global edit distance: `part` must align fully, `whole` may start
+  // and end anywhere.
+  let previous = new Int32Array(b.length + 1)
+  let current = new Int32Array(b.length + 1)
+  for (let i = 1; i <= a.length; i++) {
+    const cost = strict[i - 1] ? blocked : 1
+    current[0] = previous[0] + cost
+    let rowMin = current[0]
+    for (let j = 1; j <= b.length; j++) {
+      const same = a[i - 1] === b[j - 1]
+      current[j] = Math.min(
+        previous[j - 1] + (same ? 0 : cost),
+        previous[j] + cost,
+        current[j - 1] + 1
+      )
+      if (current[j] < rowMin) rowMin = current[j]
+    }
+    if (rowMin > allowed) return false
+    ;[previous, current] = [current, previous]
+  }
+  let best = Infinity
+  for (let j = 0; j <= b.length; j++) best = Math.min(best, previous[j])
+  return best <= allowed
+}
+
 function reviewFailure(error: unknown): string {
   if (error instanceof SyntaxError) return 'invalid-json'
   if (error instanceof Error) {
@@ -286,9 +333,7 @@ function unsupportedReviewFormat(error: unknown): boolean {
     !!error &&
     typeof error === 'object' &&
     'status' in error &&
-    error.status === 400 &&
-    error instanceof Error &&
-    /response_format|json_schema|structured.?output/i.test(error.message)
+    (error.status === 400 || error.status === 422)
   )
 }
 
@@ -378,12 +423,12 @@ export function parseAccuracyVerdict(
     !!normalize(part) &&
     !!claimText(part) &&
     part.length <= 4000 &&
-    claimText(whole).includes(claimText(part))
+    (claimText(whole).includes(claimText(part)) || nearSpan(part, whole))
   const quoteSpan = (part: unknown, whole: string): part is string =>
     typeof part === 'string' &&
     !!normalize(part) &&
     part.length <= 4000 &&
-    normalize(whole).includes(normalize(part))
+    (normalize(whole).includes(normalize(part)) || nearSpan(part, whole))
   if (
     value.unsupportedClaims.some((claim) => !span(claim, draft)) ||
     (value.verdict === 'approved' && value.unsupportedClaims.length)
@@ -752,77 +797,91 @@ export async function verifyAccuracyCompletion(
     },
   })
 
-  // Every reviewer audits at once. Claude's verdict wins if it lands within
-  // CLAUDE_WINDOW_MS; after that the first valid gpt-oss audit is shown, so a
-  // slow reviewer never holds the answer back.
+  // Every reviewer audits at once, and one recovery answer (Cerebras when
+  // configured) is written alongside so a failed audit never adds a second
+  // round trip. Claude's verdict wins if it lands within CLAUDE_WINDOW_MS;
+  // after that the first valid gpt-oss audit is shown, and once every gpt-oss
+  // audit has failed the recovery answer is shown, labelled unverified.
   const raceAbort = new AbortController()
   const link = () => raceAbort.abort(signal.reason)
   signal.addEventListener('abort', link, { once: true })
   type Run = {
     reviewer: Reviewer
+    repair: boolean
     settled: boolean
     checked?: Checked
     promise: Promise<void>
   }
-  const runs: Run[] = (claude ? [claude, ...judges] : judges).map(
-    (reviewer) => {
-      const run: Run = {
-        reviewer,
-        settled: false,
-        promise: Promise.resolve(),
-      }
-      run.promise = attempt(
-        reviewer,
-        false,
-        Math.min(
-          reviewer.kind === 'claude' ? 12_000 : 10_000,
-          reviewDeadline - Date.now()
-        ),
-        raceAbort.signal
-      ).then(
-        (checked) => {
-          run.settled = true
-          run.checked = checked
-          attempts.push(`${reviewer.name}:${Date.now() - started}ms:ok`)
-        },
-        (error) => {
-          run.settled = true
-          if (signal.aborted || raceAbort.signal.aborted) return
-          attempts.push(
-            `${reviewer.name}:${Date.now() - started}ms:${reviewFailure(error)}`
-          )
-          fail(reviewer, error, started)
-        }
-      )
-      return run
+  const start = (reviewer: Reviewer, repair: boolean): Run => {
+    const run: Run = {
+      reviewer,
+      repair,
+      settled: false,
+      promise: Promise.resolve(),
     }
+    const label = repair ? `${reviewer.name}-repair` : reviewer.name
+    run.promise = attempt(
+      reviewer,
+      repair,
+      Math.min(
+        reviewer.kind === 'claude' ? 12_000 : 10_000,
+        reviewDeadline - Date.now()
+      ),
+      raceAbort.signal
+    ).then(
+      (checked) => {
+        run.settled = true
+        run.checked = checked
+        attempts.push(`${label}:${Date.now() - started}ms:ok`)
+      },
+      (error) => {
+        run.settled = true
+        if (signal.aborted || raceAbort.signal.aborted) return
+        attempts.push(
+          `${label}:${Date.now() - started}ms:${reviewFailure(error)}`
+        )
+        fail(reviewer, error, started)
+      }
+    )
+    return run
+  }
+  const runs: Run[] = (claude ? [claude, ...judges] : judges).map((reviewer) =>
+    start(reviewer, false)
   )
+  const repairer = [...judges].sort(
+    (a, b) => Number(a.name !== 'cerebras') - Number(b.name !== 'cerebras')
+  )[0]
+  if (repairer) runs.push(start(repairer, true))
   const claudeWindowEnd = started + CLAUDE_WINDOW_MS
   try {
     for (;;) {
       if (signal.aborted) throw signal.reason
+      const windowOver = Date.now() >= claudeWindowEnd
       const claudeRun = runs.find((run) => run.reviewer.kind === 'claude')
+      const repairRun = runs.find((run) => run.repair)
+      const gptRuns = runs.filter(
+        (run) => run.reviewer.kind !== 'claude' && !run.repair
+      )
       if (claudeRun?.checked)
         return accept(claudeRun.reviewer, claudeRun.checked, false)
-      const best = runs.find(
-        (run) => run.reviewer.kind !== 'claude' && run.checked
-      )
-      if (
-        best?.checked &&
-        (!claudeRun || claudeRun.settled || Date.now() >= claudeWindowEnd)
-      )
+      const best = gptRuns.find((run) => run.checked)
+      if (best?.checked && (!claudeRun || claudeRun.settled || windowOver))
         return accept(best.reviewer, best.checked, false)
+      const gptFailed = gptRuns.every((run) => run.settled && !run.checked)
+      if (
+        repairRun?.checked &&
+        gptFailed &&
+        (!claudeRun || claudeRun.settled || windowOver)
+      )
+        return accept(repairRun.reviewer, repairRun.checked, true)
       const pending = runs.filter((run) => !run.settled)
       if (!pending.length) break
       let timer: ReturnType<typeof setTimeout> | undefined
       const waits: Promise<unknown>[] = pending.map((run) => run.promise)
-      if (best)
+      if (!windowOver)
         waits.push(
           new Promise((resolve) => {
-            timer = setTimeout(
-              resolve,
-              Math.max(0, claudeWindowEnd - Date.now())
-            )
+            timer = setTimeout(resolve, claudeWindowEnd - Date.now())
           })
         )
       await Promise.race(waits)
@@ -830,33 +889,12 @@ export async function verifyAccuracyCompletion(
     }
   } finally {
     for (const run of runs)
-      if (!run.settled) attempts.push(`${run.reviewer.name}:cancelled`)
+      if (!run.settled)
+        attempts.push(
+          `${run.repair ? `${run.reviewer.name}-repair` : run.reviewer.name}:cancelled`
+        )
     raceAbort.abort(new Error('Review race finished'))
     signal.removeEventListener('abort', link)
-  }
-  if (signal.aborted) throw signal.reason
-  // One recovery answer, from the fastest provider (Cerebras when configured).
-  const repairers = [...judges]
-    .sort(
-      (a, b) => Number(a.name !== 'cerebras') - Number(b.name !== 'cerebras')
-    )
-    .slice(0, 1)
-  for (const reviewer of repairers) {
-    const remainingMs = Math.min(10_000, reviewDeadline - Date.now())
-    if (remainingMs <= 0) break
-    const attemptStarted = Date.now()
-    try {
-      const checked = await attempt(reviewer, true, remainingMs, signal)
-      if (signal.aborted) throw signal.reason
-      attempts.push(`${reviewer.name}-repair:${Date.now() - started}ms:ok`)
-      return accept(reviewer, checked, true)
-    } catch (error) {
-      if (signal.aborted) throw signal.reason
-      attempts.push(
-        `${reviewer.name}-repair:${Date.now() - started}ms:${reviewFailure(error)}`
-      )
-      fail(reviewer, error, attemptStarted)
-    }
   }
   if (signal.aborted) throw signal.reason
   const replacement =
