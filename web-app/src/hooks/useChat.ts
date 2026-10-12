@@ -76,6 +76,7 @@ import { reportSpeech } from '@/lib/speechServices'
 import { useAttachmentIngestionPrompt } from './useAttachmentIngestionPrompt'
 import {
   describeTiming,
+  speedLogLine,
   pageHidden,
   type StreamTiming,
 } from '@/lib/replyTiming'
@@ -1294,6 +1295,9 @@ export const useChat = () => {
                 ]
               : [])
           )
+
+          if (autoState.auto && autoState.mode === 'speed')
+            reportSpeech(speedLogLine(timings))
 
           // Create a final content object for adding to the thread
           let finalContent = newAssistantThreadContent(

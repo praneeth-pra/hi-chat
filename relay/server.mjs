@@ -387,6 +387,11 @@ export function speechLogLine(body, includeText = false) {
   const single = line.match(
     /^dictation (?:[\w-]+|fallback \((?:live failed|live empty)\)): \d+ ms after stop, \d+ chars$/
   )
+  // Speed replies: timings only, every field known.
+  const speed = line.match(
+    /^speed: model=(?:(?:openai_)?gpt-oss-(?:20|120)b|qwen_qwen3\.8-27b|qwen-3\.8-27b|claude-[a-z0-9.-]{1,40}|none) total=(?:\d{1,9}ms|none) first_byte=(?:\d{1,9}ms|none) first_words=(?:\d{1,9}ms|none) answer=(?:\d{1,9}ms|none) tokens=\d{1,7} route=(?:direct|server|none) hidden=(?:yes|no)$/
+  )
+  if (speed) return speed[0]
   // Allow only known diagnostic fields and values, not arbitrary key=value text.
   if (line.startsWith('accuracy:')) {
     const reason =
