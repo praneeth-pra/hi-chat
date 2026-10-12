@@ -16,6 +16,12 @@ vi.mock('../ThreadContent', () => ({
 }))
 
 describe('Accuracy progress visibility', () => {
+  it('shows search progress before a draft or stream exists', () => {
+    state.accuracyStatus = { threadId: 'chat', phase: 'searching' }
+    state.streamingContent = undefined
+    render(<StreamingContent threadId="chat" />)
+    expect(screen.getByRole('status').textContent).toContain('searching sources')
+  })
   it('shows review progress before the stream is initialized and hides unchecked text', () => {
     state.accuracyStatus = { threadId: 'chat', phase: 'verifying' }
     state.streamingContent = { thread_id: '', content: [] }

@@ -46,8 +46,9 @@ also uses the dictation queue. Ordinary text pastes remain drafts.
 
 The model picker offers **Auto · Speed** and **Auto · Accuracy**, using Groq 20B,
 Groq 120B and Cerebras 120B. Speed races all three with Low reasoning. Accuracy
-races the two 120B models with Medium reasoning (20B is draft recovery), requires
-Exa Fast web evidence, then checks the full draft with a 120B reviewer before showing
+races the two 120B models with Medium reasoning (20B is draft recovery) after
+retrieving mandatory Exa Fast evidence. All draft candidates receive the sources;
+a 120B reviewer checks the full answer with a validated claim audit before showing
 it. Set `EXA_API_KEY` securely in Railway for Accuracy; missing sources or failed
 review produces an error rather than an unchecked answer. Speed streams the
 first useful winner immediately. Manual model choices remain available. Parallel

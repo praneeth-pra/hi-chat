@@ -591,7 +591,7 @@ function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
             Exa sources ({review.sources.length})
           </summary>
           <ul className="mt-1 space-y-1">
-            {review.sources.map((source) => (
+            {review.sources.map((source, index) => (
               <li key={source.url}>
                 <a
                   href={source.url}
@@ -599,7 +599,7 @@ function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
                   rel="noopener noreferrer"
                   className="underline"
                 >
-                  {source.title}
+                  [{index + 1}] {source.title}
                 </a>
               </li>
             ))}

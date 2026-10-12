@@ -18,7 +18,10 @@ type AppErrorMessage = {
 }
 
 type AppState = {
-  accuracyStatus?: { threadId: string; phase: 'drafting' | 'verifying' }
+  accuracyStatus?: {
+    threadId: string
+    phase: 'searching' | 'drafting' | 'verifying'
+  }
   setAccuracyStatus: (status: AppState['accuracyStatus']) => void
   streamingContent?: ThreadMessage
   loadingModel?: boolean

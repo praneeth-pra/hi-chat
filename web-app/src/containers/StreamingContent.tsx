@@ -53,9 +53,11 @@ export const StreamingContent = memo(({ threadId }: Props) => {
   if (accuracyStatus?.threadId === threadId) {
     return (
       <p role="status" className="text-sm text-main-view-fg/60 py-3">
-        {accuracyStatus.phase === 'drafting'
-          ? 'Accuracy: preparing an answer…'
-          : 'Accuracy: checking the answer…'}
+        {accuracyStatus.phase === 'searching'
+          ? 'Accuracy: searching sources…'
+          : accuracyStatus.phase === 'drafting'
+            ? 'Accuracy: preparing an answer…'
+            : 'Accuracy: checking the answer…'}
       </p>
     )
   }
