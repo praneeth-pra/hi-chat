@@ -547,7 +547,7 @@ function General() {
               />
               <CardItem
                 title="Answer format"
-                description="Direct first line; the shape follows the question (a line or two, short paragraphs, bullets or steps). Tables in answers are always displayed as lists."
+                description="Bullet points only, starting with a direct answer; how many depends on the question. Tables in answers are always displayed as lists."
               />
               <CardItem
                 title="Chat thinking"
