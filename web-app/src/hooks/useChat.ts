@@ -1,6 +1,7 @@
 import { raceAutoAnswers } from '@/lib/autoRace'
 import {
   getWebEvidence,
+  groundAccuracyMessages,
   buildAccuracyQuery,
   verifyAccuracyCompletion,
   type WebEvidence,
@@ -829,7 +830,7 @@ export const useChat = () => {
         }
 
         // let assistantLoopSteps = 0
-        let webEvidence: Promise<WebEvidence> | undefined
+        let webEvidence: WebEvidence | undefined
 
         while (
           !isCompleted &&
@@ -864,7 +865,8 @@ export const useChat = () => {
             hiddenAtStart: pageHidden(),
             attempts: [],
           }
-          const requestMessages = builder.getMessages()
+          const originalMessages = builder.getMessages()
+          let requestMessages = originalMessages
           const track: NonNullable<Parameters<typeof sendCompletion>[7]> = {
             attempts: streamTiming.attempts!,
             start: requestStart,
@@ -875,17 +877,26 @@ export const useChat = () => {
             accuracyRequested = true
             useAppState.getState().setAccuracyStatus({
               threadId: activeThread.id,
-              phase: 'drafting',
+              phase: webEvidence ? 'drafting' : 'searching',
             })
             if (!webEvidence) {
-              webEvidence = getWebEvidence(
+              webEvidence = await getWebEvidence(
                 buildAccuracyQuery(message, getMessages(activeThread.id)),
                 abortController.signal
               )
-              // Search overlaps drafting; cancellation must not reject unobserved.
-              void webEvidence.catch(() => {})
             }
+            if (abortController.signal.aborted)
+              throw abortController.signal.reason
+            requestMessages = groundAccuracyMessages(
+              originalMessages,
+              webEvidence
+            )
+            useAppState.getState().setAccuracyStatus({
+              threadId: activeThread.id,
+              phase: 'drafting',
+            })
           }
+          const draftStartedAt = Date.now()
           // Auto's first-answer race requires streaming; manual models retain their setting.
           const streamReply =
             autoState.auto || currentAssistant?.parameters?.stream !== false
@@ -1054,7 +1065,7 @@ export const useChat = () => {
             const checked = await verifyAccuracyCompletion(
               completion,
               activeThread,
-              requestMessages,
+              originalMessages,
               useModelProvider.getState().providers,
               winner?.provider.provider ?? activeProvider.provider,
               abortController.signal,
@@ -1063,7 +1074,8 @@ export const useChat = () => {
                 useAppState
                   .getState()
                   .setAccuracyStatus({ threadId: activeThread.id, phase }),
-              accumulatedTextRef.value
+              accumulatedTextRef.value,
+              draftStartedAt
             )
             completion = checked.completion
             accuracyReview = checked.review
@@ -1207,9 +1219,14 @@ export const useChat = () => {
                       verifier: accuracyReview.verifier,
                       verdict: accuracyReview.verdict,
                       draft_ms: accuracyReview.draftMs,
+                      search_ms: accuracyReview.searchMs,
                       review_ms: accuracyReview.reviewMs,
                       web_status: accuracyReview.webStatus,
                       source_count: accuracyReview.sources.length,
+                      claim_count: accuracyReview.claimCount,
+                      source_claim_count: accuracyReview.sourceClaimCount,
+                      qualified_claim_count: accuracyReview.qualifiedClaimCount,
+                      unsupported_claim_count: accuracyReview.unsupportedClaimCount,
                     },
                   },
                 ]

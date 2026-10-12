@@ -793,24 +793,18 @@ describe('useChat', () => {
       )
       expect(answer.metadata.timings.answered_by).toBe('Groq gpt-oss-20b')
     })
-    it('reviews the winning 120B draft before saving an Accuracy answer', async () => {
+    it('waits for web evidence, grounds both 120B drafts and reviews before saving an Accuracy answer', async () => {
       configure('accuracy')
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              status: 'ready',
-              sources: [
-                {
-                  url: 'https://docs.example.com',
-                  title: 'Docs',
-                  text: 'Evidence',
-                },
-              ],
-            })
-          )
-        )
+      mockCompletionMessagesBuilder.getMessages.mockReturnValue([
+        { role: 'user', content: 'Explain DNS.' },
+      ] as any)
+      let finishSearch!: (response: Response) => void
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishSearch = resolve
+          })
+      )
       mockSendCompletion.mockImplementation(
         async (
           _thread: any,
@@ -831,6 +825,15 @@ describe('useChat', () => {
                       content: JSON.stringify({
                         verdict: 'revised',
                         answer: '- Checked answer',
+                        claims: [
+                          {
+                            text: 'Checked answer',
+                            support: 'source',
+                            sourceId: 1,
+                            quote: 'Evidence',
+                          },
+                        ],
+                        unsupportedClaims: ['Large answer'],
                       }),
                     },
                   },
@@ -840,13 +843,35 @@ describe('useChat', () => {
       try {
         const { result } = renderHook(() => useChat())
         await act(async () => {
-          await result.current('Explain DNS.')
+          const sending = result.current('Explain DNS.')
+          await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+          expect(mockSendCompletion).not.toHaveBeenCalled()
+          finishSearch(
+            Response.json({
+              status: 'ready',
+              sources: [
+                {
+                  url: 'https://docs.example.com',
+                  title: 'Docs',
+                  text: 'Evidence',
+                },
+              ],
+            })
+          )
+          await sending
         })
         expect(
           mockSendCompletion.mock.calls
             .slice(0, 2)
             .map((args: any[]) => args[0].model.id)
         ).toEqual(['gpt-oss-120b', 'openai/gpt-oss-120b'])
+        for (const args of mockSendCompletion.mock.calls.slice(0, 2)) {
+          expect(JSON.stringify(args[2])).toContain('Explain DNS.')
+          expect(JSON.parse(args[2].at(-1).content).sources[0]).toMatchObject({
+            sourceId: 1,
+            text: 'Evidence',
+          })
+        }
         const review = mockSendCompletion.mock.calls[2]
         expect(review[5]).toBe(false)
         expect(review[4]).toEqual([])
@@ -859,6 +884,57 @@ describe('useChat', () => {
           mockAddMessage.mock.calls[1][0].metadata.accuracyReview.verdict
         ).toBe('revised')
         expect(fetchSpy).toHaveBeenCalledWith('/api/search', expect.anything())
+        expect(
+          mockAddMessage.mock.calls[1][0].metadata.accuracyReview
+        ).toMatchObject({
+          sourceClaimCount: 1,
+          unsupportedClaimCount: 1,
+          searchMs: expect.any(Number),
+        })
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+    it('does not start a draft or reviewer without usable web sources', async () => {
+      configure('accuracy')
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(Response.json({ status: 'ready', sources: [] }))
+      try {
+        const { result } = renderHook(() => useChat())
+        await act(async () => {
+          await result.current('What is assert_all?')
+        })
+        expect(mockSendCompletion).not.toHaveBeenCalled()
+        expect(
+          mockAddMessage.mock.calls.every((args) => args[0].role === 'user')
+        ).toBe(true)
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+    it('Speed still starts without a web search or evidence-review request', async () => {
+      configure('speed')
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(new Error('Speed must not search'))
+      mockSendCompletion.mockImplementation(async () =>
+        (async function* () {
+          yield { choices: [{ delta: { content: 'Fast answer' } }] }
+        })()
+      )
+      try {
+        const { result } = renderHook(() => useChat())
+        await act(async () => {
+          await result.current('Explain DNS.')
+        })
+        expect(fetchSpy).not.toHaveBeenCalled()
+        expect(
+          mockSendCompletion.mock.calls.every((args) => args[5] === true)
+        ).toBe(true)
+        expect(mockAddMessage.mock.calls[1][0].content[0].text.value).toBe(
+          'Fast answer'
+        )
       } finally {
         fetchSpy.mockRestore()
       }
