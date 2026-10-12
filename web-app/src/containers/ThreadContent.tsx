@@ -2,6 +2,7 @@
 import { ThreadMessage } from '@janhq/core'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { RenderMarkdown } from './RenderMarkdown'
+import { useSmoothText } from '@/hooks/useSmoothText'
 import React, { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import {
   IconCopy,
@@ -178,6 +179,15 @@ export const ThreadContent = memo(
 
       return { reasoningSegment: undefined, textSegment: text }
     }, [text])
+
+    // The answer flows onto the screen while it streams
+    const answerText = useSmoothText(textSegment, item.thread_id, {
+      streaming: !!item.streamingThread,
+      latest:
+        !item.streamingThread &&
+        !!item.isLastMessage &&
+        item.role === 'assistant',
+    })
 
     const getMessages = useMessages((state) => state.getMessages)
     const deleteMessage = useMessages((state) => state.deleteMessage)
@@ -453,7 +463,7 @@ export const ThreadContent = memo(
             )}
 
             <RenderMarkdown
-              content={textSegment.replace('</think>', '')}
+              content={answerText.replace('</think>', '')}
               components={linkComponents}
             />
 

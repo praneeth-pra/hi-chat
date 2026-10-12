@@ -7,6 +7,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { IconFileText, IconUpload, IconX } from '@tabler/icons-react'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useTranslation } from '@/i18n/react-i18next-compat'
@@ -45,6 +46,7 @@ export default function AddEditAssistant({
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [jdFile, setJdFile] = useState<File | null>(null)
   const [jdRemoved, setJdRemoved] = useState(false)
+  const [jdText, setJdText] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const resumeInputRef = useRef<HTMLInputElement>(null)
@@ -55,13 +57,18 @@ export default function AddEditAssistant({
     setResumeFile(null)
     setJdFile(null)
     setJdRemoved(false)
+    setJdText('')
     setStatus(null)
     setBusy(false)
   }, [open, editingKey])
 
   const resumeName = resumeFile?.name ?? savedResume?.name
-  const jdName = jdFile?.name ?? (jdRemoved ? undefined : savedJd?.name)
-  const changed = !!resumeFile || !!jdFile || (jdRemoved && !!savedJd)
+  const pastedJd = jdText.trim()
+  const jdName =
+    jdFile?.name ??
+    (pastedJd ? 'Pasted below' : jdRemoved ? undefined : savedJd?.name)
+  const changed =
+    !!resumeFile || !!jdFile || !!pastedJd || (jdRemoved && !!savedJd)
   const canSave = !busy && !!resumeName && (!editing || changed)
 
   const readFile = async (file: File): Promise<SetupFile> => {
@@ -81,9 +88,11 @@ export default function AddEditAssistant({
       if (!resume) throw new Error('Upload a resume first')
       const jd = jdFile
         ? await readFile(jdFile)
-        : jdRemoved
-          ? undefined
-          : savedJd
+        : pastedJd
+          ? { name: 'Job description', text: pastedJd }
+          : jdRemoved
+            ? undefined
+            : savedJd
       setStatus('Setting up the assistant…')
       const { getProviderByName } = useModelProvider.getState()
       const groq = getProviderByName('groq')
@@ -158,8 +167,22 @@ export default function AddEditAssistant({
             () => jdInputRef.current?.click(),
             () => {
               setJdFile(null)
+              setJdText('')
               setJdRemoved(true)
             }
+          )}
+          {!jdFile && (
+            <Textarea
+              value={jdText}
+              onChange={(e) => {
+                setJdText(e.target.value)
+                setStatus(null)
+              }}
+              placeholder="Or paste the job description here"
+              aria-label="Paste job description"
+              className="min-h-20 max-h-40 resize-none text-sm"
+              disabled={busy}
+            />
           )}
           <input
             ref={resumeInputRef}
@@ -182,7 +205,10 @@ export default function AddEditAssistant({
             onChange={(e) => {
               const file = e.target.files?.[0] ?? null
               setJdFile(file)
-              if (file) setJdRemoved(false)
+              if (file) {
+                setJdRemoved(false)
+                setJdText('')
+              }
               setStatus(null)
               e.target.value = ''
             }}
