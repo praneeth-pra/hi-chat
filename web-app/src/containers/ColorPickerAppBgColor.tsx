@@ -24,15 +24,15 @@ export function ColorPickerAppBgColor() {
   const predefineAppBgColor: RgbaColor[] = [
     isDark
       ? {
-          r: 25,
-          g: 25,
-          b: 25,
+          r: 17,
+          g: 17,
+          b: 19,
           a: getAlpha(0.4),
         }
       : {
-          r: 255,
-          g: 255,
-          b: 255,
+          r: 244,
+          g: 244,
+          b: 242,
           a: getAlpha(0.4),
         },
     {

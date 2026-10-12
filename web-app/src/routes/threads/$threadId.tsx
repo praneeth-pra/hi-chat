@@ -226,7 +226,7 @@ function ThreadDetail() {
   if (!messages || !threadModel) return null
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))]">
+    <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))] md:h-[calc(100dvh-18px)]">
       <HeaderPage>
         <div className="flex items-center justify-between w-full pr-2">
           <div>
@@ -240,7 +240,7 @@ function ThreadDetail() {
           {thread && <ThreadActions key={thread.id} thread={thread} />}
         </div>
       </HeaderPage>
-      <div className="flex flex-col h-[calc(100%-40px)]">
+      <div className="flex flex-col h-[calc(100%-48px)]">
         <div
           ref={scrollContainerRef}
           data-thread-scroller

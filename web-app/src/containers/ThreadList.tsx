@@ -207,12 +207,12 @@ const SortableItem = memo(
         {...attributes}
         {...listeners}
         className={cn(
-          'rounded hover:bg-left-panel-fg/10 flex items-center justify-between gap-2 px-1.5 group/thread-list transition-all',
+          'rounded-lg hover:bg-left-panel-fg/[0.07] flex items-center justify-between gap-2 px-2 group/thread-list transition-colors',
           variant === 'project'
             ? 'mb-2 rounded-lg px-4 border border-main-view-fg/10 bg-main-view-fg/5'
-            : 'mb-1',
+            : 'mb-0.5',
           isDragging ? 'cursor-move' : 'cursor-pointer',
-          isActive && 'bg-left-panel-fg/10'
+          isActive && 'bg-left-panel-fg/[0.09]'
         )}
         onClick={(e) => handleClick(e)}
         onContextMenu={(e) => {
@@ -224,10 +224,12 @@ const SortableItem = memo(
         <div
           className={cn(
             'pr-2 truncate flex-1',
-            variant === 'project' ? 'py-2 cursor-pointer' : 'py-1'
+            variant === 'project' ? 'py-2 cursor-pointer' : 'py-1.5'
           )}
         >
-          <span>{thread.title || t('common:newThread')}</span>
+          <span className="text-left-panel-fg/90">
+            {thread.title || t('common:newThread')}
+          </span>
           {variant !== 'project' && now !== undefined && (
             <ThreadMeta thread={thread} now={now} />
           )}
@@ -242,7 +244,7 @@ const SortableItem = memo(
             type="button"
             aria-label={`${t('common:delete')} ${plainTitleForRename || t('common:newThread')}`}
             title={t('common:deleteThread')}
-            className="size-7 shrink-0 flex items-center justify-center rounded text-left-panel-fg/50 hover:text-destructive hover:bg-left-panel-fg/10 focus-visible:ring-2 focus-visible:ring-main-view-fg/40"
+            className="size-7 shrink-0 flex items-center justify-center rounded-md text-left-panel-fg/45 hover:text-destructive hover:bg-left-panel-fg/10 focus-visible:ring-2 focus-visible:ring-main-view-fg/40 md:opacity-0 md:group-hover/thread-list:opacity-100 focus-visible:opacity-100 transition-opacity"
             onClick={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -385,7 +387,7 @@ const SortableItem = memo(
 function ThreadMeta({ thread, now }: { thread: Thread; now: number }) {
   const count = getMessageCount(thread)
   return (
-    <span className="block text-[11px] leading-tight text-left-panel-fg/50 truncate">
+    <span className="block text-[11px] leading-tight text-left-panel-fg/45 truncate mt-0.5">
       {formatRelativeTime(thread.updated, now)}
       {count !== undefined &&
         count > 0 &&
@@ -436,7 +438,7 @@ function ThreadList({
         {groupByDate
           ? groupThreadsByDate(sortedThreads, now).map((group) => (
               <div key={group.key} className="mb-2">
-                <span className="block text-[11px] text-left-panel-fg/40 px-1.5 mb-1 font-medium uppercase tracking-wide">
+                <span className="block text-[11px] text-left-panel-fg/40 px-2 mb-1 mt-1 font-semibold uppercase tracking-wider">
                   {group.label}
                 </span>
                 {group.threads.map((thread) => (

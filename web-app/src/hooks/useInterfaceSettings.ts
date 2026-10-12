@@ -84,19 +84,21 @@ const getAlphaValue = () => {
 
 // Default interface settings
 const defaultFontSize: FontSize = '15px'
+// Sidebar (app background): a soft neutral that sets the panel apart from
+// the chat surface
 const defaultAppBgColor: RgbaColor = {
-  r: 25,
-  g: 25,
-  b: 25,
+  r: 17,
+  g: 17,
+  b: 19,
   a: getAlphaValue(),
 }
 const defaultLightAppBgColor: RgbaColor = {
-  r: 255,
-  g: 255,
-  b: 255,
+  r: 244,
+  g: 244,
+  b: 242,
   a: getAlphaValue(),
 }
-const defaultAppMainViewBgColor: RgbaColor = { r: 25, g: 25, b: 25, a: 1 }
+const defaultAppMainViewBgColor: RgbaColor = { r: 26, g: 26, b: 29, a: 1 }
 const defaultLightAppMainViewBgColor: RgbaColor = {
   r: 255,
   g: 255,
@@ -104,19 +106,36 @@ const defaultLightAppMainViewBgColor: RgbaColor = {
   a: 1,
 }
 
-const defaultAppPrimaryBgColor: RgbaColor = { r: 219, g: 88, b: 44, a: 1 }
-const defaultLightAppPrimaryBgColor: RgbaColor = { r: 219, g: 88, b: 44, a: 1 }
-const defaultAppAccentBgColor: RgbaColor = { r: 45, g: 120, b: 220, a: 1 }
-const defaultLightAppAccentBgColor: RgbaColor = { r: 45, g: 120, b: 220, a: 1 }
-const defaultAppDestructiveBgColor: RgbaColor = { r: 144, g: 60, b: 60, a: 1 }
+const defaultAppPrimaryBgColor: RgbaColor = { r: 108, g: 99, b: 255, a: 1 }
+const defaultLightAppPrimaryBgColor: RgbaColor = { r: 91, g: 80, b: 230, a: 1 }
+const defaultAppAccentBgColor: RgbaColor = { r: 99, g: 140, b: 255, a: 1 }
+const defaultLightAppAccentBgColor: RgbaColor = { r: 59, g: 99, b: 230, a: 1 }
+const defaultAppDestructiveBgColor: RgbaColor = { r: 190, g: 70, b: 70, a: 1 }
 const defaultLightAppDestructiveBgColor: RgbaColor = {
   r: 217,
-  g: 95,
-  b: 95,
+  g: 72,
+  b: 72,
   a: 1,
 }
-const defaultDarkLeftPanelTextColor: string = '#FFF'
-const defaultLightLeftPanelTextColor: string = '#000'
+const defaultDarkLeftPanelTextColor: string = '#ECECEF'
+const defaultLightLeftPanelTextColor: string = '#18181B'
+
+/**
+ * Defaults from before the 2026-10 redesign. Browsers that saved them are
+ * treated as "not customised" and move to the new defaults.
+ */
+const legacyDefaults: RgbaColor[] = [
+  { r: 25, g: 25, b: 25, a: 1 },
+  { r: 255, g: 255, b: 255, a: 1 },
+  { r: 219, g: 88, b: 44, a: 1 },
+  { r: 45, g: 120, b: 220, a: 1 },
+  { r: 144, g: 60, b: 60, a: 1 },
+  { r: 217, g: 95, b: 95, a: 1 },
+]
+const isLegacyDefault = (color: RgbaColor) =>
+  legacyDefaults.some(
+    (d) => d.r === color.r && d.g === color.g && d.b === color.b
+  )
 
 // Helper function to check if two RGBA colors are equal
 const isColorEqual = (color1: RgbaColor, color2: RgbaColor): boolean => {
@@ -130,42 +149,51 @@ const isColorEqual = (color1: RgbaColor, color2: RgbaColor): boolean => {
 
 // Helper function to check if color is default (not customized)
 export const isDefaultColor = (color: RgbaColor): boolean => {
-  // Check if RGB matches default (ignore alpha since it changes based on blur support)
-  const isDarkDefault = color.r === 25 && color.g === 25 && color.b === 25
-  const isLightDefault = color.r === 255 && color.g === 255 && color.b === 255
+  // Match RGB only: alpha changes with blur support
+  const sameRgb = (d: RgbaColor) =>
+    color.r === d.r && color.g === d.g && color.b === d.b
+  const isDefault =
+    sameRgb(defaultAppBgColor) ||
+    sameRgb(defaultLightAppBgColor) ||
+    color.r === 25 && color.g === 25 && color.b === 25 ||
+    color.r === 255 && color.g === 255 && color.b === 255
 
   // Consider it default if RGB matches and alpha is either 0.4 or 1 (common values)
   const hasDefaultAlpha =
     Math.abs(color.a - 0.4) < 0.01 || Math.abs(color.a - 1) < 0.01
 
-  return (isDarkDefault || isLightDefault) && hasDefaultAlpha
+  return isDefault && hasDefaultAlpha
 }
 
 export const isDefaultColorMainView = (color: RgbaColor): boolean => {
   return (
     isColorEqual(color, defaultAppMainViewBgColor) ||
-    isColorEqual(color, defaultLightAppMainViewBgColor)
+    isColorEqual(color, defaultLightAppMainViewBgColor) ||
+    isLegacyDefault(color)
   )
 }
 
 export const isDefaultColorPrimary = (color: RgbaColor): boolean => {
   return (
     isColorEqual(color, defaultAppPrimaryBgColor) ||
-    isColorEqual(color, defaultLightAppPrimaryBgColor)
+    isColorEqual(color, defaultLightAppPrimaryBgColor) ||
+    isLegacyDefault(color)
   )
 }
 
 export const isDefaultColorAccent = (color: RgbaColor): boolean => {
   return (
     isColorEqual(color, defaultAppAccentBgColor) ||
-    isColorEqual(color, defaultLightAppAccentBgColor)
+    isColorEqual(color, defaultLightAppAccentBgColor) ||
+    isLegacyDefault(color)
   )
 }
 
 export const isDefaultColorDestructive = (color: RgbaColor): boolean => {
   return (
     isColorEqual(color, defaultAppDestructiveBgColor) ||
-    isColorEqual(color, defaultLightAppDestructiveBgColor)
+    isColorEqual(color, defaultLightAppDestructiveBgColor) ||
+    isLegacyDefault(color)
   )
 }
 
@@ -284,9 +312,10 @@ export const useInterfaceSettings = create<InterfaceSettingsState>()(
 
           // Reset app background color with correct alpha based on blur support
           const currentAlpha = blurEffectsSupported && IS_TAURI ? 0.4 : 1
-          const defaultBg = isDark
-            ? { r: 25, g: 25, b: 25, a: currentAlpha }
-            : { r: 255, g: 255, b: 255, a: currentAlpha }
+          const defaultBg = {
+            ...(isDark ? defaultAppBgColor : defaultLightAppBgColor),
+            a: currentAlpha,
+          }
           const culoriRgbBg = rgb({
             mode: 'rgb',
             r: defaultBg.r / 255,
@@ -508,7 +537,7 @@ export const useInterfaceSettings = create<InterfaceSettingsState>()(
           // Calculate text color based on background brightness or use default based on theme
           let textColor: string
 
-          if (isDefaultColor(color)) {
+          if (isDefaultColorMainView(color)) {
             // If using default background, use default text color based on theme
             textColor = getDefaultTextColor(isDark)
           } else {

@@ -262,11 +262,11 @@ export const ThreadContent = memo(
     return (
       <Fragment>
         {item.role === 'user' && (
-          <div className="w-full">
+          <div className="w-full group/user">
             {/* Render text content in the message bubble */}
             {cleanPrompt && (
               <div className="flex justify-end w-full h-full text-start break-words whitespace-normal">
-                <div className="bg-main-view-fg/4 relative text-main-view-fg p-2 rounded-md inline-block max-w-[80%] ">
+                <div className="bg-primary/[0.08] border border-primary/[0.12] relative text-main-view-fg px-4 py-2.5 rounded-2xl rounded-br-md inline-block max-w-[80%]">
                   <div className="select-text">
                     <RenderMarkdown
                       content={cleanPrompt}
@@ -393,7 +393,7 @@ export const ThreadContent = memo(
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 text-main-view-fg/60 text-xs mt-2">
+            <div className="flex items-center justify-end gap-2 text-main-view-fg/45 text-xs mt-1.5 md:opacity-0 md:group-hover/user:opacity-100 focus-within:opacity-100 transition-opacity">
               <EditMessageDialog
                 message={cleanPrompt || ''}
                 imageUrls={
@@ -417,9 +417,9 @@ export const ThreadContent = memo(
         {item.content?.[0]?.text && item.role !== 'user' && (
           <>
             {item.showAssistant && (
-              <div className="flex items-center gap-2 mb-3 text-main-view-fg/60">
+              <div className="flex items-center gap-2.5 mb-3 text-main-view-fg/50">
                 {assistant?.avatar && (
-                  <div className="flex items-center gap-2 size-8 rounded-md justify-center border border-main-view-fg/10 bg-main-view-fg/5 p-1">
+                  <div className="flex items-center gap-2 size-8 rounded-full justify-center border border-main-view-fg/[0.08] bg-main-view-fg/[0.04] p-1">
                     <AvatarEmoji
                       avatar={assistant?.avatar}
                       imageClassName="w-6 h-6 object-contain"
@@ -429,11 +429,11 @@ export const ThreadContent = memo(
                 )}
 
                 <div className="flex flex-col">
-                  <span className="text-main-view-fg font-medium">
+                  <span className="text-main-view-fg font-semibold text-sm leading-tight">
                     {assistant?.name || 'Hi-chat'}
                   </span>
                   {item?.created_at && item?.created_at !== 0 && (
-                    <span className="text-xs mt-0.5">
+                    <span className="text-[11px] mt-0.5">
                       {formatDate(item?.created_at)}
                     </span>
                   )}
@@ -487,11 +487,11 @@ export const ThreadContent = memo(
             ) : null}
 
             {!isToolCalls && (
-              <div className="flex items-center gap-2 text-main-view-fg/60 text-xs">
-                <div className={cn('flex items-center gap-2')}>
+              <div className="flex items-center gap-2 text-main-view-fg/45 text-xs mt-1">
+                <div className={cn('flex items-center gap-3')}>
                   <div
                     className={cn(
-                      'flex items-center gap-2',
+                      'flex items-center gap-3',
                       item.isLastMessage && isStreamingThisThread && 'hidden'
                     )}
                   >

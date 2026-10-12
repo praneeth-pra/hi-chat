@@ -284,8 +284,8 @@ function loginPage(email) {
 <meta name="robots" content="noindex">
 <title>Hi-chat · Sign in</title>
 <style>
-  :root { color-scheme: light dark; --bg:#f6f7fb; --card:#fff; --fg:#111; --muted:#666; --line:#dcdfe6; --accent:#5b6cff; --err:#c62828; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111214; --card:#1b1c20; --fg:#eee; --muted:#9a9a9a; --line:#33343a; --err:#ef6b6b; } }
+  :root { color-scheme: light dark; --bg:#f4f4f2; --card:#fff; --fg:#18181b; --muted:#6b6b70; --line:#e2e2e0; --accent:#5b50e6; --err:#c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111113; --card:#1a1a1d; --fg:#ececef; --muted:#9a9aa0; --line:#2e2e33; --accent:#6c63ff; --err:#ef6b6b; } }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; padding:16px; }
   main { width:100%; max-width:360px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:32px 28px; text-align:center; }

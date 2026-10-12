@@ -149,10 +149,10 @@ describe('Dialog Components', () => {
       'translate-x-[-50%]',
       'translate-y-[-50%]',
       'gap-4',
-      'rounded-lg',
+      'rounded-2xl',
       'border',
       'p-6',
-      'shadow-lg',
+      'shadow-[0_16px_48px_rgba(0,0,0,0.18)]',
       'duration-200',
       'sm:max-w-lg'
     )
