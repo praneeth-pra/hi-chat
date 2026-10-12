@@ -214,6 +214,7 @@ export function parseAccuracyVerdict(
     value.unsupportedClaims.length > 40
   )
     throw new Error('Missing claim review')
+  const claims = value.claims
   const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
   const span = (part: unknown, whole: string): part is string =>
     typeof part === 'string' &&
@@ -276,7 +277,7 @@ export function parseAccuracyVerdict(
     value.unsupportedClaims.some(
       (unsupported) =>
         span(unsupported, answer) &&
-        !value.claims.some(
+        !claims.some(
           (claim) =>
             claim.support === 'qualified' && span(unsupported, claim.text)
         )
