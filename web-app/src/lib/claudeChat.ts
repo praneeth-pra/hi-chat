@@ -98,8 +98,10 @@ export async function streamClaude(opts: {
     }),
   })
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`Claude ${res.status}: ${detail.slice(0, 200)}`)
+    void res.body?.cancel().catch(() => {})
+    throw Object.assign(new Error(`Claude ${res.status}`), {
+      status: res.status,
+    })
   }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -108,11 +110,21 @@ export async function streamClaude(opts: {
     let buffer = ''
     let input = 0
     let output = 0
+    let stopped = false
+    let finishReason = 'stop'
+    const abort = () => {
+      void reader.cancel().catch(() => {})
+    }
+    opts.signal.addEventListener('abort', abort, { once: true })
     try {
       for (;;) {
+        if (opts.signal.aborted) throw opts.signal.reason
         const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
+        if (opts.signal.aborted) throw opts.signal.reason
+        buffer += decoder.decode(value, { stream: !done })
+        if (buffer.length > 1_048_576)
+          throw new Error('Claude stream frame too large')
+        if (done && buffer) buffer += '\n'
         let nl: number
         while ((nl = buffer.indexOf('\n')) >= 0) {
           const line = buffer.slice(0, nl).trim()
@@ -126,14 +138,19 @@ export async function streamClaude(opts: {
             event.delta?.type === 'text_delta'
           )
             yield chunk(event.delta.text)
-          else if (event.type === 'message_delta')
+          else if (event.type === 'message_delta') {
             output = event.usage?.output_tokens ?? output
+            if (event.delta?.stop_reason === 'max_tokens')
+              finishReason = 'length'
+          } else if (event.type === 'message_stop') stopped = true
           else if (event.type === 'error')
-            throw new Error(`Claude: ${event.error?.message ?? 'stream error'}`)
+            throw new Error('Claude stream failed')
         }
+        if (stopped || done) break
       }
+      if (!stopped) throw new Error('Claude stream ended before completion')
       yield {
-        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
         usage: {
           prompt_tokens: input,
           completion_tokens: output,
@@ -141,6 +158,8 @@ export async function streamClaude(opts: {
         },
       }
     } finally {
+      opts.signal.removeEventListener('abort', abort)
+      void reader.cancel().catch(() => {})
       reader.releaseLock()
     }
   })()

@@ -614,10 +614,16 @@ export const postMessageProcessing = async (
 
       // Check if tool is approved or show modal for approval
       let toolParameters = {}
+      let invalidArguments = false
       if (toolCall.function.arguments.length) {
         try {
           toolParameters = JSON.parse(toolCall.function.arguments)
+          invalidArguments =
+            !toolParameters ||
+            typeof toolParameters !== 'object' ||
+            Array.isArray(toolParameters)
         } catch {
+          invalidArguments = true
           console.error('Invalid tool arguments for', toolCall.function.name)
         }
       }
@@ -628,17 +634,19 @@ export const postMessageProcessing = async (
       const isBrowserTool = isBrowserMCPTool(toolName)
 
       // Auto-approve RAG tools (local/safe operations), require permission for MCP tools
-      let approved = isRagTool
-        ? true
-        : allowAllMCPPermissions ||
-          approvedTools[message.thread_id]?.includes(toolCall.function.name) ||
-          (showModal
-            ? await showModal(
-                toolCall.function.name,
-                message.thread_id,
-                toolParameters
-              )
-            : false)
+      let approved =
+        !invalidArguments &&
+        (isRagTool
+          ? true
+          : allowAllMCPPermissions ||
+            approvedTools[message.thread_id]?.includes(toolCall.function.name) ||
+            (showModal
+              ? await showModal(
+                  toolCall.function.name,
+                  message.thread_id,
+                  toolParameters
+                )
+              : false))
 
       approved = !!approved && !abortController.signal.aborted
 
@@ -714,10 +722,12 @@ export const postMessageProcessing = async (
             content: [
               {
                 type: 'text',
-                text: 'The user has chosen to disallow the tool call.',
+                text: invalidArguments
+                  ? 'Tool arguments must be a valid JSON object. Correct the arguments before retrying.'
+                  : 'The user has chosen to disallow the tool call.',
               },
             ],
-            error: 'disallowed',
+            error: invalidArguments ? 'invalid_arguments' : 'disallowed',
           }
 
       if (typeof result === 'string') {

@@ -3,6 +3,7 @@ import { ThreadContent } from './ThreadContent'
 import { memo, useMemo } from 'react'
 import { useMessages } from '@/hooks/useMessages'
 import { MessageStatus } from '@janhq/core'
+import { AccuracyProgress } from './AccuracyProgress'
 
 type Props = {
   threadId: string
@@ -51,15 +52,7 @@ export const StreamingContent = memo(({ threadId }: Props) => {
   }, [lastAssistant])
 
   if (accuracyStatus?.threadId === threadId) {
-    return (
-      <p role="status" className="text-sm text-main-view-fg/60 py-3">
-        {accuracyStatus.phase === 'searching'
-          ? 'Accuracy: searching sources…'
-          : accuracyStatus.phase === 'drafting'
-            ? 'Accuracy: preparing an answer…'
-            : 'Accuracy: checking the answer…'}
-      </p>
-    )
+    return <AccuracyProgress key={threadId} phase={accuracyStatus.phase} />
   }
 
   if (!streamingContent || streamingContent.thread_id !== threadId) {
@@ -71,7 +64,10 @@ export const StreamingContent = memo(({ threadId }: Props) => {
   }
 
   // Don't show streaming content if there's already a stopped message
-  if (lastAssistant?.status === MessageStatus.Stopped) {
+  if (
+    lastAssistant?.status === MessageStatus.Stopped &&
+    lastAssistant.id === streamingContent.id
+  ) {
     return null
   }
 

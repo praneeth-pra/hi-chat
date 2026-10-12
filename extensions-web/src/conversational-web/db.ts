@@ -30,7 +30,17 @@ function openDb(): Promise<IDBDatabase> {
           messages.createIndex('thread_id', 'thread_id', { unique: false })
         }
       }
-      request.onsuccess = () => resolve(request.result)
+      request.onsuccess = () => {
+        const db = request.result
+        db.onversionchange = () => {
+          db.close()
+          dbPromise = undefined
+        }
+        db.onclose = () => {
+          dbPromise = undefined
+        }
+        resolve(db)
+      }
       request.onerror = () => {
         dbPromise = undefined
         reject(request.error)
@@ -72,11 +82,36 @@ export async function get<T>(
 }
 
 export async function put<T>(name: StoreName, value: T): Promise<void> {
-  await promisify((await store(name, 'readwrite')).put(plain(value)))
+  const data = plain(value)
+  await write([name], (tx) => {
+    tx.objectStore(name).put(data)
+  })
 }
 
 export async function remove(name: StoreName, key: string): Promise<void> {
-  await promisify((await store(name, 'readwrite')).delete(key))
+  await write([name], (tx) => {
+    tx.objectStore(name).delete(key)
+  })
+}
+
+/** Request success precedes commit; a later quota/transaction abort must fail the save. */
+async function write(
+  names: StoreName[],
+  enqueue: (tx: IDBTransaction) => void
+): Promise<void> {
+  const db = await openDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(names, 'readwrite')
+    tx.oncomplete = () => resolve()
+    tx.onabort = () =>
+      reject(tx.error ?? new Error('Chat storage transaction aborted'))
+    try {
+      enqueue(tx)
+    } catch (error) {
+      tx.abort()
+      reject(error)
+    }
+  })
 }
 
 export async function getByThread<T>(threadId: string): Promise<T[]> {
@@ -87,9 +122,26 @@ export async function getByThread<T>(threadId: string): Promise<T[]> {
 }
 
 export async function removeByThread(threadId: string): Promise<void> {
-  const messages = await store(STORES.messages, 'readwrite')
-  const keys = await promisify(
-    messages.index('thread_id').getAllKeys(IDBKeyRange.only(threadId))
-  )
-  await Promise.all(keys.map((key) => promisify(messages.delete(key))))
+  await write([STORES.messages], (tx) => deleteMessages(tx, threadId))
+}
+
+function deleteMessages(tx: IDBTransaction, threadId: string) {
+  const request = tx
+    .objectStore(STORES.messages)
+    .index('thread_id')
+    .openCursor(IDBKeyRange.only(threadId))
+  request.onsuccess = () => {
+    const cursor = request.result
+    if (!cursor) return
+    cursor.delete()
+    cursor.continue()
+  }
+}
+
+/** Remove the chat and its messages in a single commit, without loading message bodies. */
+export async function removeThread(threadId: string): Promise<void> {
+  await write([STORES.threads, STORES.messages], (tx) => {
+    tx.objectStore(STORES.threads).delete(threadId)
+    deleteMessages(tx, threadId)
+  })
 }

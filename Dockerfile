@@ -1,5 +1,5 @@
 # Stage 1: Build stage with Node.js and Yarn v4
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -28,7 +28,7 @@ COPY ./yarn.lock ./yarn.lock
 COPY ./core ./core
 
 # Build web application
-RUN yarn install && yarn build:core && make build-web-app
+RUN yarn install --immutable && yarn build:core && make build-web-app
 
 # Stage 2: Production stage with Nginx
 FROM nginx:alpine
@@ -42,6 +42,7 @@ COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
 # Copy custom nginx config. The official nginx image renders templates with
 # envsubst, so the server listens on $PORT (Railway sets it; defaults to 80).
 COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 ENV PORT=80
 # Dictation transcription keys; set them as Railway variables. ElevenLabs is the
 # main engine; Grok (xAI) is an optional second engine.

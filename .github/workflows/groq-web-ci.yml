@@ -55,6 +55,17 @@ jobs:
           curl -sf -b "$C" http://localhost:8081/serviceWorker.js | grep -q 'registration.unregister'
           worker=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^pdf.worker" | head -1')
           curl -sfI -b "$C" "http://localhost:8081/assets/$worker" | grep -qi '^content-type: text/javascript'
+          # Headers must survive location-level Cache-Control, including error responses.
+          for path in /login / /serviceWorker.js "/assets/$worker" /api/search; do
+            curl -s -D response-headers.txt -o /dev/null -b "$C" "http://localhost:8081$path"
+            grep -qi '^X-Content-Type-Options: nosniff' response-headers.txt
+            grep -qi '^X-Frame-Options: DENY' response-headers.txt
+            grep -qi '^Referrer-Policy: no-referrer' response-headers.txt
+            grep -qi '^Content-Security-Policy:.*object-src' response-headers.txt
+          done
+          asset=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^index-.*\.js$" | head -1')
+          curl -sfI -b "$C" "http://localhost:8081/assets/$asset" | grep -qi '^cache-control: private, max-age=31536000, immutable'
+          curl -sfI -b "$C" -H 'Accept-Encoding: gzip' "http://localhost:8081/assets/$asset" | grep -qi '^content-encoding: gzip'
           # Browser Origin checks use the public host forwarded by nginx.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' http://localhost:8081/auth/code)" = 403
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: https://evil.example' http://localhost:8081/api/live-token)" = 403

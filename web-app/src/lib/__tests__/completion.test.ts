@@ -779,3 +779,24 @@ describe('completion transport cancellation', () => {
     vi.unstubAllGlobals()
   })
 })
+
+
+describe('malformed tool arguments', () => {
+  it.each(['{broken', 'null', '[]', '42', '"text"'])('never invokes a tool with %s, even when all tools are approved', async (argumentsText) => {
+    const { getServiceHub } = await import('@/hooks/useServiceHub')
+    const callTool = vi.fn()
+    vi.mocked(getServiceHub).mockReturnValue({
+      mcp: () => ({ getTools: vi.fn(), callToolWithCancellation: callTool }),
+      rag: () => ({ getToolNames: async () => [] }),
+    } as any)
+    const builder = { addToolMessage: vi.fn(), getMessages: () => [] } as any
+    const modal = vi.fn(async () => true)
+    await postMessageProcessing(
+      [{ id: 'bad', type: 'function', function: { name: 'fetch_url', arguments: argumentsText } }],
+      builder, { thread_id: 'thread', metadata: {} } as any, new AbortController(), {}, modal, true,
+    )
+    expect(callTool).not.toHaveBeenCalled()
+    expect(modal).not.toHaveBeenCalled()
+    expect(builder.addToolMessage).toHaveBeenCalledWith(expect.objectContaining({ error: 'invalid_arguments' }), 'bad')
+  })
+})

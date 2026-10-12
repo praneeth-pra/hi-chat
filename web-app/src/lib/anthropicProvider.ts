@@ -9,8 +9,21 @@ export function anthropicConfig(providers: ModelProvider[]): {
   apiKey?: string
   baseUrl?: string
 } {
-  const isAnthropicUrl = (p: ModelProvider) =>
-    !!p.base_url && /anthropic\.com/i.test(p.base_url)
+  const isAnthropicUrl = (p: ModelProvider) => {
+    try {
+      const url = new URL(p.base_url ?? '')
+      return (
+        url.origin === DEFAULT_BASE &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash &&
+        ['/', '/v1', '/v1/'].includes(url.pathname)
+      )
+    } catch {
+      return false
+    }
+  }
   const withKey = providers.filter((p) => !!p.api_key)
   const provider =
     withKey.find((p) => p.provider === 'anthropic') ??
