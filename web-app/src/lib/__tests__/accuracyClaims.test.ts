@@ -252,7 +252,7 @@ describe('Accuracy claim evidence validation', () => {
       6000
     )
     expect(line).toBe(
-      'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=1 total=6000ms search_time=410ms draft=2100ms review=3200ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=claude:provider-429,groq:claim-span'
+      'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=1 total=6000ms search_time=410ms draft=2100ms review=3200ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=claude:provider-429,groq:claim-span reviewers=none'
     )
     expect(line).not.toContain('secret')
   })

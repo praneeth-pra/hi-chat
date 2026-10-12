@@ -34,6 +34,8 @@ export type AccuracyReview = {
   unsupportedClaimCount?: number
   fallback?: 'grounded-draft' | 'reviewer-answer'
   failureReasons?: string[]
+  /** Per reviewer: `name:12ms:ok`, `name:12ms:reason` or `name:cancelled`. */
+  reviewAttempts?: string[]
 }
 
 /** Give short follow-ups context without sending assistant answers or attachment payloads. */
@@ -570,6 +572,8 @@ export async function verifyAccuracyCompletion(
   const started = Date.now()
   const reviewDeadline = started + 15_000
   const failures: string[] = []
+  // Per-reviewer outcome and time, for the Railway log line.
+  const attempts: string[] = []
   // Corrected answers from audits that failed validation, best reviewer first.
   const replacements: { answer: string; reviewer: Reviewer }[] = []
 
@@ -744,58 +748,99 @@ export async function verifyAccuracyCompletion(
       ...checked.audit,
       ...(failures.length ? { failureReasons: [...failures] } : {}),
       ...(repair ? { fallback: 'reviewer-answer' as const } : {}),
+      reviewAttempts: attempts,
     },
   })
 
-  let repairers = judges.slice(1)
-  if (claude) {
-    // Claude audits; the other gpt-oss provider audits in parallel as a hedge,
-    // so a slow or failed Claude review costs no extra time.
-    const hedge = judges[0]
-    const hedgeAbort = new AbortController()
-    const link = () => hedgeAbort.abort(signal.reason)
-    signal.addEventListener('abort', link, { once: true })
-    const claudeRun = attempt(claude, false, 12_000, signal)
-    const hedgeRun = hedge
-      ? attempt(hedge, false, 10_000, hedgeAbort.signal)
-      : undefined
-    hedgeRun?.catch(() => {})
-    try {
-      try {
-        const checked = await claudeRun
-        if (signal.aborted) throw signal.reason
-        hedgeAbort.abort(new Error('Claude review finished'))
-        return accept(claude, checked, false)
-      } catch (error) {
-        if (signal.aborted) throw signal.reason
-        fail(claude, error, started)
-      }
-      if (hedge && hedgeRun) {
-        try {
-          const checked = await hedgeRun
-          if (signal.aborted) throw signal.reason
-          return accept(hedge, checked, false)
-        } catch (error) {
-          if (signal.aborted) throw signal.reason
-          fail(hedge, error, started)
-        }
-      }
-    } finally {
-      signal.removeEventListener('abort', link)
-    }
-    repairers = judges.length > 1 ? judges.slice(1) : judges
-  } else if (judges[0]) {
-    const remainingMs = Math.min(10_000, reviewDeadline - Date.now())
-    const attemptStarted = Date.now()
-    try {
-      const checked = await attempt(judges[0], false, remainingMs, signal)
-      if (signal.aborted) throw signal.reason
-      return accept(judges[0], checked, false)
-    } catch (error) {
-      if (signal.aborted) throw signal.reason
-      fail(judges[0], error, attemptStarted)
-    }
+  // Every reviewer audits at once. Claude's verdict wins if it lands within
+  // CLAUDE_WINDOW_MS; after that the first valid gpt-oss audit is shown, so a
+  // slow reviewer never holds the answer back.
+  const raceAbort = new AbortController()
+  const link = () => raceAbort.abort(signal.reason)
+  signal.addEventListener('abort', link, { once: true })
+  type Run = {
+    reviewer: Reviewer
+    settled: boolean
+    checked?: Checked
+    promise: Promise<void>
   }
+  const runs: Run[] = (claude ? [claude, ...judges] : judges).map(
+    (reviewer) => {
+      const run: Run = {
+        reviewer,
+        settled: false,
+        promise: Promise.resolve(),
+      }
+      run.promise = attempt(
+        reviewer,
+        false,
+        Math.min(
+          reviewer.kind === 'claude' ? 12_000 : 10_000,
+          reviewDeadline - Date.now()
+        ),
+        raceAbort.signal
+      ).then(
+        (checked) => {
+          run.settled = true
+          run.checked = checked
+          attempts.push(`${reviewer.name}:${Date.now() - started}ms:ok`)
+        },
+        (error) => {
+          run.settled = true
+          if (signal.aborted || raceAbort.signal.aborted) return
+          attempts.push(
+            `${reviewer.name}:${Date.now() - started}ms:${reviewFailure(error)}`
+          )
+          fail(reviewer, error, started)
+        }
+      )
+      return run
+    }
+  )
+  const claudeWindowEnd = started + CLAUDE_WINDOW_MS
+  try {
+    for (;;) {
+      if (signal.aborted) throw signal.reason
+      const claudeRun = runs.find((run) => run.reviewer.kind === 'claude')
+      if (claudeRun?.checked)
+        return accept(claudeRun.reviewer, claudeRun.checked, false)
+      const best = runs.find(
+        (run) => run.reviewer.kind !== 'claude' && run.checked
+      )
+      if (
+        best?.checked &&
+        (!claudeRun || claudeRun.settled || Date.now() >= claudeWindowEnd)
+      )
+        return accept(best.reviewer, best.checked, false)
+      const pending = runs.filter((run) => !run.settled)
+      if (!pending.length) break
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const waits: Promise<unknown>[] = pending.map((run) => run.promise)
+      if (best)
+        waits.push(
+          new Promise((resolve) => {
+            timer = setTimeout(
+              resolve,
+              Math.max(0, claudeWindowEnd - Date.now())
+            )
+          })
+        )
+      await Promise.race(waits)
+      clearTimeout(timer)
+    }
+  } finally {
+    for (const run of runs)
+      if (!run.settled) attempts.push(`${run.reviewer.name}:cancelled`)
+    raceAbort.abort(new Error('Review race finished'))
+    signal.removeEventListener('abort', link)
+  }
+  if (signal.aborted) throw signal.reason
+  // One recovery answer, from the fastest provider (Cerebras when configured).
+  const repairers = [...judges]
+    .sort(
+      (a, b) => Number(a.name !== 'cerebras') - Number(b.name !== 'cerebras')
+    )
+    .slice(0, 1)
   for (const reviewer of repairers) {
     const remainingMs = Math.min(10_000, reviewDeadline - Date.now())
     if (remainingMs <= 0) break
@@ -803,9 +848,13 @@ export async function verifyAccuracyCompletion(
     try {
       const checked = await attempt(reviewer, true, remainingMs, signal)
       if (signal.aborted) throw signal.reason
+      attempts.push(`${reviewer.name}-repair:${Date.now() - started}ms:ok`)
       return accept(reviewer, checked, true)
     } catch (error) {
       if (signal.aborted) throw signal.reason
+      attempts.push(
+        `${reviewer.name}-repair:${Date.now() - started}ms:${reviewFailure(error)}`
+      )
       fail(reviewer, error, attemptStarted)
     }
   }
@@ -841,11 +890,14 @@ export async function verifyAccuracyCompletion(
       reviewMs: Date.now() - started,
       fallback: replacement ? 'reviewer-answer' : 'grounded-draft',
       failureReasons: failures,
+      reviewAttempts: attempts,
     },
   }
 }
 
 const CLAUDE_REVIEW_MODEL = 'claude-sonnet-5-5'
+/** How long a valid gpt-oss audit waits for Claude's before it is shown. */
+export const CLAUDE_WINDOW_MS = 2500
 
 type Reviewer = { name: string; verifier: string; model: string } & (
   | { kind: 'openai'; provider: ModelProvider }
@@ -888,5 +940,6 @@ export function accuracyLogLine(
     `unsupported=${review.unsupportedClaimCount ?? 0}`,
     `fallback=${token(review.fallback ?? 'none')}`,
     `failures=${token((review.failureReasons ?? []).map((f) => f.replace(/\s+/g, '')).join(',') || 'none')}`,
+    `reviewers=${token((review.reviewAttempts ?? []).join(',') || 'none')}`,
   ].join(' ')
 }
