@@ -12,7 +12,9 @@ export const TokenSpeedIndicator = memo(
   ({ metadata, streaming }: TokenSpeedIndicatorProps) => {
     // Only re-render when the rounded token speed changes to prevent constant updates
     const roundedTokenSpeed = useAppState((state) =>
-      state.tokenSpeed ? Math.round(state.tokenSpeed.tokenSpeed) : 0
+      streaming && state.tokenSpeed
+        ? Math.round(state.tokenSpeed.tokenSpeed)
+        : 0
     )
     const persistedTokenSpeed =
       (metadata?.tokenSpeed as { tokenSpeed: number })?.tokenSpeed || 0

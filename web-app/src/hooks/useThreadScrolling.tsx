@@ -15,6 +15,7 @@ export const useThreadScrolling = (
   scrollContainerRef: React.RefObject<HTMLDivElement | null>
 ) => {
   const streamingContent = useAppState((state) => state.streamingContent)
+  const isStreaming = !!streamingContent
   const isFirstRender = useRef(true)
   const wasStreamingRef = useRef(false)
   const userIntendedPositionRef = useRef<number | null>(null)
@@ -97,7 +98,7 @@ export const useThreadScrolling = (
       const wasAtBottom = wasAtBottomRef.current
 
       if (Math.abs(delta) > 10) {
-        if (streamingContent && !isBottom) {
+        if (isStreaming && !isBottom) {
           userIntendedPositionRef.current = scrollTop
         }
 
@@ -140,7 +141,7 @@ export const useThreadScrolling = (
       clearStickyReleaseTimeout,
       isStickyScroll,
       isStickyScrollFollowing,
-      streamingContent,
+      isStreaming,
     ]
   )
 

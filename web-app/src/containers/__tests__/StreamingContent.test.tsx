@@ -10,7 +10,8 @@ vi.mock('@/hooks/useAppState', () => ({
   useAppState: (selector: any) => selector(state),
 }))
 vi.mock('@/hooks/useMessages', () => ({
-  useMessages: () => ({ getMessages: () => state.messages }),
+  useMessages: (selector: any) =>
+    selector({ messages: { chat: state.messages } }),
 }))
 vi.mock('../ThreadContent', () => ({
   ThreadContent: ({ content }: any) => <div>{content[0].text.value}</div>,

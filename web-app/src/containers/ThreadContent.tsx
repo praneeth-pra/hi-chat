@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ThreadMessage } from '@janhq/core'
+import { ThreadMessage, MessageStatus } from '@janhq/core'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { RenderMarkdown } from './RenderMarkdown'
-import { useSmoothText } from '@/hooks/useSmoothText'
 import React, { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import {
   IconCopy,
@@ -97,7 +96,9 @@ export const ThreadContent = memo(
     }
   ) => {
     const { t } = useTranslation()
-    const selectedModel = useModelProvider((state) => state.selectedModel)
+    const selectedModel = useModelProvider((state) =>
+      item.isLastMessage ? state.selectedModel : null
+    )
     const [inlinePreview, setInlinePreview] = useState<{
       name: string
       content: string
@@ -115,7 +116,9 @@ export const ThreadContent = memo(
     const image = useMemo(() => item.content?.[0]?.image_url, [item])
     // Only check if streaming is happening for this thread, not the content itself
     const isStreamingThisThread = useAppState(
-      (state) => state.streamingContent?.thread_id === item.thread_id
+      (state) =>
+        !!item.isLastMessage &&
+        state.streamingContent?.thread_id === item.thread_id
     )
 
     const text = useMemo(
@@ -179,15 +182,6 @@ export const ThreadContent = memo(
 
       return { reasoningSegment: undefined, textSegment: text }
     }, [text])
-
-    // The answer flows onto the screen while it streams
-    const answerText = useSmoothText(textSegment, item.thread_id, {
-      streaming: !!item.streamingThread,
-      latest:
-        !item.streamingThread &&
-        !!item.isLastMessage &&
-        item.role === 'assistant',
-    })
 
     const getMessages = useMessages((state) => state.getMessages)
     const deleteMessage = useMessages((state) => state.deleteMessage)
@@ -463,7 +457,11 @@ export const ThreadContent = memo(
             )}
 
             <RenderMarkdown
-              content={answerText.replace('</think>', '')}
+              content={textSegment.replace('</think>', '')}
+              isStreaming={
+                !!item.streamingThread ||
+                (isStreamingThisThread && item.status === MessageStatus.Stopped)
+              }
               components={linkComponents}
             />
 

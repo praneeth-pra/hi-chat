@@ -5,6 +5,8 @@ import { useMessages } from '@/hooks/useMessages'
 import { MessageStatus } from '@janhq/core'
 import { AccuracyProgress } from './AccuracyProgress'
 
+const EMPTY_MESSAGES: import('@janhq/core').ThreadMessage[] = []
+
 type Props = {
   threadId: string
 }
@@ -25,8 +27,9 @@ function extractReasoningSegment(text: string) {
 export const StreamingContent = memo(({ threadId }: Props) => {
   const streamingContent = useAppState((state) => state.streamingContent)
   const accuracyStatus = useAppState((state) => state.accuracyStatus)
-  const { getMessages } = useMessages()
-  const messages = getMessages(threadId)
+  const messages = useMessages(
+    (state) => state.messages[threadId] ?? EMPTY_MESSAGES
+  )
 
   const streamingReasoning = useMemo(() => {
     const text =

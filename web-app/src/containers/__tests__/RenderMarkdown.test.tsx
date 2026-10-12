@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react'
+import { render, fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { RenderMarkdown } from '../RenderMarkdown'
 
@@ -6,6 +6,12 @@ vi.mock('@i18n/react-i18next-compat', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+}))
+
+vi.mock('../CodeHighlight', () => ({
+  default: ({ children }: { children: string }) => (
+    <code data-testid="highlighted-code">{children}</code>
+  ),
 }))
 
 // Mock clipboard API
@@ -282,5 +288,35 @@ describe('RenderMarkdown', () => {
       const text = markdownContainer?.textContent || ''
       expect(text).toContain('$100')
     })
+  })
+})
+
+describe('code rendering latency', () => {
+  it('shows and copies all streaming code before enabling syntax highlighting', async () => {
+    const code = 'print("first")\nprint("second")'
+    const { container, rerender } = render(
+      <RenderMarkdown content={'```python\n' + code + '\n```'} isStreaming />
+    )
+    expect(container.querySelector('code')?.textContent).toBe(code)
+    expect(screen.queryByTestId('highlighted-code')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code)
+    rerender(<RenderMarkdown content={'```python\n' + code + '\n```'} />)
+    await waitFor(() =>
+      expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
+    )
+  })
+
+  it('keeps large finished blocks readable until highlighting is requested', async () => {
+    const code = 'print("large code block")\n'.repeat(200).trimEnd()
+    const { container } = render(
+      <RenderMarkdown content={'```python\n' + code + '\n```'} />
+    )
+    expect(container.querySelector('code')?.textContent).toBe(code)
+    expect(screen.queryByTestId('highlighted-code')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Highlight code' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
+    )
   })
 })
