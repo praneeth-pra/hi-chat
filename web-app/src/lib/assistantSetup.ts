@@ -1,4 +1,5 @@
 import { viaGroqProxy } from '@/lib/groqProxy'
+import { dictionaryTerms, extractKeyTerms } from '@/lib/keyTerms'
 
 /**
  * Quick setup: from a resume (and optionally a job description) build the
@@ -129,4 +130,65 @@ export function buildInstructions(
   else if (profile.focus.length)
     lines.push(`- Your strongest areas: ${profile.focus.join(', ')}.`)
   return lines.join('\n')
+}
+
+export type SetupFile = { name: string; text: string }
+
+export type SetupKeys = {
+  groq?: { apiKey?: string; baseUrl?: string }
+  cerebras?: { apiKey?: string; baseUrl?: string }
+}
+
+/**
+ * Builds the whole assistant from the resume and optional job description.
+ * Editing keeps the assistant's id, emoji, creation time and settings.
+ */
+export async function setupAssistant(
+  resume: SetupFile,
+  jobDescription: SetupFile | undefined,
+  keys: SetupKeys,
+  base?: Assistant,
+  fetchImpl: typeof fetch = fetch
+): Promise<Assistant> {
+  const jd = jobDescription?.text.trim() ? jobDescription : undefined
+  const documents = [resume, ...(jd ? [jd] : [])]
+  const [profile, terms] = await Promise.all([
+    extractProfile(
+      resume.text,
+      jd?.text ?? '',
+      [
+        {
+          apiKey: keys.groq?.apiKey,
+          baseUrl: keys.groq?.baseUrl || 'https://api.groq.com/openai/v1',
+          model: 'openai/gpt-oss-120b',
+        },
+        {
+          apiKey: keys.cerebras?.apiKey,
+          baseUrl: keys.cerebras?.baseUrl || 'https://api.cerebras.ai/v1',
+          model: 'gpt-oss-120b',
+        },
+      ],
+      fetchImpl
+    ),
+    // Key terms come from both files (resume capped so the JD always fits).
+    // They only help dictation, so a failure doesn't stop setup
+    extractKeyTerms(
+      `Resume:\n${resume.text.slice(0, MAX_SOURCE_CHARS)}` +
+        (jd ? `\n\nJob description:\n${jd.text}` : ''),
+      keys.groq ?? {},
+      dictionaryTerms(),
+      fetchImpl
+    ).catch(() => [] as string[]),
+  ])
+  return {
+    avatar: base?.avatar ?? '🧑‍💼',
+    id: base?.id ?? Math.random().toString(36).substring(7),
+    created_at: base?.created_at ?? Date.now(),
+    name: assistantName(profile),
+    description: profile.summary,
+    instructions: buildInstructions(profile, !!jd),
+    documents,
+    ...(terms.length ? { keyterms: terms } : {}),
+    parameters: base?.parameters ?? {},
+  }
 }

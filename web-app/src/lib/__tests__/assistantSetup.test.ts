@@ -101,3 +101,64 @@ describe('withMediumLength', () => {
     expect(out[0]).toEqual({ role: 'system', content: MEDIUM_LENGTH_RULE })
   })
 })
+
+describe('setupAssistant', () => {
+  const reply = (content: string) =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }))
+
+  it('builds the whole assistant and keeps id, emoji and settings when editing', async () => {
+    const { setupAssistant } = await import('../assistantSetup')
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      return body.model === 'openai/gpt-oss-120b'
+        ? reply(JSON.stringify(profile))
+        : reply('SQL\nPower BI')
+    })
+    const base = {
+      id: 'abc',
+      avatar: '🦊',
+      created_at: 1,
+      name: 'Old',
+      instructions: 'old',
+      parameters: { temperature: 0.2 },
+    }
+    const out = await setupAssistant(
+      { name: 'resume.pdf', text: 'Priya resume' },
+      { name: 'jd.pdf', text: 'Data Analyst at Acme' },
+      { groq: { apiKey: 'g' } },
+      base,
+      fetchImpl as unknown as typeof fetch
+    )
+    expect(out).toMatchObject({
+      id: 'abc',
+      avatar: '🦊',
+      created_at: 1,
+      name: 'Priya · Data Analyst',
+      description: profile.summary,
+      parameters: { temperature: 0.2 },
+      keyterms: ['SQL', 'Power BI'],
+    })
+    expect(out.documents?.map((d) => d.name)).toEqual(['resume.pdf', 'jd.pdf'])
+    expect(out.instructions).toContain('Never invent experience')
+  })
+
+  it('still sets up when key terms fail, and skips an empty JD', async () => {
+    const { setupAssistant } = await import('../assistantSetup')
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      return body.response_format
+        ? reply(JSON.stringify(profile))
+        : new Response('down', { status: 503 })
+    })
+    const out = await setupAssistant(
+      { name: 'resume.pdf', text: 'Priya resume' },
+      { name: 'jd.txt', text: '   ' },
+      { groq: { apiKey: 'g' } },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    )
+    expect(out.keyterms).toBeUndefined()
+    expect(out.documents).toHaveLength(1)
+    expect(out.avatar).toBe('🧑‍💼')
+  })
+})
