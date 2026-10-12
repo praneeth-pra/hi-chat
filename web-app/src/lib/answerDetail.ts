@@ -9,9 +9,10 @@ export function withAnswerDetail(instructions: string | undefined): string {
 
 /**
  * gpt-oss-20b follows the style rule but stops early (12 Oct: noticeably
- * shorter answers than 120B), so it gets an explicit length target.
+ * shorter answers than 120B; still too short for most questions later that
+ * night), so it gets an explicit length target in words.
  */
-export const MEDIUM_LENGTH_RULE = `Answer length: match the question, and default to a medium-length answer. For an open interview, technical, design, behavioural or "how/why" question, give the direct opening sentence plus about 4 to 7 substantive points (as bullets, short paragraphs or steps, whichever fits the question) with concrete details, examples and tradeoffs. Only a simple fact or a narrow yes/no follow-up gets 2 to 4 lines. Never answer an open question with just one or two sentences.`
+export const MEDIUM_LENGTH_RULE = `Length check before you answer: you tend to stop too early, so answers come out shorter than a strong candidate would say them. Only a simple fact, a yes/no question or a narrow follow-up gets a short answer of 2 to 4 lines. Every other question (open interview, technical, "how/why", design, scenario or behavioural) gets a complete, natural answer of roughly 120 to 250 words: the direct opening sentence, then about 4 to 7 points that each add a concrete detail, example, step or tradeoff, in natural spoken sentences. Never answer such a question with just one or two sentences, and never pad or repeat yourself to reach the length.`
 
 type RequestMessage = { role: string; content?: unknown }
 
