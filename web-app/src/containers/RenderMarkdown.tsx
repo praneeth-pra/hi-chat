@@ -4,9 +4,7 @@ import remarkEmoji from 'remark-emoji'
 import remarkMath from 'remark-math'
 import remarkBreaks from 'remark-breaks'
 import rehypeKatex from 'rehype-katex'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import * as prismStyles from 'react-syntax-highlighter/dist/cjs/styles/prism'
-import { memo, useState, useMemo, useCallback } from 'react'
+import { lazy, Suspense, memo, useState, useMemo, useCallback } from 'react'
 import { getReadableLanguageName } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useCodeblock } from '@/hooks/useCodeblock'
@@ -17,6 +15,17 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import type { PluggableList } from 'unified'
 import { remarkTablesAsLists } from '@/lib/tablesToLists'
 import { useTranslation } from '@/i18n/react-i18next-compat'
+
+function PlainCode({ children }: { children: string | string[] }) {
+  return (
+    <pre className="p-2 overflow-auto whitespace-pre-wrap">
+      <code>{children}</code>
+    </pre>
+  )
+}
+const CodeHighlight = lazy<(typeof import('./CodeHighlight'))['default']>(() =>
+  import('./CodeHighlight').catch(() => ({ default: PlainCode }))
+)
 
 interface MarkdownProps {
   content: string
@@ -91,7 +100,7 @@ const CodeComponent = memo(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }: any) => {
     const { t } = useTranslation()
-    const match = /language-(\w+)/.exec(className || '')
+    const match = /language-([^\s]+)/.exec(className || '')
     const language = match ? match[1] : ''
     const isInline = !match || !language
 
@@ -156,48 +165,47 @@ const CodeComponent = memo(
             )}
           </button>
         </div>
-        <SyntaxHighlighter
-          style={
-            prismStyles[
-              codeBlockStyle
-                .split('-')
-                .map((part: string, index: number) =>
-                  index === 0
-                    ? part
-                    : part.charAt(0).toUpperCase() + part.slice(1)
-                )
-                .join('') as keyof typeof prismStyles
-            ] || prismStyles.oneLight
+        <Suspense
+          fallback={
+            <pre className="p-2 overflow-auto whitespace-pre-wrap">
+              <code>{code}</code>
+            </pre>
           }
-          language={language}
-          showLineNumbers={showLineNumbers}
-          wrapLines={true}
-          // Wrap long lines by default so narrow windows never scroll sideways
-          lineProps={
-            isWrapping !== false
-              ? {
-                  style: { overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
-                }
-              : {}
-          }
-          codeTagProps={
-            isWrapping !== false
-              ? { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }
-              : undefined
-          }
-          customStyle={{
-            margin: 0,
-            padding: '8px',
-            borderRadius: '0 0 4px 4px',
-            overflow: 'auto',
-            border: 'none',
-          }}
-          PreTag="div"
-          CodeTag={'code'}
-          {...props}
         >
-          {code}
-        </SyntaxHighlighter>
+          <CodeHighlight
+            codeBlockStyle={codeBlockStyle}
+            language={language}
+            showLineNumbers={showLineNumbers}
+            wrapLines={true}
+            // Wrap long lines by default so narrow windows never scroll sideways
+            lineProps={
+              isWrapping !== false
+                ? {
+                    style: { overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' },
+                  }
+                : {}
+            }
+            codeTagProps={
+              isWrapping !== false
+                ? {
+                    style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+                  }
+                : undefined
+            }
+            customStyle={{
+              margin: 0,
+              padding: '8px',
+              borderRadius: '0 0 4px 4px',
+              overflow: 'auto',
+              border: 'none',
+            }}
+            PreTag="div"
+            CodeTag={'code'}
+            {...props}
+          >
+            {code}
+          </CodeHighlight>
+        </Suspense>
       </div>
     )
   }

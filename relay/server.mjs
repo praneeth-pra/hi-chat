@@ -387,9 +387,51 @@ export function speechLogLine(body, includeText = false) {
   const single = line.match(
     /^dictation (?:[\w-]+|fallback \((?:live failed|live empty)\)): \d+ ms after stop, \d+ chars$/
   )
-  // Accuracy answers: key=value tokens only (verdict, model, timings, failure categories).
-  const accuracy = line.match(/^accuracy:(?: [a-z_]+=[\w.:,-]{1,300}){1,20}$/)
-  if (accuracy) return accuracy[0]
+  // Allow only known diagnostic fields and values, not arbitrary key=value text.
+  if (line.startsWith('accuracy:')) {
+    const reason =
+      '(?:invalid-json|claim-span|missing-audit|source-reference|context-reference|unsupported-claim|invalid-verdict|incomplete-response|missing-response|timeout|provider-4xx|provider-5xx|provider-error)'
+    const rules = {
+      verdict: /^(approved|revised|uncertain|unverified)$/,
+      model:
+        /^(?:openai_)?gpt-oss-(?:20|120)b$|^claude-(?:sonnet|haiku|opus)-[0-9.-]+$/,
+      search: /^(ready|empty|unavailable|unconfigured|skipped)$/,
+      sources: /^\d{1,2}$/,
+      total: /^\d{1,9}ms$|^none$/,
+      search_time: /^\d{1,9}ms$|^none$/,
+      draft: /^\d{1,9}ms$|^none$/,
+      review: /^\d{1,9}ms$|^none$/,
+      claims: /^\d{1,5}$/,
+      context_claims: /^\d{1,5}$/,
+      unsupported: /^\d{1,5}$/,
+      fallback: /^(none|grounded-draft|reviewer-answer)$/,
+      failures: new RegExp(
+        `^(?:none|(?:groq|cerebras|claude):${reason}(?:,(?:groq|cerebras|claude):${reason})*)$`
+      ),
+      reviewers: new RegExp(
+        `^(?:none|(?:groq|cerebras|claude)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason}))(?:,(?:groq|cerebras|claude)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason})))*)$`
+      ),
+    }
+    const tokens = line.slice('accuracy:'.length).trim().split(' ')
+    const seen = new Set()
+    if (
+      tokens.length <= Object.keys(rules).length &&
+      tokens.every((token) => {
+        const split = token.indexOf('=')
+        const key = token.slice(0, split)
+        const value = token.slice(split + 1)
+        if (
+          !Object.hasOwn(rules, key) ||
+          seen.has(key) ||
+          !rules[key].test(value)
+        )
+          return false
+        seen.add(key)
+        return true
+      })
+    )
+      return line
+  }
   return `speech ${auto?.[0] ?? single?.[0] ?? 'diagnostic text omitted'}`
 }
 

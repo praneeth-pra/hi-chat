@@ -8,10 +8,15 @@ type UseProviderModelsState = {
   refetch: () => void
 }
 
-const modelsCache = new Map<string, { models: string[]; timestamp: number }>()
+const modelsCache = new Map<
+  string,
+  { models: string[]; timestamp: number; credential?: string }
+>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 
-export const useProviderModels = (provider?: ModelProvider): UseProviderModelsState => {
+export const useProviderModels = (
+  provider?: ModelProvider
+): UseProviderModelsState => {
   const serviceHub = useServiceHub()
   const [models, setModels] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -20,6 +25,8 @@ export const useProviderModels = (provider?: ModelProvider): UseProviderModelsSt
   const requestIdRef = useRef(0)
 
   const fetchModels = useCallback(async () => {
+    // Invalidate older work even when the next provider is empty or cached.
+    const currentRequestId = ++requestIdRef.current
     if (!provider || !provider.base_url) {
       // Clear models if provider is invalid (base_url is required, api_key is optional)
       setModels([])
@@ -41,19 +48,26 @@ export const useProviderModels = (provider?: ModelProvider): UseProviderModelsSt
     const cached = modelsCache.get(cacheKey)
 
     // Check cache first
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    if (
+      cached &&
+      cached.credential === provider.api_key &&
+      Date.now() - cached.timestamp < CACHE_DURATION
+    ) {
       setModels(cached.models)
+      setError(null)
+      setLoading(false)
       return
     }
 
-    const currentRequestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
 
     try {
-      const fetchedModels = await serviceHub.providers().fetchModelsFromProvider(provider)
+      const fetchedModels = await serviceHub
+        .providers()
+        .fetchModelsFromProvider(provider)
       if (currentRequestId !== requestIdRef.current) return
-      const sortedModels = fetchedModels.sort((a, b) => a.localeCompare(b))
+      const sortedModels = [...fetchedModels].sort((a, b) => a.localeCompare(b))
 
       setModels(sortedModels)
 
@@ -61,10 +75,14 @@ export const useProviderModels = (provider?: ModelProvider): UseProviderModelsSt
       modelsCache.set(cacheKey, {
         models: sortedModels,
         timestamp: Date.now(),
+        credential: provider.api_key,
       })
+      if (modelsCache.size > 50)
+        modelsCache.delete(modelsCache.keys().next().value!)
     } catch (err) {
       if (currentRequestId !== requestIdRef.current) return
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch models'
+      const errorMessage =
+        err instanceof Error ? err.message : 'Failed to fetch models'
       setError(errorMessage)
       console.error(`Error fetching models from ${provider.provider}:`, err)
     } finally {
@@ -82,6 +100,9 @@ export const useProviderModels = (provider?: ModelProvider): UseProviderModelsSt
 
   useEffect(() => {
     fetchModels()
+    return () => {
+      requestIdRef.current++
+    }
   }, [fetchModels])
 
   return {

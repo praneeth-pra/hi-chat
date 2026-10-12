@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,14 @@ import {
   IconFileText,
   IconUpload,
 } from '@tabler/icons-react'
-import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react'
+import type { EmojiClickData, Theme } from 'emoji-picker-react'
+const EmojiPicker = lazy<(typeof import('emoji-picker-react'))['default']>(() =>
+  import('emoji-picker-react').catch(() => ({
+    default: () => (
+      <span role="status">Couldn’t load emojis. Reload to try again.</span>
+    ),
+  }))
+)
 
 import { Textarea } from '@/components/ui/textarea'
 import { dictionaryTerms, extractKeyTerms, parseKeyTerms } from '@/lib/keyTerms'
@@ -82,7 +89,7 @@ export default function AddEditAssistant({
   const [paramsTypes, setParamsTypes] = useState<string[]>(['string'])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
-  const emojiPickerTriggerRef = useRef<HTMLDivElement>(null)
+  const emojiPickerTriggerRef = useRef<HTMLButtonElement>(null)
   const [nameError, setNameError] = useState<string | null>(null)
   // const [toolStepsInput, setToolStepsInput] = useState('20')
 
@@ -360,7 +367,10 @@ export default function AddEditAssistant({
               <label className="text-sm mb-2 inline-block">
                 {t('assistants:emoji')}
               </label>
-              <div
+              <button
+                type="button"
+                aria-label="Choose assistant emoji"
+                aria-expanded={showEmojiPicker}
                 className="border rounded-sm p-1 w-9 h-9 flex items-center justify-center border-main-view-fg/10 cursor-pointer"
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                 ref={emojiPickerTriggerRef}
@@ -374,26 +384,32 @@ export default function AddEditAssistant({
                 ) : (
                   <IconMoodSmile size={18} className="text-main-view-fg/50" />
                 )}
-              </div>
+              </button>
               <div className="relative" ref={emojiPickerRef}>
-                <EmojiPicker
-                  open={showEmojiPicker}
-                  theme={isDark ? ('dark' as Theme) : ('light' as Theme)}
-                  className="!absolute !z-40 !overflow-y-auto top-2"
-                  height={350}
-                  customEmojis={isDev() ? teamEmoji : []}
-                  lazyLoadEmojis
-                  previewConfig={{ showPreview: false }}
-                  onEmojiClick={(emojiData: EmojiClickData) => {
-                    // For custom emojis, use the imageUrl instead of the emoji name
-                    if (emojiData.isCustom && emojiData.imageUrl) {
-                      setAvatar(emojiData.imageUrl)
-                    } else {
-                      setAvatar(emojiData.emoji)
-                    }
-                    setShowEmojiPicker(false)
-                  }}
-                />
+                {showEmojiPicker && (
+                  <Suspense
+                    fallback={<span role="status">Loading emojis…</span>}
+                  >
+                    <EmojiPicker
+                      open
+                      theme={isDark ? ('dark' as Theme) : ('light' as Theme)}
+                      className="!absolute !z-40 !overflow-y-auto top-2"
+                      height={350}
+                      customEmojis={isDev() ? teamEmoji : []}
+                      lazyLoadEmojis
+                      previewConfig={{ showPreview: false }}
+                      onEmojiClick={(emojiData: EmojiClickData) => {
+                        // For custom emojis, use the imageUrl instead of the emoji name
+                        if (emojiData.isCustom && emojiData.imageUrl) {
+                          setAvatar(emojiData.imageUrl)
+                        } else {
+                          setAvatar(emojiData.emoji)
+                        }
+                        setShowEmojiPicker(false)
+                      }}
+                    />
+                  </Suspense>
+                )}
               </div>
             </div>
 
@@ -540,8 +556,8 @@ export default function AddEditAssistant({
               </div>
             )}
             <div className="text-xs text-main-view-fg/60">
-              One per line (up to 100). Dictation's live transcription is
-              biased toward these words, and its transcript judge can fix misheard
+              One per line (up to 100). Dictation's live transcription is biased
+              toward these words, and its transcript judge can fix misheard
               terms. Suggest picks them from the documents and your dictionary
               (Settings &gt; General). Left empty, the first 100 dictionary
               words are used.

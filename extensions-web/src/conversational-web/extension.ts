@@ -17,7 +17,7 @@ import {
   getByThread,
   put,
   remove,
-  removeByThread,
+  removeThread,
 } from './db'
 
 export default class ConversationalExtensionWeb extends ConversationalExtension {
@@ -48,8 +48,7 @@ export default class ConversationalExtensionWeb extends ConversationalExtension 
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    await removeByThread(threadId)
-    await remove(STORES.threads, threadId)
+    await removeThread(threadId)
   }
 
   // Message Management

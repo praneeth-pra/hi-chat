@@ -3,6 +3,7 @@ import { ThreadMessage } from '@janhq/core'
 import { getServiceHub } from '@/hooks/useServiceHub'
 import { useAssistant } from './useAssistant'
 import { noteMessageAdded, noteMessageDeleted } from './useThreadHygiene'
+import { withoutDocuments } from '@/lib/assistantDocuments'
 
 type MessageState = {
   messages: Record<string, ThreadMessage[]>
@@ -39,7 +40,7 @@ export const useMessages = create<MessageState>()((set, get) => ({
       created_at: message.created_at || Date.now(),
       metadata: {
         ...message.metadata,
-        assistant: selectedAssistant,
+        assistant: withoutDocuments(selectedAssistant),
       },
     }
 
@@ -58,19 +59,27 @@ export const useMessages = create<MessageState>()((set, get) => ({
     noteMessageAdded(newMessage)
 
     // Persist to storage asynchronously
-    getServiceHub().messages().createMessage(newMessage).then((createdMessage) => {
-      set((state) => ({
-        messages: {
-          ...state.messages,
-          [message.thread_id]:
-            state.messages[message.thread_id]?.map((existing) =>
-              existing.id === newMessage.id ? createdMessage : existing
-            ) ?? [createdMessage],
-        },
-      }))
-    }).catch((error) => {
-      console.error('Failed to persist message:', error)
-    })
+    getServiceHub()
+      .messages()
+      .createMessage(newMessage)
+      .then((createdMessage) => {
+        set((state) =>
+          !state.messages[message.thread_id]
+            ? state
+            : {
+                messages: {
+                  ...state.messages,
+                  [message.thread_id]:
+                    state.messages[message.thread_id]?.map((existing) =>
+                      existing === newMessage ? createdMessage : existing
+                    ) ?? [],
+                },
+              }
+        )
+      })
+      .catch((error) => {
+        console.error('Failed to persist message:', error)
+      })
   },
   updateMessage: (message) => {
     const assistants = useAssistant.getState().assistants
@@ -83,7 +92,7 @@ export const useMessages = create<MessageState>()((set, get) => ({
       ...message,
       metadata: {
         ...message.metadata,
-        assistant: selectedAssistant,
+        assistant: withoutDocuments(selectedAssistant),
       },
     }
 
@@ -91,17 +100,20 @@ export const useMessages = create<MessageState>()((set, get) => ({
     set((state) => ({
       messages: {
         ...state.messages,
-        [message.thread_id]: (state.messages[message.thread_id] || []).map((m) =>
-          m.id === message.id ? updatedMessage : m
+        [message.thread_id]: (state.messages[message.thread_id] || []).map(
+          (m) => (m.id === message.id ? updatedMessage : m)
         ),
       },
     }))
 
     // Persist to storage asynchronously using modifyMessage instead of createMessage
     // to prevent duplicates when updating existing messages
-    getServiceHub().messages().modifyMessage(updatedMessage).catch((error) => {
-      console.error('Failed to persist message update:', error)
-    })
+    getServiceHub()
+      .messages()
+      .modifyMessage(updatedMessage)
+      .catch((error) => {
+        console.error('Failed to persist message update:', error)
+      })
   },
   deleteMessage: (threadId, messageId) => {
     getServiceHub().messages().deleteMessage(threadId, messageId)

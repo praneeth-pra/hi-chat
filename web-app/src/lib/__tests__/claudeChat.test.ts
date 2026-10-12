@@ -51,7 +51,12 @@ describe('streamClaude', () => {
           type: 'content_block_delta',
           delta: { type: 'text_delta', text: 'is…' },
         },
-        { type: 'message_delta', usage: { output_tokens: 4 } },
+        {
+          type: 'message_delta',
+          usage: { output_tokens: 4 },
+          delta: { stop_reason: 'end_turn' },
+        },
+        { type: 'message_stop' },
       ])
     )
     vi.stubGlobal('fetch', fetchMock)
@@ -98,5 +103,86 @@ describe('streamClaude', () => {
         signal: new AbortController().signal,
       })
     ).rejects.toThrow('Claude 529')
+  })
+  const opts = () => ({
+    apiKey: 'k',
+    model: 'claude-haiku-4-5',
+    messages: [{ role: 'user', content: 'Hi' }],
+    signal: new AbortController().signal,
+  })
+  const collect = async (stream: AsyncIterable<unknown>) => {
+    const chunks = []
+    for await (const chunk of stream) chunks.push(chunk)
+    return chunks
+  }
+
+  it('marks token-limited answers as length instead of claiming successful completion', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sse([
+          {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Partial' },
+          },
+          { type: 'message_delta', delta: { stop_reason: 'max_tokens' } },
+          { type: 'message_stop' },
+        ])
+      )
+    )
+    const chunks = (await collect(await streamClaude(opts()))) as any[]
+    expect(chunks.at(-1).choices[0].finish_reason).toBe('length')
+  })
+
+  it('rejects a disconnected stream instead of reporting a complete answer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sse([
+          {
+            type: 'content_block_delta',
+            delta: { type: 'text_delta', text: 'Partial' },
+          },
+        ])
+      )
+    )
+    await expect(collect(await streamClaude(opts()))).rejects.toThrow(
+      'before completion'
+    )
+  })
+
+  it('cancels the response body when the consumer stops', async () => {
+    const cancel = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(c) {
+                c.enqueue(
+                  new TextEncoder().encode(
+                    'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}\n\n'
+                  )
+                )
+              },
+              cancel,
+            })
+          )
+      )
+    )
+    const stream = await streamClaude(opts())
+    for await (const _chunk of stream) break
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('does not expose raw provider error bodies', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response('sensitive upstream details', { status: 401 })
+      )
+    )
+    await expect(streamClaude(opts())).rejects.toThrow(/^Claude 401$/)
   })
 })

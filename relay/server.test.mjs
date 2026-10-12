@@ -265,7 +265,9 @@ test('speech log: Accuracy lines keep only key=value tokens', () => {
     'accuracy: verdict=approved model=claude-sonnet-5-5 search=skipped total=4210ms failures=groq:timeout,cerebras:claim-span'
   assert.equal(speechLogLine(body({ line })), line)
   assert.equal(
-    speechLogLine(body({ line: 'accuracy: verdict=approved question="What is a pod?"' })),
+    speechLogLine(
+      body({ line: 'accuracy: verdict=approved question="What is a pod?"' })
+    ),
     'speech diagnostic text omitted'
   )
 })
@@ -617,4 +619,21 @@ test('default diagnostics keep timings while withholding transcript text', () =>
     speechLogLine(Buffer.from(JSON.stringify({ line: 'secret' }))),
     'speech diagnostic text omitted'
   )
+})
+
+test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
+  for (const line of [
+    'accuracy: question=private_question',
+    'accuracy: verdict=approved model=private_secret',
+    'accuracy: failures=groq:private_secret',
+    'accuracy: reviewers=claude:private_secret',
+    'accuracy: total=123ms total=456ms',
+  ])
+    assert.equal(
+      speechLogLine(Buffer.from(JSON.stringify({ line }))),
+      'speech diagnostic text omitted'
+    )
+  const line =
+    'accuracy: verdict=revised model=gpt-oss-120b search=ready sources=5 total=4210ms search_time=300ms draft=500ms review=3410ms claims=4 context_claims=1 unsupported=0 fallback=none failures=groq:timeout reviewers=cerebras:3400ms:ok,claude:cancelled'
+  assert.equal(speechLogLine(Buffer.from(JSON.stringify({ line }))), line)
 })

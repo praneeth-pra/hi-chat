@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useProviderModels } from '../useProviderModels'
 import { useServiceHub } from '@/hooks/useServiceHub'
 
@@ -64,7 +64,11 @@ describe('useProviderModels', () => {
     const { result } = renderHook(() => useProviderModels(mockProvider))
 
     await waitFor(() => {
-      expect(result.current.models).toEqual(['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'])
+      expect(result.current.models).toEqual([
+        'gpt-3.5-turbo',
+        'gpt-4',
+        'gpt-4-turbo',
+      ])
     })
 
     expect(result.current.error).toBe(null)
@@ -79,10 +83,17 @@ describe('useProviderModels', () => {
       { initialProps: { provider: mockProvider } }
     )
 
-    await waitFor(() => {
-      expect(result.current.models).toEqual(['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'])
-      expect(result.current.loading).toBe(false)
-    }, { timeout: 500 })
+    await waitFor(
+      () => {
+        expect(result.current.models).toEqual([
+          'gpt-3.5-turbo',
+          'gpt-4',
+          'gpt-4-turbo',
+        ])
+        expect(result.current.loading).toBe(false)
+      },
+      { timeout: 500 }
+    )
 
     // Switch to invalid provider
     rerender({ provider: { ...mockProvider, base_url: undefined } })
@@ -98,5 +109,56 @@ describe('useProviderModels', () => {
     result.current.refetch()
 
     expect(fetchModelsSpy).not.toHaveBeenCalled()
+  })
+  it('ignores an old response after the provider is cleared', async () => {
+    let finish!: (models: string[]) => void
+    fetchModelsSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const provider = {
+      ...mockProvider,
+      base_url: 'https://models.example/slow',
+    }
+    const { result, rerender } = renderHook(
+      ({ provider }: { provider: MockModelProvider | undefined }) =>
+        useProviderModels(provider),
+      {
+        initialProps: { provider } as {
+          provider: MockModelProvider | undefined
+        },
+      }
+    )
+    rerender({ provider: undefined })
+    await act(async () => {
+      finish(['stale-model'])
+      await Promise.resolve()
+    })
+    expect(result.current.models).toEqual([])
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('refreshes model access when the API key changes on the same endpoint', async () => {
+    fetchModelsSpy
+      .mockResolvedValueOnce(['old-account-model'])
+      .mockResolvedValueOnce(['new-account-model'])
+    const provider = {
+      ...mockProvider,
+      base_url: 'https://models.example/accounts',
+    }
+    const { result, rerender } = renderHook(
+      ({ provider }) => useProviderModels(provider),
+      { initialProps: { provider } }
+    )
+    await waitFor(() =>
+      expect(result.current.models).toEqual(['old-account-model'])
+    )
+    rerender({ provider: { ...provider, api_key: 'replacement-key' } })
+    await waitFor(() =>
+      expect(result.current.models).toEqual(['new-account-model'])
+    )
+    expect(fetchModelsSpy).toHaveBeenCalledTimes(2)
   })
 })

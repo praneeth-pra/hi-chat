@@ -66,7 +66,7 @@ function safeEqual(a, b) {
 export function signedIn(cookieHeader, env = process.env, now = Date.now()) {
   if (!loginOn(env)) return false
   const m = (cookieHeader ?? '').match(
-    /(?:^|;\s*)hc_auth=(\d+)\.([a-f0-9]{64})/
+    /(?:^|;\s*)hc_auth=(\d+)\.([a-f0-9]{64})(?=;|$)/
   )
   if (!m) return false
   const exp = Number(m[1])
@@ -128,7 +128,7 @@ async function emailCode(env, code, fetchImpl) {
     signal: AbortSignal.timeout(15_000),
   })
   if (!res.ok)
-    throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    throw new Error(`Resend HTTP ${res.status}`)
 }
 
 // "Info.hi-techie@gmail.com" shows as "in***@gmail.com"

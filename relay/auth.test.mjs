@@ -29,7 +29,9 @@ test('session cookie: valid, expired, tampered, other secret', () => {
     signedIn(`hc_auth=${sessionToken(env, now - 1)}`, env, now),
     false
   )
-  assert.equal(signedIn(`hc_auth=${good.slice(0, -1)}0`, env, now), false)
+  const changed = good.slice(0, -1) + (good.endsWith('0') ? '1' : '0')
+  assert.equal(signedIn(`hc_auth=${changed}`, env, now), false)
+  assert.equal(signedIn(`hc_auth=${good}extra`, env, now), false)
   assert.equal(
     signedIn(`hc_auth=${good}`, { ...env, RESEND_API_KEY: 'other' }, now),
     false

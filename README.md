@@ -57,6 +57,9 @@ first useful winner immediately. Manual model choices remain available. Parallel
 requests and review increase API usage; checking does not guarantee correctness.
 See [Auto modes](docs/auto-modes.md) and [Accuracy setup](docs/accuracy-mode.md).
 
+The [repository audit](docs/repository-audit-2026-10-12.md) documents security,
+storage, loading and UI improvements, validation, and remaining risks.
+
 Answers default to a useful medium length, mostly bullet points, with no tabular
 layouts. Structure adapts to the question instead of repeating fixed sections;
 interview answers favor first-person phrasing without inventing past experience.
