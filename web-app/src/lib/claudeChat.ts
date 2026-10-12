@@ -75,6 +75,8 @@ export async function streamClaude(opts: {
   messages: OpenAIMessage[]
   signal: AbortSignal
   maxTokens?: number
+  /** Thinking off (`between_tools` on Sonnet 5.5) and effort low, for speed. */
+  fast?: boolean
 }): Promise<AsyncIterable<ClaudeChunk>> {
   const { system, messages } = toClaudeMessages(opts.messages)
   const base = (opts.baseUrl || 'https://api.anthropic.com')
@@ -93,6 +95,12 @@ export async function streamClaude(opts: {
       model: opts.model,
       max_tokens: opts.maxTokens ?? 4096,
       stream: true,
+      ...(opts.fast
+        ? {
+            thinking: { type: 'between_tools' },
+            output_config: { effort: 'low' },
+          }
+        : {}),
       ...(system ? { system } : {}),
       messages,
     }),
