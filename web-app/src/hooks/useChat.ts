@@ -34,7 +34,7 @@ import { CompletionMessagesBuilder } from '@/lib/messages'
 import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
-import { withAnswerDetail } from '@/lib/answerDetail'
+import { withAnswerDetail, withMediumLength } from '@/lib/answerDetail'
 import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
@@ -969,7 +969,7 @@ export const useChat = () => {
                   }
                 : activeThread,
               provider,
-              requestMessages,
+              withMediumLength(requestMessages, modelId),
               controller,
               availableTools,
               streamReply,

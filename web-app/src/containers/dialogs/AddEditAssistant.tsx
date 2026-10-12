@@ -28,6 +28,11 @@ const EmojiPicker = lazy<(typeof import('emoji-picker-react'))['default']>(() =>
 import { Textarea } from '@/components/ui/textarea'
 import { dictionaryTerms, extractKeyTerms, parseKeyTerms } from '@/lib/keyTerms'
 import { useModelProvider } from '@/hooks/useModelProvider'
+import {
+  assistantName,
+  buildInstructions,
+  extractProfile,
+} from '@/lib/assistantSetup'
 import { paramsSettings } from '@/lib/predefinedParams'
 
 import {
@@ -91,6 +96,14 @@ export default function AddEditAssistant({
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const emojiPickerTriggerRef = useRef<HTMLButtonElement>(null)
   const [nameError, setNameError] = useState<string | null>(null)
+  // Quick setup: resume plus optional job description
+  const [resumeFile, setResumeFile] = useState<File | null>(null)
+  const [jdFile, setJdFile] = useState<File | null>(null)
+  const [jdText, setJdText] = useState('')
+  const [setupStatus, setSetupStatus] = useState<string | null>(null)
+  const [setupBusy, setSetupBusy] = useState(false)
+  const resumeInputRef = useRef<HTMLInputElement>(null)
+  const jdInputRef = useRef<HTMLInputElement>(null)
   // const [toolStepsInput, setToolStepsInput] = useState('20')
 
   // Handle click outside emoji picker or trigger
@@ -164,6 +177,11 @@ export default function AddEditAssistant({
     setParamsTypes(['string'])
     setNameError(null)
     setShowEmojiPicker(false)
+    setResumeFile(null)
+    setJdFile(null)
+    setJdText('')
+    setSetupStatus(null)
+    setSetupBusy(false)
     // setToolStepsInput('20')
   }
 
@@ -344,9 +362,73 @@ export default function AddEditAssistant({
       parameters: parameters || {},
       // tool_steps: isNaN(parsedToolSteps) ? 20 : parsedToolSteps,
     }
+    finishSave(assistant)
+  }
+
+  const finishSave = (assistant: Assistant) => {
     onSave(assistant)
     onOpenChange(false)
     resetForm()
+  }
+
+  // Reads the files, works out the candidate, role and key terms, and saves
+  // the finished assistant, so picking the resume is all the user does.
+  const createFromResume = async () => {
+    if (!resumeFile) return
+    setSetupBusy(true)
+    try {
+      setSetupStatus('Reading the files…')
+      const resume = await extractDocumentText(resumeFile)
+      if (!resume)
+        throw new Error(
+          `${resumeFile.name} has no readable text (a scanned PDF needs OCR first)`
+        )
+      const jd = jdFile ? await extractDocumentText(jdFile) : jdText.trim()
+      const docs: AssistantDocument[] = [
+        { name: resumeFile.name, text: resume },
+        ...(jd ? [{ name: jdFile?.name ?? 'Job description', text: jd }] : []),
+      ]
+      setSetupStatus('Setting up the assistant…')
+      const { getProviderByName } = useModelProvider.getState()
+      const groq = getProviderByName('groq')
+      const cerebras = getProviderByName('cerebras')
+      const [profile, terms] = await Promise.all([
+        extractProfile(resume, jd, [
+          {
+            apiKey: groq?.api_key,
+            baseUrl: groq?.base_url || 'https://api.groq.com/openai/v1',
+            model: 'openai/gpt-oss-120b',
+          },
+          {
+            apiKey: cerebras?.api_key,
+            baseUrl: cerebras?.base_url || 'https://api.cerebras.ai/v1',
+            model: 'gpt-oss-120b',
+          },
+        ]),
+        // Key terms only help dictation, so a failure doesn't stop setup
+        extractKeyTerms(
+          docs.map((d) => d.text).join('\n\n'),
+          { apiKey: groq?.api_key, baseUrl: groq?.base_url },
+          dictionaryTerms()
+        ).catch(() => [] as string[]),
+      ])
+      finishSave({
+        avatar: avatar ?? '🧑‍💼',
+        id: Math.random().toString(36).substring(7),
+        name: assistantName(profile),
+        created_at: Date.now(),
+        description: profile.summary,
+        instructions: buildInstructions(profile, !!jd),
+        documents: docs,
+        ...(terms.length ? { keyterms: terms } : {}),
+        parameters: {},
+      })
+    } catch (error) {
+      setSetupStatus(
+        `Couldn't set up the assistant: ${error instanceof Error ? error.message : String(error)}`
+      )
+      setSetupBusy(false)
+    }
   }
 
   const { t } = useTranslation()
@@ -362,6 +444,88 @@ export default function AddEditAssistant({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
+          {!editingKey && (
+            <div className="space-y-2 rounded-lg border border-main-view-fg/10 p-3">
+              <div className="text-sm font-medium">Quick setup</div>
+              <div className="text-xs text-main-view-fg/60">
+                Pick the resume, and the job description if you have one. The
+                name, instructions, documents and key terms are all filled in
+                for you.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resumeInputRef.current?.click()}
+                  title={resumeFile?.name}
+                >
+                  <IconUpload size={14} />
+                  <span className="max-w-40 truncate">
+                    {resumeFile?.name ?? 'Resume'}
+                  </span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => jdInputRef.current?.click()}
+                  title={jdFile?.name}
+                >
+                  <IconUpload size={14} />
+                  <span className="max-w-48 truncate">
+                    {jdFile?.name ?? 'Job description (optional)'}
+                  </span>
+                </Button>
+                <input
+                  ref={resumeInputRef}
+                  type="file"
+                  accept={ACCEPTED_DOCUMENT_TYPES}
+                  className="hidden"
+                  aria-label="Resume file"
+                  onChange={(e) => {
+                    setResumeFile(e.target.files?.[0] ?? null)
+                    setSetupStatus(null)
+                    e.target.value = ''
+                  }}
+                />
+                <input
+                  ref={jdInputRef}
+                  type="file"
+                  accept={ACCEPTED_DOCUMENT_TYPES}
+                  className="hidden"
+                  aria-label="Job description file"
+                  onChange={(e) => {
+                    setJdFile(e.target.files?.[0] ?? null)
+                    e.target.value = ''
+                  }}
+                />
+              </div>
+              {!jdFile && (
+                <Textarea
+                  value={jdText}
+                  onChange={(e) => setJdText(e.target.value)}
+                  placeholder="Or paste the job description here (optional)"
+                  className="min-h-16 max-h-32 resize-none"
+                />
+              )}
+              <Button
+                size="sm"
+                disabled={!resumeFile || setupBusy}
+                onClick={createFromResume}
+              >
+                {setupBusy ? 'Setting up…' : 'Create assistant'}
+              </Button>
+              {setupStatus && (
+                <div className="text-xs text-main-view-fg/60">
+                  {setupStatus}
+                </div>
+              )}
+            </div>
+          )}
+          {!editingKey && (
+            <div className="text-xs text-main-view-fg/50 pt-1">
+              Or fill it in yourself:
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <div className="relative">
               <label className="text-sm mb-2 inline-block">
