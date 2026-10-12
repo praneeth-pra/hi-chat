@@ -924,7 +924,7 @@ describe('useChat', () => {
                   `data: ${JSON.stringify({
                     type: 'content_block_delta',
                     delta: { type: 'text_delta', text: 'Claude answer [1]' },
-                  })}\n\n`
+                  })}\n\ndata: {"type":"message_stop"}\n\n`
                 )
               : new Response('{}')
         )

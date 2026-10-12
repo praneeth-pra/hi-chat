@@ -651,4 +651,11 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
     ),
     'speech diagnostic text omitted'
   )
+  // A Claude-written answer (no audit) also logs its time to first words.
+  const direct =
+    'accuracy: verdict=direct model=claude-sonnet-5-5 search=ready sources=5 total=5210ms search_time=700ms draft=4100ms review=0ms claims=0 context_claims=0 unsupported=0 fallback=none failures=none reviewers=none first=1900ms'
+  assert.equal(
+    speechLogLine(Buffer.from(JSON.stringify({ line: direct }))),
+    direct
+  )
 })

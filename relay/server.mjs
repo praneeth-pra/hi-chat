@@ -392,7 +392,7 @@ export function speechLogLine(body, includeText = false) {
     const reason =
       '(?:invalid-json|claim-span|missing-audit|source-reference|context-reference|unsupported-claim|invalid-verdict|incomplete-response|missing-response|timeout|provider-[45]\\d\\d|provider-error)'
     const rules = {
-      verdict: /^(approved|revised|uncertain|unverified)$/,
+      verdict: /^(approved|revised|uncertain|unverified|direct)$/,
       model:
         /^(?:openai_)?gpt-oss-(?:20|120)b$|^claude-(?:sonnet|haiku|opus)-[0-9.-]+$/,
       search: /^(ready|empty|unavailable|unconfigured|skipped)$/,
@@ -401,6 +401,7 @@ export function speechLogLine(body, includeText = false) {
       search_time: /^\d{1,9}ms$|^none$/,
       draft: /^\d{1,9}ms$|^none$/,
       review: /^\d{1,9}ms$|^none$/,
+      first: /^\d{1,9}ms$|^none$/,
       claims: /^\d{1,5}$/,
       context_claims: /^\d{1,5}$/,
       unsupported: /^\d{1,5}$/,

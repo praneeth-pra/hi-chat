@@ -16,6 +16,7 @@ const sse = (...texts: string[]) =>
         delta: { type: 'text_delta', text },
       })),
       { type: 'message_delta', usage: { output_tokens: 3 } },
+      { type: 'message_stop' },
     ]
       .map((event) => `data: ${JSON.stringify(event)}\n\n`)
       .join('')
