@@ -7,4 +7,8 @@ describe('withAnswerDetail', () => {
     expect(rule).toContain('src/test/java')
     expect(rule).toContain('Strictly no tabular answers')
   })
+
+  it('keeps each bullet to about two lines', () => {
+    expect(withAnswerDetail(undefined)).toContain('fits in about two lines')
+  })
 })
