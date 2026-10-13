@@ -24,4 +24,9 @@ describe('codingAnswer', () => {
       CODING_ANSWER_RULE
     )
   })
+
+  it('asks for comment-free code with only a short explanation', () => {
+    expect(CODING_ANSWER_RULE).toContain('no comments of any kind')
+    expect(CODING_ANSWER_RULE).toContain('at most 2 or 3 short bullets')
+  })
 })
