@@ -22,6 +22,36 @@ Object.assign(navigator, {
 })
 
 describe('RenderMarkdown', () => {
+  it('draws a flow block as stacked steps that fit a narrow window', () => {
+    const { container } = render(
+      <RenderMarkdown
+        content={'```flow\n1. Test class: calls page methods\n->\nPage Object: holds locators\n- WebDriver\n```'}
+      />
+    )
+    const flow = container.querySelector('[data-flow-diagram]')
+    expect(flow).not.toBeNull()
+    expect(container.querySelector('[data-code-block]')).toBeNull()
+    const steps = flow!.querySelectorAll('.font-semibold')
+    expect([...steps].map((s) => s.textContent)).toEqual([
+      'Test class',
+      'Page Object',
+      'WebDriver',
+    ])
+    expect(flow!.textContent).toContain(': calls page methods')
+    expect(flow!.textContent?.match(/↓/g)).toHaveLength(2)
+  })
+
+  it('keeps a tree block unwrapped so the folder indentation lines up', () => {
+    const tree = 'src/\n  test/\n    java/\n      pages/'
+    const { container } = render(
+      <RenderMarkdown content={'```tree\n' + tree + '\n```'} />
+    )
+    const pre = container.querySelector('[data-tree-layout]')
+    expect(pre?.className).toContain('whitespace-pre')
+    expect(pre?.className).not.toContain('pre-wrap')
+    expect(pre?.textContent).toBe(tree)
+  })
+
   it('always displays model comparisons as bullets even with an old disabled setting', () => {
     localStorage.setItem('tables-as-lists', 'off')
     try {

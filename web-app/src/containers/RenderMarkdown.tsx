@@ -16,6 +16,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import type { PluggableList } from 'unified'
 import { remarkTablesAsLists } from '@/lib/tablesToLists'
 import { useTranslation } from '@/i18n/react-i18next-compat'
+import { FlowDiagram, TreeLayout, isDiagramLanguage } from './DiagramBlocks'
 
 function PlainCode({ children }: { children: string | string[] }) {
   return (
@@ -134,6 +135,14 @@ const CodeComponent = memo(
 
     if (isInline || isUser) {
       return <code className={cn(className)}>{children}</code>
+    }
+
+    if (isDiagramLanguage(language)) {
+      return language === 'flow' ? (
+        <FlowDiagram code={code} />
+      ) : (
+        <TreeLayout code={code} />
+      )
     }
 
     return (

@@ -5,7 +5,9 @@ describe('withAnswerDetail', () => {
   it('allows a structure layout for architecture questions but keeps the no-table rule', () => {
     const rule = withAnswerDetail(undefined)
     expect(rule).toContain('src/test/java')
-    expect(rule).toContain('always include one short structure layout')
+    expect(rule).toContain('always include one short diagram')
+    expect(rule).toContain('```flow')
+    expect(rule).toContain('```tree')
     expect(rule).toContain('Strictly no tabular answers')
   })
 
