@@ -78,6 +78,7 @@ local toggleEnd = assert(source:find('-- fn + Up / Down: the code block', toggle
 local block = 'local APPS,TAP_SECONDS,types,RETURN,PAD_ENTER = ...\n'
   .. 'local typingTarget = nil\n'
   .. 'local function chatWindow() error("Must use the pinned typing window") end\n'
+  .. 'local function cancelDictationOnEscape() return false end -- not dictating\n'
   .. source:sub(toggleStart, toggleEnd - 1)
   .. source:sub(start, finish - 1)
   .. '\nlocal Z,X=6,7\nlocal props=hs.eventtap.event.properties\n'
