@@ -15,6 +15,8 @@ import {
   readyMicEarly,
   pickBest,
   gatherAuto,
+  getAutoEngines,
+  setAutoEngines,
   reportAuto,
   withoutFillers,
   textAgreement,
@@ -482,6 +484,16 @@ describe('dictation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('Auto races the engines chosen in Settings, in tie-break order', () => {
+    expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
+    setAutoEngines(['grok', 'cartesia'])
+    expect(getAutoEngines()).toEqual(['cartesia', 'grok'])
+    // None chosen falls back to the default three
+    setAutoEngines([])
+    expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
+    localStorage.removeItem('dictation-auto-engines')
   })
 
   it('logs the engines that lost the race once they answer', async () => {

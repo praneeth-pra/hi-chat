@@ -32,6 +32,9 @@ import { PlatformFeature } from '@/lib/platform/types'
 import { isRootDir } from '@/utils/path'
 import {
   DICTATION_ENGINES,
+  AUTO_ENGINE_CHOICES,
+  getAutoEngines,
+  setAutoEngines,
   getDictationEngine,
   getDictationReduceEcho,
   setDictationReduceEcho,
@@ -75,6 +78,13 @@ import {
   getDictationJudges,
   setDictationJudges,
 } from '@/lib/dictationJudge'
+const ENGINE_LABELS: Record<string, string> = {
+  cartesia: 'Cartesia',
+  soniox: 'Soniox',
+  elevenlabs: 'ElevenLabs',
+  grok: 'Grok',
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.general as any)({
   component: General,
@@ -112,6 +122,7 @@ function General() {
   )
   const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [judges, setJudgesState] = useState(getDictationJudges)
+  const [autoEngines, setAutoEnginesState] = useState(getAutoEngines)
   const [answers, setAnswers] = useState<AnswerResult[] | null>(null)
   const [answersRunning, setAnswersRunning] = useState(false)
   const runAnswers = async () => {
@@ -596,7 +607,7 @@ function General() {
             <Card title="Dictation">
               <CardItem
                 title="Dictation engine"
-                description="Turns your own voice into text when you tap Left Control or the mic button. Auto runs Cartesia, Soniox and ElevenLabs live and sends as soon as two agree (else a judge picks). Soniox gets your whole dictionary and Cartesia the 100 words that fit."
+                description="Turns your voice into text (Left Control or the mic button)."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -628,9 +639,50 @@ function General() {
                   </DropdownMenu>
                 }
               />
+              {dictationEngine === 'auto' && (
+                <CardItem
+                  title="Auto engines"
+                  description="Race live; sent as soon as two agree."
+                  actions={
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                        >
+                          {autoEngines.map((e) => ENGINE_LABELS[e]).join(', ')}
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {AUTO_ENGINE_CHOICES.map((e) => (
+                          <DropdownMenuCheckboxItem
+                            key={e}
+                            className="cursor-pointer my-0.5"
+                            checked={autoEngines.includes(e)}
+                            // The last engine can't be unticked
+                            disabled={
+                              autoEngines.length === 1 && autoEngines[0] === e
+                            }
+                            onSelect={(event) => event.preventDefault()}
+                            onCheckedChange={(on) => {
+                              const next = AUTO_ENGINE_CHOICES.filter((c) =>
+                                c === e ? on : autoEngines.includes(c)
+                              )
+                              setAutoEngines(next)
+                              setAutoEnginesState(next)
+                            }}
+                          >
+                            {ENGINE_LABELS[e]}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  }
+                />
+              )}
               <CardItem
                 title="Dictation judges"
-                description="When Auto's engines disagree, these models race to write the final text; the first good answer wins. Each needs its provider's key. With none chosen, the engines' vote is sent."
+                description="Write the final text when the engines disagree. Fastest answer wins."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -671,7 +723,7 @@ function General() {
               />
               <CardItem
                 title="Microphone"
-                description="The mic dictation records from. BlackHole is never used."
+                description="The mic dictation records from."
                 actions={
                   <DropdownMenu onOpenChange={loadMics}>
                     <DropdownMenuTrigger asChild>
@@ -706,7 +758,7 @@ function General() {
               />
               <CardItem
                 title="Suppress playback through the microphone"
-                description="Off captures spoken audio played near your microphone as well as your voice. Turn on to reduce speaker echo and background noise. Choose MacBook Microphone above to use its built-in mic."
+                description="Reduces speaker echo and background noise."
                 actions={
                   <Switch
                     checked={reduceDictationEcho}
@@ -719,7 +771,7 @@ function General() {
               />
               <CardItem
                 title="Keep the mic ready"
-                description="Leaves the mic open after your first dictation so the next one starts instantly, with nothing cut off. macOS shows the mic as in use while Hi-chat is open."
+                description="Starts dictation instantly with nothing cut off."
                 actions={
                   <Switch
                     checked={keepMic}
@@ -732,7 +784,7 @@ function General() {
               />
               <CardItem
                 title="Your dictionary"
-                description={`Names and terms the transcription should spell right, one per line or separated by commas (${dictionaryTerms().length} saved).`}
+                description={`Names and terms to spell right (${dictionaryTerms().length} saved).`}
                 column
                 actions={
                   <Textarea

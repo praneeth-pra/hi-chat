@@ -37,9 +37,9 @@ import {
 /**
  * Which service turns your voice into text. Soniox gets your dictionary as
  * context terms and Cartesia the 100 that fit; all four stream live while
- * you talk. Auto runs Cartesia, Soniox and ElevenLabs: as soon as two agree
- * their text is sent, else a judge model writes the best version. Grok was
- * left out of Auto: on P's questions it was the slowest and least accurate.
+ * you talk. Auto races the engines chosen in Settings (Cartesia, Soniox and
+ * ElevenLabs by default; Grok can be added): as soon as two agree their text
+ * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
   | 'grok'
@@ -48,7 +48,7 @@ export type DictationEngine =
   | 'cartesia'
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
+  { value: 'auto', label: 'Auto (race the chosen engines)' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
@@ -531,10 +531,45 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
   return undefined
 }
 
+/** Engines Auto can race, in tie-break order. */
+export const AUTO_ENGINE_CHOICES = [
+  'cartesia',
+  'soniox',
+  'elevenlabs',
+  'grok',
+] as const satisfies readonly DictationEngine[]
+export type AutoEngine = (typeof AUTO_ENGINE_CHOICES)[number]
+const DEFAULT_AUTO_ENGINES: AutoEngine[] = ['cartesia', 'soniox', 'elevenlabs']
+const AUTO_ENGINES_STORAGE_KEY = 'dictation-auto-engines'
+
+/** The engines Auto races, chosen in Settings (at least one). */
+export function getAutoEngines(): AutoEngine[] {
+  try {
+    const saved: unknown = JSON.parse(
+      localStorage.getItem(AUTO_ENGINES_STORAGE_KEY) ?? 'null'
+    )
+    if (Array.isArray(saved)) {
+      const chosen = AUTO_ENGINE_CHOICES.filter((e) => saved.includes(e))
+      if (chosen.length) return chosen
+    }
+  } catch {
+    // Storage blocked or unreadable
+  }
+  return DEFAULT_AUTO_ENGINES
+}
+
+export function setAutoEngines(engines: AutoEngine[]) {
+  try {
+    localStorage.setItem(AUTO_ENGINES_STORAGE_KEY, JSON.stringify(engines))
+  } catch {
+    // Storage blocked
+  }
+}
+
 function autoLiveStreams() {
   // Cartesia first: when it agrees with another engine its text is sent
   // (it had the most words right on P's questions), then Soniox
-  return (['cartesia', 'soniox', 'elevenlabs'] as const).map((engine) => ({
+  return getAutoEngines().map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
