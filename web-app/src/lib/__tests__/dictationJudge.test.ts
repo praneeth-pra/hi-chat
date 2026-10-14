@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { judgeDictation } from '../dictationJudge'
+import {
+  getDictationJudges,
+  judgeDictation,
+  setDictationJudges,
+} from '../dictationJudge'
 
 const providers: Record<string, { api_key?: string; base_url?: string }> = {
   cerebras: { api_key: 'csk' },
@@ -220,6 +224,41 @@ describe('judgeDictation', () => {
       ).resolves.toBeUndefined()
       expect(down).toHaveBeenCalledTimes(2)
     } finally {
+      delete providers.groq
+    }
+  })
+
+  it('uses only the judges chosen in Settings', async () => {
+    providers.groq = { api_key: 'gsk' }
+    try {
+      expect(getDictationJudges()).toEqual(['cerebras-120b', 'groq-20b'])
+      setDictationJudges(['cerebras-qwen', 'groq-120b'])
+      const fetcher = reply('Run kubectl get pods.')
+      await judgeDictation(
+        results,
+        'Run kubectl get pods.',
+        [],
+        fetcher as unknown as typeof fetch
+      )
+      const bodies = fetcher.mock.calls.map((c) =>
+        JSON.parse(String((c[1] as RequestInit).body))
+      )
+      expect(bodies.map((b) => b.model).sort()).toEqual([
+        'openai/gpt-oss-120b',
+        'qwen-3.8-27b',
+      ])
+      expect(
+        bodies.find((b) => b.model === 'qwen-3.8-27b').reasoning_effort
+      ).toBe('none')
+      // None chosen: the vote stands, nothing is asked
+      setDictationJudges([])
+      const none = reply('x')
+      expect(
+        await judgeDictation(results, 'v', [], none as unknown as typeof fetch)
+      ).toBeUndefined()
+      expect(none).not.toHaveBeenCalled()
+    } finally {
+      localStorage.removeItem('dictation-judges')
       delete providers.groq
     }
   })

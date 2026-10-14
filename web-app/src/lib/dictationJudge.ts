@@ -2,10 +2,11 @@ import { groqFetch, viaGroqProxy } from '@/lib/groqProxy'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
 /**
- * Auto dictation's judge: when the engines' texts differ, a fast model
- * (Cerebras gpt-oss-120b, else Groq gpt-oss-20b, with the keys from Model
- * Providers) writes the most accurate version from all of them. Without a
- * key, or if it is slow or answers something else, the vote stands.
+ * Auto dictation's judge: when the engines' texts differ, the fast models
+ * chosen in Settings (Cerebras gpt-oss-120b and Groq gpt-oss-20b by default,
+ * with the keys from Model Providers) race to write the most accurate
+ * version from all of them. Without a key, or if they are slow or answer
+ * something else, the vote stands.
  */
 
 export type EngineText = { engine: string; text: string }
@@ -58,31 +59,97 @@ const ENGINE_NAMES: Record<string, string> = {
   cartesia: 'Cartesia',
 }
 
+export type DictationJudge =
+  | 'cerebras-120b'
+  | 'cerebras-qwen'
+  | 'groq-20b'
+  | 'groq-120b'
+
+/** Judge models to pick from in Settings; the chosen ones all run at once. */
+export const DICTATION_JUDGES: {
+  value: DictationJudge
+  label: string
+  provider: 'cerebras' | 'groq'
+  model: string
+  extra: Record<string, unknown>
+}[] = [
+  {
+    value: 'cerebras-120b',
+    label: 'Cerebras gpt-oss-120b',
+    provider: 'cerebras',
+    model: 'gpt-oss-120b',
+    extra: {},
+  },
+  {
+    value: 'cerebras-qwen',
+    label: 'Cerebras Qwen 3.8 27B (no thinking)',
+    provider: 'cerebras',
+    model: 'qwen-3.8-27b',
+    extra: { reasoning_effort: 'none' },
+  },
+  {
+    value: 'groq-20b',
+    label: 'Groq gpt-oss-20b',
+    provider: 'groq',
+    model: 'openai/gpt-oss-20b',
+    extra: { include_reasoning: false },
+  },
+  {
+    value: 'groq-120b',
+    label: 'Groq gpt-oss-120b',
+    provider: 'groq',
+    model: 'openai/gpt-oss-120b',
+    extra: { include_reasoning: false },
+  },
+]
+const DEFAULT_JUDGES: DictationJudge[] = ['cerebras-120b', 'groq-20b']
+const JUDGES_STORAGE_KEY = 'dictation-judges'
+
+/** The judges chosen in Settings (none means the vote is always sent). */
+export function getDictationJudges(): DictationJudge[] {
+  try {
+    const saved: unknown = JSON.parse(
+      localStorage.getItem(JUDGES_STORAGE_KEY) ?? 'null'
+    )
+    if (Array.isArray(saved))
+      return DICTATION_JUDGES.map((j) => j.value).filter((v) =>
+        saved.includes(v)
+      )
+  } catch {
+    // Storage blocked or unreadable
+  }
+  return DEFAULT_JUDGES
+}
+
+export function setDictationJudges(judges: DictationJudge[]) {
+  try {
+    localStorage.setItem(JUDGES_STORAGE_KEY, JSON.stringify(judges))
+  } catch {
+    // Storage blocked
+  }
+}
+
 function judgeTargets() {
   const providers = useModelProvider.getState()
-  const targets: {
-    url: string
-    key: string
-    model: string
-    extra: Record<string, unknown>
-  }[] = []
-  const cerebras = providers.getProviderByName('cerebras')
-  if (cerebras?.api_key)
-    targets.push({
-      url: `${cerebras.base_url || 'https://api.cerebras.ai/v1'}/chat/completions`,
-      key: cerebras.api_key,
-      model: 'gpt-oss-120b',
-      extra: {},
-    })
-  const groq = providers.getProviderByName('groq')
-  if (groq?.api_key)
-    targets.push({
-      url: `${viaGroqProxy(groq.base_url || 'https://api.groq.com/openai/v1')}/chat/completions`,
-      key: groq.api_key,
-      model: 'openai/gpt-oss-20b',
-      extra: { include_reasoning: false },
-    })
-  return targets
+  const chosen = getDictationJudges()
+  return DICTATION_JUDGES.filter((j) => chosen.includes(j.value)).flatMap(
+    (judge) => {
+      const provider = providers.getProviderByName(judge.provider)
+      if (!provider?.api_key) return []
+      const base =
+        judge.provider === 'cerebras'
+          ? provider.base_url || 'https://api.cerebras.ai/v1'
+          : viaGroqProxy(provider.base_url || 'https://api.groq.com/openai/v1')
+      return [
+        {
+          url: `${base}/chat/completions`,
+          key: provider.api_key,
+          model: judge.model,
+          extra: judge.extra,
+        },
+      ]
+    }
+  )
 }
 
 /**

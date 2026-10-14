@@ -65,10 +65,16 @@ import { useChatAuto } from '@/lib/chatModels'
 import { AUTO_MODES } from '@/lib/autoRace'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  DICTATION_JUDGES,
+  getDictationJudges,
+  setDictationJudges,
+} from '@/lib/dictationJudge'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.general as any)({
   component: General,
@@ -105,6 +111,7 @@ function General() {
     getDictationReduceEcho
   )
   const [keepMic, setKeepMicState] = useState(getKeepMicReady)
+  const [judges, setJudgesState] = useState(getDictationJudges)
   const [answers, setAnswers] = useState<AnswerResult[] | null>(null)
   const [answersRunning, setAnswersRunning] = useState(false)
   const runAnswers = async () => {
@@ -616,6 +623,47 @@ function General() {
                         >
                           {e.label}
                         </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                }
+              />
+              <CardItem
+                title="Dictation judges"
+                description="When Auto's engines disagree, these models race to write the final text; the first good answer wins. Each needs its provider's key. With none chosen, the engines' vote is sent."
+                actions={
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-56 truncate"
+                      >
+                        {judges.length
+                          ? DICTATION_JUDGES.filter((j) =>
+                              judges.includes(j.value)
+                            )
+                              .map((j) => j.label)
+                              .join(', ')
+                          : 'None (vote only)'}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {DICTATION_JUDGES.map((j) => (
+                        <DropdownMenuCheckboxItem
+                          key={j.value}
+                          className="cursor-pointer my-0.5"
+                          checked={judges.includes(j.value)}
+                          onSelect={(e) => e.preventDefault()}
+                          onCheckedChange={(on) => {
+                            const next = on
+                              ? [...judges, j.value]
+                              : judges.filter((v) => v !== j.value)
+                            setDictationJudges(next)
+                            setJudgesState(next)
+                          }}
+                        >
+                          {j.label}
+                        </DropdownMenuCheckboxItem>
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
