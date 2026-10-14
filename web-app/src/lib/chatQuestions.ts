@@ -49,11 +49,39 @@ export function questionBatches(prompts: ChatPrompt[]): ChatPrompt[][] {
   return batches
 }
 
-/** Reject fabricated sources and altered wording instead of displaying invented questions. */
-export function parseChatQuestions(
-  content: string,
+/** A question entry that quotes its source prompt, or undefined. */
+function sourcedQuestion(
+  question: unknown,
   prompts: ChatPrompt[]
-): ChatQuestion[] {
+): ChatQuestion | undefined {
+  if (
+    !question ||
+    typeof question !== 'object' ||
+    !('promptIndex' in question) ||
+    !('text' in question)
+  )
+    return undefined
+  const { promptIndex, text } = question
+  if (
+    !Number.isInteger(promptIndex) ||
+    typeof text !== 'string' ||
+    !normalized(text)
+  )
+    return undefined
+  // A judge often adds a closing "?" to a dictated question; that's not a
+  // change of wording
+  const span = normalized(text).replace(/[?.!,;:]+$/, '')
+  const source = prompts.find(
+    (prompt) =>
+      prompt.promptIndex === promptIndex &&
+      normalized(prompt.text).includes(span)
+  )
+  return source
+    ? { promptIndex: promptIndex as number, text: text.trim() }
+    : undefined
+}
+
+function questionList(content: string): unknown[] {
   const value: unknown = JSON.parse(content)
   if (
     !value ||
@@ -63,35 +91,32 @@ export function parseChatQuestions(
   ) {
     throw new Error('The judge returned an invalid question list.')
   }
-  return value.questions.map((question: unknown) => {
-    if (
-      !question ||
-      typeof question !== 'object' ||
-      !('promptIndex' in question) ||
-      !('text' in question)
-    ) {
-      throw new Error('The judge returned an invalid question.')
-    }
-    const { promptIndex, text } = question
-    if (
-      !Number.isInteger(promptIndex) ||
-      typeof text !== 'string' ||
-      !normalized(text)
-    ) {
-      throw new Error('The judge returned an invalid question.')
-    }
-    if (
-      !prompts.some(
-        (prompt) =>
-          prompt.promptIndex === promptIndex &&
-          normalized(prompt.text).includes(normalized(text))
-      )
-    ) {
+  return value.questions
+}
+
+/** Reject fabricated sources and altered wording instead of displaying invented questions. */
+export function parseChatQuestions(
+  content: string,
+  prompts: ChatPrompt[]
+): ChatQuestion[] {
+  return questionList(content).map((question) => {
+    const sourced = sourcedQuestion(question, prompts)
+    if (!sourced)
       throw new Error(
         'The judge changed a question or referenced an unknown prompt.'
       )
-    }
-    return { promptIndex: promptIndex as number, text: text.trim() }
+    return sourced
+  })
+}
+
+/** Only the entries that quote their source prompt; the rest are dropped. */
+export function sourcedQuestions(
+  content: string,
+  prompts: ChatPrompt[]
+): ChatQuestion[] {
+  return questionList(content).flatMap((question) => {
+    const sourced = sourcedQuestion(question, prompts)
+    return sourced ? [sourced] : []
   })
 }
 
@@ -136,7 +161,7 @@ async function judgeBatch(
       throw new Error('The judge response was incomplete. Please retry.')
     const content = choice?.message.content
     if (typeof content !== 'string') throw new Error('No judge question list.')
-    return parseChatQuestions(content, prompts)
+    return content
   })
 }
 
@@ -162,18 +187,27 @@ export async function extractChatQuestions(
     if (signal.aborted) throw signal.reason
     onProgress?.(index, batches.length)
     let result: ChatQuestion[] | undefined
+    let partial: ChatQuestion[] = []
     for (const provider of judges) {
       try {
-        result = await judgeBatch(thread, batch, provider, signal)
-        break
+        const content = await judgeBatch(thread, batch, provider, signal)
+        try {
+          result = parseChatQuestions(content, batch)
+          break
+        } catch {
+          const kept = sourcedQuestions(content, batch)
+          if (kept.length > partial.length) partial = kept
+        }
       } catch {
         if (signal.aborted) throw signal.reason
       }
     }
-    if (!result)
-      throw new Error(
-        'Question extraction failed. No partial list was saved; please retry.'
-      )
+    // Every judge failed or misquoted: keep the questions they quoted
+    // exactly, else list this batch's prompts as they were sent, so the
+    // list is never lost
+    result ??= partial.length
+      ? partial
+      : batch.map((prompt) => ({ ...prompt, text: prompt.text.trim() }))
     questions.push(...result)
     onProgress?.(index + 1, batches.length)
   }
