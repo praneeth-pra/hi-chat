@@ -432,6 +432,58 @@ describe('dictation', () => {
     }
   })
 
+  it('Auto stops waiting at the deadline, or sends the first text after it', async () => {
+    vi.useFakeTimers()
+    try {
+      let soniox!: (t: string) => void
+      const results = gatherAuto(
+        [
+          { engine: 'cartesia', text: Promise.resolve('What is an S3 bucket') },
+          { engine: 'soniox', text: new Promise((r) => (soniox = r)) },
+          {
+            engine: 'elevenlabs',
+            text: Promise.resolve('What is an extra bucket'),
+          },
+        ],
+        950
+      )
+      await vi.advanceTimersByTimeAsync(949)
+      soniox('What is an S3 bucket')
+      // In time: Soniox's vote is kept
+      await expect(results).resolves.toHaveLength(3)
+      const cut = gatherAuto(
+        [
+          { engine: 'cartesia', text: Promise.resolve('What is an S3 bucket') },
+          { engine: 'soniox', text: new Promise(() => {}) },
+          {
+            engine: 'elevenlabs',
+            text: Promise.resolve('What is an extra bucket'),
+          },
+        ],
+        950
+      )
+      await vi.advanceTimersByTimeAsync(950)
+      await expect(cut).resolves.toHaveLength(2)
+      // Nothing heard by the deadline: the first text goes as it arrives
+      let cartesia!: (t: string) => void
+      const slow = gatherAuto(
+        [
+          { engine: 'cartesia', text: new Promise((r) => (cartesia = r)) },
+          { engine: 'soniox', text: new Promise(() => {}) },
+          { engine: 'elevenlabs', text: new Promise(() => {}) },
+        ],
+        950
+      )
+      await vi.advanceTimersByTimeAsync(1200)
+      cartesia('What is EKS?')
+      await expect(slow).resolves.toEqual([
+        { engine: 'cartesia', text: 'What is EKS?' },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('logs the engines that lost the race once they answer', async () => {
     let lateGrok!: (t: string) => void
     const done = reportAuto(

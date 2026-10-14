@@ -40,11 +40,6 @@ export function textAgreement(a: string, b: string): number {
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 1500
 /**
- * Groq's judge joins if Cerebras hasn't answered by now. In the 12 Oct mock
- * interview Cerebras judged in 0.37-1.04 s but twice ran past the timeout.
- */
-export const JUDGE_HEDGE_MS = 600
-/**
  * Texts this alike skip the judge and the vote is sent. On P's questions,
  * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
  * vs "Extra bucket" 0.95 (the first engine right both times); a real mix-up
@@ -91,9 +86,9 @@ function judgeTargets() {
 }
 
 /**
- * Sends one prompt to the judge and returns the first reply `accept` takes.
- * Cerebras goes first; Groq joins after JUDGE_HEDGE_MS, or at once if
- * Cerebras fails, so one slow provider no longer runs into the timeout.
+ * Sends one prompt to every judge at once and returns the first reply
+ * `accept` takes. Groq used to wait 0.6 s for Cerebras, but on 14 Oct
+ * Cerebras's judging took 0.72 s on a typical clip and up to 1.13 s.
  */
 async function askJudge(
   system: string,
@@ -146,18 +141,11 @@ async function askJudge(
               `Dictation judge (${target.model}) skipped:`,
               (err as Error).message
             )
-          // A failed first judge brings the backup in straight away
-          if (started < targets.length) next()
         } finally {
           if (--pending === 0 && started === targets.length) resolve(undefined)
         }
       }
-      const next = () => {
-        const target = targets[started]
-        if (target) void ask(target)
-      }
-      next()
-      if (targets.length > 1) timers.push(setTimeout(next, JUDGE_HEDGE_MS))
+      targets.forEach((target) => void ask(target))
       timers.push(setTimeout(() => resolve(undefined), timeoutMs))
     })
   } finally {

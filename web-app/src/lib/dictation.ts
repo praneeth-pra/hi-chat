@@ -130,6 +130,15 @@ const AUTO_GRACE_MS = 1000
  * interview for 1.0-1.5 s although ElevenLabs had answered in 0.35-0.8 s.
  */
 const AUTO_SHORT_GRACE_MS = 500
+/**
+ * Auto: the text goes out by this long after you stop, whatever is late. In
+ * the 12-14 Oct mock interviews 40 of 154 clips took longer, 32 of them
+ * waiting on the judge. Past it the vote is sent; if no engine has text yet,
+ * the first one to answer is sent as it arrives.
+ */
+export const AUTO_DEADLINE_MS = 950
+/** Less judge time than this left before the deadline: send the vote. */
+const MIN_JUDGE_MS = 150
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -575,18 +584,29 @@ export function pickBest(results: EngineText[]): EngineText | undefined {
 
 /**
  * Waits for every engine, but only AUTO_GRACE_MS once the first has text,
- * and not at all once two engines agree (the judge would skip anyway).
+ * not at all once two engines agree (the judge would skip anyway), and not
+ * past `deadlineMs` once any engine has text.
  */
 export function gatherAuto(
-  jobs: { engine: DictationEngine; text: Promise<string> }[]
+  jobs: { engine: DictationEngine; text: Promise<string> }[],
+  deadlineMs?: number
 ): Promise<EngineText[]> {
   return new Promise((resolve, reject) => {
     const done: EngineText[] = []
     const errors: string[] = []
     let left = jobs.length
     let grace: ReturnType<typeof setTimeout> | undefined
+    let late = false
+    const deadline =
+      deadlineMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            late = true
+            if (done.some((d) => d.text)) finish()
+          }, deadlineMs)
     const finish = () => {
       clearTimeout(grace)
+      clearTimeout(deadline)
       if (!done.length && errors.length) reject(new Error(errors.join('; ')))
       // Keep the engines' order, so ties go to the first (Cartesia)
       else
@@ -602,7 +622,7 @@ export function gatherAuto(
               (d) => d.text && textAgreement(d.text, text) >= SKIP_AGREEMENT
             )
           done.push({ engine, text })
-          if (agreed) finish()
+          if (agreed || (late && text)) finish()
           else if (text && !grace)
             grace = setTimeout(
               finish,
@@ -709,14 +729,23 @@ export async function stopDictation() {
       )
       // Known mistakes fixed first, so two engines sharing one still agree
       // on the right text
-      const results = (await gatherAuto(jobs)).map((r) => ({
+      const results = (await gatherAuto(jobs, AUTO_DEADLINE_MS)).map((r) => ({
         ...r,
         text: applyFixes(r.text),
       }))
       const best = pickBest(results)
       const judgeStart = Date.now()
+      const judgeMs = AUTO_DEADLINE_MS - (judgeStart - stoppedAt)
       const judged =
-        best && (await judgeDictation(results, best.text, keyTerms()))
+        best && judgeMs >= MIN_JUDGE_MS
+          ? await judgeDictation(
+              results,
+              best.text,
+              keyTerms(),
+              undefined,
+              judgeMs
+            )
+          : undefined
       text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard

@@ -151,7 +151,7 @@ describe('judgeDictation', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it('brings in Groq when Cerebras is slow, and uses the first usable reply', async () => {
+  it('asks Cerebras and Groq at once and uses the first usable reply', async () => {
     providers.cerebras = { api_key: 'csk' }
     providers.groq = { api_key: 'gsk' }
     vi.useFakeTimers()
@@ -177,9 +177,8 @@ describe('judgeDictation', () => {
         [],
         fetcher as unknown as typeof fetch
       )
-      await vi.advanceTimersByTimeAsync(599)
-      expect(fetcher).toHaveBeenCalledTimes(1)
-      await vi.advanceTimersByTimeAsync(1)
+      expect(fetcher).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(0)
       await expect(judged).resolves.toBe('Run kubectl get pods.')
       expect(fetcher).toHaveBeenCalledTimes(2)
       // The slow Cerebras request is cancelled
@@ -192,7 +191,7 @@ describe('judgeDictation', () => {
     }
   })
 
-  it('asks Groq at once when Cerebras fails, and keeps the vote if both fail', async () => {
+  it('uses Groq when Cerebras fails, and keeps the vote if both fail', async () => {
     providers.cerebras = { api_key: 'csk' }
     providers.groq = { api_key: 'gsk' }
     try {
