@@ -16,6 +16,8 @@
 --   tap Left Control        dictate in Jan: starts recording your mic; tap
 --                           again to stop, transcribe and send it. Control held with
 --                           another key or a click works as usual.
+--   Escape while dictating  throws the recording away; nothing is sent.
+--                           Escape works as usual the rest of the time.
 --   tap Left Option         toggle background typing into Jan's prompt box;
 --                           the main app stays active. Escape also turns it off.
 --                           Enter adds a line; fn + Right sends the prompt.
@@ -168,20 +170,40 @@ sendTap:start()
 -- to Jan, which starts dictation, or stops it and sends the text. Control
 -- isn't swallowed, so Control + a key or a click still works everywhere.
 local LEFT_CTRL = hs.keycodes.map["ctrl"]
+local ESCAPE = hs.keycodes.map["escape"]
 local TAP_SECONDS = 0.35
+local DICTATION_MAX_SECONDS = 600 -- Jan stops a recording after 9.5 minutes
 local ctrlDownAt = nil
+local dictatingSince = nil -- when a Control tap started dictation
 local types = hs.eventtap.event.types
+
+local function dictating()
+  return dictatingSince ~= nil
+    and hs.timer.secondsSinceEpoch() - dictatingSince < DICTATION_MAX_SECONDS
+end
+
+-- Escape while dictating: Shift + F13 tells Jan to throw the recording away.
+-- Returns true when it did, so the Escape goes no further.
+local function cancelDictationOnEscape(e)
+  if e:getKeyCode() ~= ESCAPE or not dictating() then return false end
+  local flags = e:getFlags()
+  if flags.cmd or flags.alt or flags.ctrl or flags.shift then return false end
+  dictatingSince = nil
+  hs.timer.doAfter(0, function() toggle("f13", { "shift" }) end)
+  return true
+end
 
 dictateTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown, types.rightMouseDown, types.scrollWheel }, function(e)
   if e:getType() ~= types.flagsChanged then
     ctrlDownAt = nil -- used with another key or the mouse: not a tap
-    return false
+    return e:getType() == types.keyDown and cancelDictationOnEscape(e)
   end
   local flags = e:getFlags()
   if e:getKeyCode() == LEFT_CTRL and flags:containExactly({ "ctrl" }) then
     ctrlDownAt = hs.timer.secondsSinceEpoch()
   elseif e:getKeyCode() == LEFT_CTRL and not flags.ctrl and ctrlDownAt then
     if hs.timer.secondsSinceEpoch() - ctrlDownAt < TAP_SECONDS then
+      dictatingSince = (not dictating()) and hs.timer.secondsSinceEpoch() or nil
       hs.timer.doAfter(0, function() toggle("f14") end)
     end
     ctrlDownAt = nil
@@ -292,7 +314,11 @@ typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
     return true
   end
   if not typingTarget then return held ~= nil end -- swallow repeats until release
-  if key == typingKeys.escape then stopTyping("Jan typing OFF") return true end
+  if key == typingKeys.escape then
+    if cancelDictationOnEscape(e) then return true end -- typing stays on
+    stopTyping("Jan typing OFF")
+    return true
+  end
   if not typingValid(typingTarget) then
     stopTyping("Jan typing stopped — select Hi-chat again")
     return true -- do not leak this character into the main app

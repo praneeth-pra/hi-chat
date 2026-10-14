@@ -1,5 +1,10 @@
 import { toast } from 'sonner'
-import { stopDictation, toggleDictation } from '@/lib/dictation'
+import {
+  cancelDictation as discardRecording,
+  stopDictation,
+  toggleDictation,
+  useDictation,
+} from '@/lib/dictation'
 import { useBackgroundTyping } from '@/hooks/useBackgroundTyping'
 
 /**
@@ -21,6 +26,11 @@ export const BACKGROUND_TYPING_OFF_KEY = 'F19'
 export const SEND_KEY = 'F15'
 export const DICTATION_TOGGLE_KEY = 'F14'
 export const DICTATION_STOP_KEY = 'F13'
+/**
+ * Escape, or Shift + F13 from Hammerspoon's Escape while you dictate, throws
+ * the recording away without sending it.
+ */
+export const DICTATION_CANCEL_KEY = 'Shift+F13'
 /**
  * Shift + F16 scrolls to the code block above, Shift + F17 to the one below,
  * so pressing one again steps on through the chat's code. Hammerspoon sends
@@ -164,6 +174,14 @@ export function handleRemoteKey(key: string): boolean {
   if (key === CODE_DOWN_KEY) return stepCode(1)
   if (key === DICTATION_TOGGLE_KEY) {
     toggleDictation()
+    return true
+  }
+  if (key === DICTATION_CANCEL_KEY || key === 'Escape') {
+    const { status } = useDictation.getState()
+    if (status !== 'recording' && status !== 'starting')
+      return key === DICTATION_CANCEL_KEY
+    discardRecording()
+    toast('Dictation discarded')
     return true
   }
   if (key === DICTATION_STOP_KEY) {

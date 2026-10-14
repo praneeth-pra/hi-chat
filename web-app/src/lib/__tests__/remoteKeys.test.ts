@@ -11,9 +11,13 @@ import {
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 const toggleDictation = vi.fn()
 const stopDictation = vi.fn()
+const discardRecording = vi.fn()
+const dictationState = { status: 'idle' }
 vi.mock('@/lib/dictation', () => ({
   toggleDictation: () => toggleDictation(),
   stopDictation: () => stopDictation(),
+  cancelDictation: () => discardRecording(),
+  useDictation: { getState: () => dictationState },
 }))
 describe('remote keys without Speaker', () => {
   beforeEach(() => {
@@ -126,6 +130,28 @@ describe('remote keys without Speaker', () => {
       new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 124 })
     )
     expect(stopDictation).toHaveBeenCalledTimes(2)
+    stop()
+  })
+
+  it('Escape or Shift+F13 discards a recording without sending it', () => {
+    const stop = listenForRemoteKeys()
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    window.dispatchEvent(esc)
+    expect(discardRecording).not.toHaveBeenCalled()
+    expect(esc.defaultPrevented).toBe(false)
+    dictationState.status = 'recording'
+    const esc2 = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    window.dispatchEvent(esc2)
+    expect(discardRecording).toHaveBeenCalledTimes(1)
+    expect(esc2.defaultPrevented).toBe(true)
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'F13', shiftKey: true })
+    )
+    expect(discardRecording).toHaveBeenCalledTimes(2)
+    expect(stopDictation).not.toHaveBeenCalled()
+    dictationState.status = 'idle'
+    expect(handleRemoteKey('Shift+F13')).toBe(true)
+    expect(discardRecording).toHaveBeenCalledTimes(2)
     stop()
   })
 
