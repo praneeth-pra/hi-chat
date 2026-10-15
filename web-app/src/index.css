@@ -110,6 +110,27 @@
 }
 
 @layer components {
+  /* Newest answer: a soft accent bar down its left edge (older answers stay
+     fully readable) */
+  [data-latest-answer] {
+    position: relative;
+  }
+  [data-latest-answer]::before {
+    content: '';
+    position: absolute;
+    left: -9px;
+    top: 2px;
+    bottom: 2px;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--app-primary) 75%, transparent),
+      color-mix(in oklab, var(--app-primary) 8%, transparent)
+    );
+    pointer-events: none;
+  }
+
   .search-highlight {
     @apply font-bold;
     color: color-mix(in srgb, currentColor 80%, white 20%);

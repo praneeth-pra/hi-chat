@@ -24,9 +24,9 @@ export function ColorPickerAppBgColor() {
   const predefineAppBgColor: RgbaColor[] = [
     isDark
       ? {
-          r: 17,
-          g: 17,
-          b: 19,
+          r: 13,
+          g: 13,
+          b: 13,
           a: getAlpha(0.4),
         }
       : {

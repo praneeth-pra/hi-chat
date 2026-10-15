@@ -85,11 +85,11 @@ const getAlphaValue = () => {
 // Default interface settings
 const defaultFontSize: FontSize = '15px'
 // Sidebar (app background): a soft neutral that sets the panel apart from
-// the chat surface
+// the chat surface. Dark mode is a neutral near-black (no blue tint).
 const defaultAppBgColor: RgbaColor = {
-  r: 17,
-  g: 17,
-  b: 19,
+  r: 13,
+  g: 13,
+  b: 13,
   a: getAlphaValue(),
 }
 const defaultLightAppBgColor: RgbaColor = {
@@ -98,7 +98,7 @@ const defaultLightAppBgColor: RgbaColor = {
   b: 242,
   a: getAlphaValue(),
 }
-const defaultAppMainViewBgColor: RgbaColor = { r: 26, g: 26, b: 29, a: 1 }
+const defaultAppMainViewBgColor: RgbaColor = { r: 22, g: 22, b: 22, a: 1 }
 const defaultLightAppMainViewBgColor: RgbaColor = {
   r: 255,
   g: 255,
@@ -131,6 +131,9 @@ const legacyDefaults: RgbaColor[] = [
   { r: 45, g: 120, b: 220, a: 1 },
   { r: 144, g: 60, b: 60, a: 1 },
   { r: 217, g: 95, b: 95, a: 1 },
+  // Blue-tinted dark surfaces from the 12 Oct refresh
+  { r: 17, g: 17, b: 19, a: 1 },
+  { r: 26, g: 26, b: 29, a: 1 },
 ]
 const isLegacyDefault = (color: RgbaColor) =>
   legacyDefaults.some(
@@ -155,6 +158,7 @@ export const isDefaultColor = (color: RgbaColor): boolean => {
   const isDefault =
     sameRgb(defaultAppBgColor) ||
     sameRgb(defaultLightAppBgColor) ||
+    (color.r === 17 && color.g === 17 && color.b === 19) ||
     color.r === 25 && color.g === 25 && color.b === 25 ||
     color.r === 255 && color.g === 255 && color.b === 255
 
