@@ -129,19 +129,23 @@ export function setDictationJudges(judges: DictationJudge[]) {
   }
 }
 
-function judgeTargets() {
+function judgeTargets(direct = false) {
   const providers = useModelProvider.getState()
   const chosen = getDictationJudges()
   return DICTATION_JUDGES.filter((j) => chosen.includes(j.value)).flatMap(
     (judge) => {
       const provider = providers.getProviderByName(judge.provider)
       if (!provider?.api_key) return []
+      const own =
+        provider.base_url ||
+        (judge.provider === 'cerebras'
+          ? 'https://api.cerebras.ai/v1'
+          : 'https://api.groq.com/openai/v1')
       const base =
-        judge.provider === 'cerebras'
-          ? provider.base_url || 'https://api.cerebras.ai/v1'
-          : viaGroqProxy(provider.base_url || 'https://api.groq.com/openai/v1')
+        judge.provider === 'cerebras' || direct ? own : viaGroqProxy(own)
       return [
         {
+          base,
           url: `${base}/chat/completions`,
           key: provider.api_key,
           model: judge.model,
@@ -150,6 +154,30 @@ function judgeTargets() {
       ]
     }
   )
+}
+
+const WARM_AGAIN_MS = 20_000
+let lastWarm = 0
+
+/**
+ * Opens the connections to the chosen judges while you are still speaking,
+ * so the judge request after you stop skips the connection setup (about
+ * 0.1-0.2 s when it has gone cold). A cheap model list request, no tokens;
+ * Groq is warmed on its direct route, which groqFetch tries first.
+ */
+export function warmJudges(fetcher: typeof fetch = fetch, now = Date.now()) {
+  if (now - lastWarm < WARM_AGAIN_MS) return
+  const targets = judgeTargets(true)
+  if (!targets.length) return
+  lastWarm = now
+  const bases = new Map(targets.map((t) => [t.base, t.key]))
+  bases.forEach((key, base) => {
+    fetcher(`${base}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+    })
+      .then((res) => res.body?.cancel())
+      .catch(() => {})
+  })
 }
 
 /**

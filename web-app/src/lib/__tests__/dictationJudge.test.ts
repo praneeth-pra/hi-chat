@@ -3,6 +3,7 @@ import {
   getDictationJudges,
   judgeDictation,
   setDictationJudges,
+  warmJudges,
 } from '../dictationJudge'
 
 const providers: Record<string, { api_key?: string; base_url?: string }> = {
@@ -261,5 +262,27 @@ describe('judgeDictation', () => {
       localStorage.removeItem('dictation-judges')
       delete providers.groq
     }
+  })
+})
+
+describe('warmJudges', () => {
+  it('opens each chosen judge connection once, direct to Groq, then rests', async () => {
+    providers.groq = { api_key: 'gsk' }
+    setDictationJudges(['cerebras-120b', 'groq-20b', 'groq-120b'])
+    const fetcher = vi.fn(async () => new Response('{}'))
+    warmJudges(fetcher as unknown as typeof fetch, 1_000_000)
+    expect(fetcher.mock.calls.map((c) => c[0])).toEqual([
+      'https://api.cerebras.ai/v1/models',
+      'https://api.groq.com/openai/v1/models',
+    ])
+    expect(fetcher.mock.calls[0][1]).toMatchObject({
+      headers: { Authorization: 'Bearer csk' },
+    })
+    warmJudges(fetcher as unknown as typeof fetch, 1_010_000)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    warmJudges(fetcher as unknown as typeof fetch, 1_030_000)
+    expect(fetcher).toHaveBeenCalledTimes(4)
+    delete providers.groq
+    setDictationJudges(['cerebras-120b', 'groq-20b'])
   })
 })

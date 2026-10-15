@@ -26,6 +26,7 @@ import {
   SKIP_AGREEMENT,
   judgeDictation,
   textAgreement,
+  warmJudges,
 } from '@/lib/dictationJudge'
 
 /**
@@ -705,6 +706,7 @@ export async function startDictation() {
     toast('This browser cannot record the microphone')
     return
   }
+  if (getDictationEngine() === 'auto') warmJudges()
   // The mic is already open: start right away
   if (mic && micReady(mic)) return begin(mic)
   const gen = ++generation
