@@ -85,11 +85,12 @@ const getAlphaValue = () => {
 // Default interface settings
 const defaultFontSize: FontSize = '15px'
 // Sidebar (app background): a soft neutral that sets the panel apart from
-// the chat surface. Dark mode is a neutral near-black (no blue tint).
+// the chat surface. Dark mode is true black around a near-black chat (no
+// blue tint).
 const defaultAppBgColor: RgbaColor = {
-  r: 13,
-  g: 13,
-  b: 13,
+  r: 0,
+  g: 0,
+  b: 0,
   a: getAlphaValue(),
 }
 const defaultLightAppBgColor: RgbaColor = {
@@ -98,7 +99,7 @@ const defaultLightAppBgColor: RgbaColor = {
   b: 242,
   a: getAlphaValue(),
 }
-const defaultAppMainViewBgColor: RgbaColor = { r: 22, g: 22, b: 22, a: 1 }
+const defaultAppMainViewBgColor: RgbaColor = { r: 10, g: 10, b: 10, a: 1 }
 const defaultLightAppMainViewBgColor: RgbaColor = {
   r: 255,
   g: 255,
