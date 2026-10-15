@@ -133,10 +133,11 @@ const AUTO_SHORT_GRACE_MS = 500
 /**
  * Auto: the text goes out by this long after you stop, whatever is late. In
  * the 12-14 Oct mock interviews 40 of 154 clips took longer, 32 of them
- * waiting on the judge. Past it the vote is sent; if no engine has text yet,
+ * waiting on the judge. 1.2 s lets the judge finish on almost all of them
+ * (its step took up to ~1.15 s). Past it the vote is sent; if no engine has text yet,
  * the first one to answer is sent as it arrives.
  */
-export const AUTO_DEADLINE_MS = 950
+export const AUTO_DEADLINE_MS = 1200
 /** Less judge time than this left before the deadline: send the vote. */
 const MIN_JUDGE_MS = 150
 
