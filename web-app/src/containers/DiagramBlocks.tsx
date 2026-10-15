@@ -39,11 +39,11 @@ export function FlowDiagram({ code }: { code: string }) {
       {steps.map((step, i) => (
         <div key={i} className="flex flex-col items-center">
           {i > 0 && (
-            <span aria-hidden className="text-primary/50 leading-none py-1">
+            <span aria-hidden className="text-primary/70 dark:text-primary leading-none py-1">
               ↓
             </span>
           )}
-          <div className="w-full flex items-baseline gap-2.5 rounded-lg border border-main-view-fg/[0.1] border-l-2 border-l-primary/60 bg-main-view-fg/[0.025] px-3 py-2 text-sm leading-snug">
+          <div className="w-full flex items-baseline gap-2.5 rounded-lg border border-main-view-fg/[0.1] dark:border-main-view-fg/[0.16] border-l-2 border-l-primary/60 bg-main-view-fg/[0.025] px-3 py-2 text-sm leading-snug">
             <span
               aria-hidden
               className="shrink-0 text-xs font-medium tabular-nums text-primary"

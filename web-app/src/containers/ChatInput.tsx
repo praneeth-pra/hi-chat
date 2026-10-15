@@ -1147,7 +1147,7 @@ const ChatInput = ({
 
           <div
             className={cn(
-              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.12] rounded-2xl text-main-view-fg bg-main-view shadow-[0_1px_2px_rgba(0,0,0,0.05),0_10px_30px_-14px_rgba(0,0,0,0.22)] transition-[border-color,box-shadow]',
+              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.12] dark:border-main-view-fg/20 rounded-2xl text-main-view-fg bg-main-view shadow-[0_1px_2px_rgba(0,0,0,0.05),0_10px_30px_-14px_rgba(0,0,0,0.22)] transition-[border-color,box-shadow]',
               isFocused &&
                 'border-primary/40 shadow-[0_0_0_3px_color-mix(in_oklab,var(--app-primary)_12%,transparent),0_12px_32px_-14px_rgba(0,0,0,0.25)]',
               isDragOver && 'ring-2 ring-accent border-accent'
@@ -1486,7 +1486,7 @@ const ChatInput = ({
                   size="icon"
                   className={cn(
                     'rounded-full shadow-[0_4px_12px_-4px_color-mix(in_oklab,var(--app-primary)_60%,transparent)]',
-                    !prompt.trim() && 'bg-primary/15 shadow-none'
+                    !prompt.trim() && 'bg-main-view-fg/10 shadow-none'
                   )}
                   disabled={!prompt.trim() || ingestingAny}
                   data-test-id="send-message-button"
@@ -1499,7 +1499,7 @@ const ChatInput = ({
                   ) : (
                     <ArrowUp
                       className={cn(
-                        prompt.trim() ? 'text-primary-fg' : 'text-primary'
+                        prompt.trim() ? 'text-primary-fg' : 'text-main-view-fg/50'
                       )}
                     />
                   )}
