@@ -242,14 +242,6 @@ function ThreadDetail() {
 
   const threadModel = useMemo(() => thread?.model, [thread])
 
-  // The newest answer gets a subtle accent so the eye lands on it first
-  const latestAnswerId = useMemo(() => {
-    for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
-      if (messages![i].role === 'assistant') return messages![i].id
-    }
-    return undefined
-  }, [messages])
-
   if (!messages || !threadModel) return null
 
   return (
@@ -302,9 +294,6 @@ function ThreadDetail() {
                       key={item.id}
                       data-test-id={`message-${item.role}-${item.id}`}
                       data-message-author-role={item.role}
-                      data-latest-answer={
-                        item.id === latestAnswerId ? 'true' : undefined
-                      }
                       className="mb-4"
                     >
                       <ThreadContent

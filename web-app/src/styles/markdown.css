@@ -85,24 +85,13 @@
     @apply text-main-view-fg/40;
   }
 
-  &:not(.is-user) li::marker {
-    @apply text-primary/60;
-  }
-
-  /* The bold term that opens a bullet (tagged by rehypeLeadTerms). Mixing
-     in the text colour darkens it on light and lifts it on dark, so it keeps
-     good contrast in both themes. */
-  .lead-term {
-    color: color-mix(in oklab, var(--app-primary) 80%, var(--app-main-view-fg));
-  }
-
   ol {
     list-style-type: decimal;
   }
 
   li {
-    margin-bottom: 0.5em;
-    padding-left: 0.2em;
+    margin-bottom: 0.4em;
+    padding-left: 0.15em;
   }
 
   li > ul,
@@ -244,17 +233,6 @@
 .markdown [data-code-block] code {
   color: inherit;
   background-color: transparent;
-}
-
-/* ```flow and ```tree blocks are drawn by DiagramBlocks; the markdown <pre>
-   around them must not add its monospace font or grey slab */
-.markdown pre:has(> [data-flow-diagram]),
-.markdown pre:has(> [data-tree-layout]) {
-  background-color: transparent;
-  font-family: inherit;
-  white-space: normal;
-  overflow: visible;
-  border-radius: 0;
 }
 
 [data-tool-call-block] + [data-tool-call-block] {

@@ -15,7 +15,6 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import type { PluggableList } from 'unified'
 import { remarkTablesAsLists } from '@/lib/tablesToLists'
-import { rehypeLeadTerms } from '@/lib/leadTerms'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { FlowDiagram, TreeLayout, isDiagramLanguage } from './DiagramBlocks'
 
@@ -299,13 +298,10 @@ function RenderMarkdownComponent({
   // Stable rehypePlugins reference
   const rehypePlugins = useMemo<PluggableList>(() => {
     // Sanitize external HTML before KaTeX generates its trusted markup.
-    const plugins: PluggableList = enableRawHtml
+    return enableRawHtml
       ? [rehypeRaw, [rehypeSanitize, markdownSchema], rehypeKatex]
       : [rehypeKatex]
-    // Colour the bold term that opens a bullet in answers
-    if (!isUser) plugins.push(rehypeLeadTerms)
-    return plugins
-  }, [enableRawHtml, isUser])
+  }, [enableRawHtml])
 
   // Memoized components with stable references
   const markdownComponents: Components = useMemo(

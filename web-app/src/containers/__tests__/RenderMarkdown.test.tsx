@@ -41,27 +41,6 @@ describe('RenderMarkdown', () => {
     expect(flow!.textContent?.match(/↓/g)).toHaveLength(2)
   })
 
-  it('tags only the bold term that opens a bullet as a lead term', () => {
-    const { container } = render(
-      <RenderMarkdown
-        content={
-          '- **Contract tests:** run **Pact** checks\n- deploy with **canary**\n\n**Not a list item**'
-        }
-      />
-    )
-    const leads = container.querySelectorAll('.lead-term')
-    expect([...leads].map((el) => el.textContent)).toEqual(['Contract tests:'])
-  })
-
-  it('tags lead terms in loose lists too, but not in user messages', () => {
-    const loose = '- **First:** one\n\n- **Second:** two'
-    const { container } = render(<RenderMarkdown content={loose} />)
-    expect(container.querySelectorAll('.lead-term')).toHaveLength(2)
-
-    const user = render(<RenderMarkdown content={loose} isUser />)
-    expect(user.container.querySelectorAll('.lead-term')).toHaveLength(0)
-  })
-
   it('keeps a tree block unwrapped so the folder indentation lines up', () => {
     const tree = 'src/\n  test/\n    java/\n      pages/'
     const { container } = render(
