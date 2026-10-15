@@ -2,10 +2,11 @@ import { groqFetch, viaGroqProxy } from '@/lib/groqProxy'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
 /**
- * Auto dictation's judge: when the engines' texts differ, a fast model
- * (Cerebras gpt-oss-120b, else Groq gpt-oss-20b, with the keys from Model
- * Providers) writes the most accurate version from all of them. Without a
- * key, or if it is slow or answers something else, the vote stands.
+ * Auto dictation's judge: when the engines' texts differ, the fast models
+ * chosen in Settings (Cerebras gpt-oss-120b and Groq gpt-oss-20b by default,
+ * with the keys from Model Providers) race to write the most accurate
+ * version from all of them. Without a key, or if they are slow or answer
+ * something else, the vote stands.
  */
 
 export type EngineText = { engine: string; text: string }
@@ -40,11 +41,6 @@ export function textAgreement(a: string, b: string): number {
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 1500
 /**
- * Groq's judge joins if Cerebras hasn't answered by now. In the 12 Oct mock
- * interview Cerebras judged in 0.37-1.04 s but twice ran past the timeout.
- */
-export const JUDGE_HEDGE_MS = 600
-/**
  * Texts this alike skip the judge and the vote is sent. On P's questions,
  * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
  * vs "Extra bucket" 0.95 (the first engine right both times); a real mix-up
@@ -63,37 +59,131 @@ const ENGINE_NAMES: Record<string, string> = {
   cartesia: 'Cartesia',
 }
 
-function judgeTargets() {
+export type DictationJudge =
+  | 'cerebras-120b'
+  | 'cerebras-qwen'
+  | 'groq-20b'
+  | 'groq-120b'
+
+/** Judge models to pick from in Settings; the chosen ones all run at once. */
+export const DICTATION_JUDGES: {
+  value: DictationJudge
+  label: string
+  provider: 'cerebras' | 'groq'
+  model: string
+  extra: Record<string, unknown>
+}[] = [
+  {
+    value: 'cerebras-120b',
+    label: 'Cerebras gpt-oss-120b',
+    provider: 'cerebras',
+    model: 'gpt-oss-120b',
+    extra: {},
+  },
+  {
+    value: 'cerebras-qwen',
+    label: 'Cerebras Qwen 3.8 27B (no thinking)',
+    provider: 'cerebras',
+    model: 'qwen-3.8-27b',
+    extra: { reasoning_effort: 'none' },
+  },
+  {
+    value: 'groq-20b',
+    label: 'Groq gpt-oss-20b',
+    provider: 'groq',
+    model: 'openai/gpt-oss-20b',
+    extra: { include_reasoning: false },
+  },
+  {
+    value: 'groq-120b',
+    label: 'Groq gpt-oss-120b',
+    provider: 'groq',
+    model: 'openai/gpt-oss-120b',
+    extra: { include_reasoning: false },
+  },
+]
+const DEFAULT_JUDGES: DictationJudge[] = ['cerebras-120b', 'groq-20b']
+const JUDGES_STORAGE_KEY = 'dictation-judges'
+
+/** The judges chosen in Settings (none means the vote is always sent). */
+export function getDictationJudges(): DictationJudge[] {
+  try {
+    const saved: unknown = JSON.parse(
+      localStorage.getItem(JUDGES_STORAGE_KEY) ?? 'null'
+    )
+    if (Array.isArray(saved))
+      return DICTATION_JUDGES.map((j) => j.value).filter((v) =>
+        saved.includes(v)
+      )
+  } catch {
+    // Storage blocked or unreadable
+  }
+  return DEFAULT_JUDGES
+}
+
+export function setDictationJudges(judges: DictationJudge[]) {
+  try {
+    localStorage.setItem(JUDGES_STORAGE_KEY, JSON.stringify(judges))
+  } catch {
+    // Storage blocked
+  }
+}
+
+function judgeTargets(direct = false) {
   const providers = useModelProvider.getState()
-  const targets: {
-    url: string
-    key: string
-    model: string
-    extra: Record<string, unknown>
-  }[] = []
-  const cerebras = providers.getProviderByName('cerebras')
-  if (cerebras?.api_key)
-    targets.push({
-      url: `${cerebras.base_url || 'https://api.cerebras.ai/v1'}/chat/completions`,
-      key: cerebras.api_key,
-      model: 'gpt-oss-120b',
-      extra: {},
+  const chosen = getDictationJudges()
+  return DICTATION_JUDGES.filter((j) => chosen.includes(j.value)).flatMap(
+    (judge) => {
+      const provider = providers.getProviderByName(judge.provider)
+      if (!provider?.api_key) return []
+      const own =
+        provider.base_url ||
+        (judge.provider === 'cerebras'
+          ? 'https://api.cerebras.ai/v1'
+          : 'https://api.groq.com/openai/v1')
+      const base =
+        judge.provider === 'cerebras' || direct ? own : viaGroqProxy(own)
+      return [
+        {
+          base,
+          url: `${base}/chat/completions`,
+          key: provider.api_key,
+          model: judge.model,
+          extra: judge.extra,
+        },
+      ]
+    }
+  )
+}
+
+const WARM_AGAIN_MS = 20_000
+let lastWarm = 0
+
+/**
+ * Opens the connections to the chosen judges while you are still speaking,
+ * so the judge request after you stop skips the connection setup (about
+ * 0.1-0.2 s when it has gone cold). A cheap model list request, no tokens;
+ * Groq is warmed on its direct route, which groqFetch tries first.
+ */
+export function warmJudges(fetcher: typeof fetch = fetch, now = Date.now()) {
+  if (now - lastWarm < WARM_AGAIN_MS) return
+  const targets = judgeTargets(true)
+  if (!targets.length) return
+  lastWarm = now
+  const bases = new Map(targets.map((t) => [t.base, t.key]))
+  bases.forEach((key, base) => {
+    fetcher(`${base}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
     })
-  const groq = providers.getProviderByName('groq')
-  if (groq?.api_key)
-    targets.push({
-      url: `${viaGroqProxy(groq.base_url || 'https://api.groq.com/openai/v1')}/chat/completions`,
-      key: groq.api_key,
-      model: 'openai/gpt-oss-20b',
-      extra: { include_reasoning: false },
-    })
-  return targets
+      .then((res) => res.body?.cancel())
+      .catch(() => {})
+  })
 }
 
 /**
- * Sends one prompt to the judge and returns the first reply `accept` takes.
- * Cerebras goes first; Groq joins after JUDGE_HEDGE_MS, or at once if
- * Cerebras fails, so one slow provider no longer runs into the timeout.
+ * Sends one prompt to every judge at once and returns the first reply
+ * `accept` takes. Groq used to wait 0.6 s for Cerebras, but on 14 Oct
+ * Cerebras's judging took 0.72 s on a typical clip and up to 1.13 s.
  */
 async function askJudge(
   system: string,
@@ -146,18 +236,11 @@ async function askJudge(
               `Dictation judge (${target.model}) skipped:`,
               (err as Error).message
             )
-          // A failed first judge brings the backup in straight away
-          if (started < targets.length) next()
         } finally {
           if (--pending === 0 && started === targets.length) resolve(undefined)
         }
       }
-      const next = () => {
-        const target = targets[started]
-        if (target) void ask(target)
-      }
-      next()
-      if (targets.length > 1) timers.push(setTimeout(next, JUDGE_HEDGE_MS))
+      targets.forEach((target) => void ask(target))
       timers.push(setTimeout(() => resolve(undefined), timeoutMs))
     })
   } finally {

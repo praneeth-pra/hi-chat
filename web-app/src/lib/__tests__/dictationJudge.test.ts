@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { judgeDictation } from '../dictationJudge'
+import {
+  getDictationJudges,
+  judgeDictation,
+  setDictationJudges,
+  warmJudges,
+} from '../dictationJudge'
 
 const providers: Record<string, { api_key?: string; base_url?: string }> = {
   cerebras: { api_key: 'csk' },
@@ -151,7 +156,7 @@ describe('judgeDictation', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it('brings in Groq when Cerebras is slow, and uses the first usable reply', async () => {
+  it('asks Cerebras and Groq at once and uses the first usable reply', async () => {
     providers.cerebras = { api_key: 'csk' }
     providers.groq = { api_key: 'gsk' }
     vi.useFakeTimers()
@@ -177,9 +182,8 @@ describe('judgeDictation', () => {
         [],
         fetcher as unknown as typeof fetch
       )
-      await vi.advanceTimersByTimeAsync(599)
-      expect(fetcher).toHaveBeenCalledTimes(1)
-      await vi.advanceTimersByTimeAsync(1)
+      expect(fetcher).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(0)
       await expect(judged).resolves.toBe('Run kubectl get pods.')
       expect(fetcher).toHaveBeenCalledTimes(2)
       // The slow Cerebras request is cancelled
@@ -192,7 +196,7 @@ describe('judgeDictation', () => {
     }
   })
 
-  it('asks Groq at once when Cerebras fails, and keeps the vote if both fail', async () => {
+  it('uses Groq when Cerebras fails, and keeps the vote if both fail', async () => {
     providers.cerebras = { api_key: 'csk' }
     providers.groq = { api_key: 'gsk' }
     try {
@@ -223,5 +227,62 @@ describe('judgeDictation', () => {
     } finally {
       delete providers.groq
     }
+  })
+
+  it('uses only the judges chosen in Settings', async () => {
+    providers.groq = { api_key: 'gsk' }
+    try {
+      expect(getDictationJudges()).toEqual(['cerebras-120b', 'groq-20b'])
+      setDictationJudges(['cerebras-qwen', 'groq-120b'])
+      const fetcher = reply('Run kubectl get pods.')
+      await judgeDictation(
+        results,
+        'Run kubectl get pods.',
+        [],
+        fetcher as unknown as typeof fetch
+      )
+      const bodies = fetcher.mock.calls.map((c) =>
+        JSON.parse(String((c[1] as RequestInit).body))
+      )
+      expect(bodies.map((b) => b.model).sort()).toEqual([
+        'openai/gpt-oss-120b',
+        'qwen-3.8-27b',
+      ])
+      expect(
+        bodies.find((b) => b.model === 'qwen-3.8-27b').reasoning_effort
+      ).toBe('none')
+      // None chosen: the vote stands, nothing is asked
+      setDictationJudges([])
+      const none = reply('x')
+      expect(
+        await judgeDictation(results, 'v', [], none as unknown as typeof fetch)
+      ).toBeUndefined()
+      expect(none).not.toHaveBeenCalled()
+    } finally {
+      localStorage.removeItem('dictation-judges')
+      delete providers.groq
+    }
+  })
+})
+
+describe('warmJudges', () => {
+  it('opens each chosen judge connection once, direct to Groq, then rests', async () => {
+    providers.groq = { api_key: 'gsk' }
+    setDictationJudges(['cerebras-120b', 'groq-20b', 'groq-120b'])
+    const fetcher = vi.fn(async () => new Response('{}'))
+    warmJudges(fetcher as unknown as typeof fetch, 1_000_000)
+    expect(fetcher.mock.calls.map((c) => c[0])).toEqual([
+      'https://api.cerebras.ai/v1/models',
+      'https://api.groq.com/openai/v1/models',
+    ])
+    expect(fetcher.mock.calls[0][1]).toMatchObject({
+      headers: { Authorization: 'Bearer csk' },
+    })
+    warmJudges(fetcher as unknown as typeof fetch, 1_010_000)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    warmJudges(fetcher as unknown as typeof fetch, 1_030_000)
+    expect(fetcher).toHaveBeenCalledTimes(4)
+    delete providers.groq
+    setDictationJudges(['cerebras-120b', 'groq-20b'])
   })
 })

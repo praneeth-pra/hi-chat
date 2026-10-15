@@ -26,6 +26,7 @@ import {
   SKIP_AGREEMENT,
   judgeDictation,
   textAgreement,
+  warmJudges,
 } from '@/lib/dictationJudge'
 
 /**
@@ -37,9 +38,9 @@ import {
 /**
  * Which service turns your voice into text. Soniox gets your dictionary as
  * context terms and Cartesia the 100 that fit; all four stream live while
- * you talk. Auto runs Cartesia, Soniox and ElevenLabs: as soon as two agree
- * their text is sent, else a judge model writes the best version. Grok was
- * left out of Auto: on P's questions it was the slowest and least accurate.
+ * you talk. Auto races the engines chosen in Settings (Cartesia, Soniox and
+ * ElevenLabs by default; Grok can be added): as soon as two agree their text
+ * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
   | 'grok'
@@ -48,7 +49,7 @@ export type DictationEngine =
   | 'cartesia'
   | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
-  { value: 'auto', label: 'Auto (Cartesia + Soniox + ElevenLabs)' },
+  { value: 'auto', label: 'Auto (race the chosen engines)' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
@@ -130,6 +131,16 @@ const AUTO_GRACE_MS = 1000
  * interview for 1.0-1.5 s although ElevenLabs had answered in 0.35-0.8 s.
  */
 const AUTO_SHORT_GRACE_MS = 500
+/**
+ * Auto: the text goes out by this long after you stop, whatever is late. In
+ * the 12-14 Oct mock interviews 40 of 154 clips took longer, 32 of them
+ * waiting on the judge. 1.2 s lets the judge finish on almost all of them
+ * (its step took up to ~1.15 s). Past it the vote is sent; if no engine has text yet,
+ * the first one to answer is sent as it arrives.
+ */
+export const AUTO_DEADLINE_MS = 1200
+/** Less judge time than this left before the deadline: send the vote. */
+const MIN_JUDGE_MS = 150
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -522,10 +533,45 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
   return undefined
 }
 
+/** Engines Auto can race, in tie-break order. */
+export const AUTO_ENGINE_CHOICES = [
+  'cartesia',
+  'soniox',
+  'elevenlabs',
+  'grok',
+] as const satisfies readonly DictationEngine[]
+export type AutoEngine = (typeof AUTO_ENGINE_CHOICES)[number]
+const DEFAULT_AUTO_ENGINES: AutoEngine[] = ['cartesia', 'soniox', 'elevenlabs']
+const AUTO_ENGINES_STORAGE_KEY = 'dictation-auto-engines'
+
+/** The engines Auto races, chosen in Settings (at least one). */
+export function getAutoEngines(): AutoEngine[] {
+  try {
+    const saved: unknown = JSON.parse(
+      localStorage.getItem(AUTO_ENGINES_STORAGE_KEY) ?? 'null'
+    )
+    if (Array.isArray(saved)) {
+      const chosen = AUTO_ENGINE_CHOICES.filter((e) => saved.includes(e))
+      if (chosen.length) return chosen
+    }
+  } catch {
+    // Storage blocked or unreadable
+  }
+  return DEFAULT_AUTO_ENGINES
+}
+
+export function setAutoEngines(engines: AutoEngine[]) {
+  try {
+    localStorage.setItem(AUTO_ENGINES_STORAGE_KEY, JSON.stringify(engines))
+  } catch {
+    // Storage blocked
+  }
+}
+
 function autoLiveStreams() {
   // Cartesia first: when it agrees with another engine its text is sent
   // (it had the most words right on P's questions), then Soniox
-  return (['cartesia', 'soniox', 'elevenlabs'] as const).map((engine) => ({
+  return getAutoEngines().map((engine) => ({
     engine,
     stream: liveStream(engine)!,
   }))
@@ -575,18 +621,29 @@ export function pickBest(results: EngineText[]): EngineText | undefined {
 
 /**
  * Waits for every engine, but only AUTO_GRACE_MS once the first has text,
- * and not at all once two engines agree (the judge would skip anyway).
+ * not at all once two engines agree (the judge would skip anyway), and not
+ * past `deadlineMs` once any engine has text.
  */
 export function gatherAuto(
-  jobs: { engine: DictationEngine; text: Promise<string> }[]
+  jobs: { engine: DictationEngine; text: Promise<string> }[],
+  deadlineMs?: number
 ): Promise<EngineText[]> {
   return new Promise((resolve, reject) => {
     const done: EngineText[] = []
     const errors: string[] = []
     let left = jobs.length
     let grace: ReturnType<typeof setTimeout> | undefined
+    let late = false
+    const deadline =
+      deadlineMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            late = true
+            if (done.some((d) => d.text)) finish()
+          }, deadlineMs)
     const finish = () => {
       clearTimeout(grace)
+      clearTimeout(deadline)
       if (!done.length && errors.length) reject(new Error(errors.join('; ')))
       // Keep the engines' order, so ties go to the first (Cartesia)
       else
@@ -602,7 +659,7 @@ export function gatherAuto(
               (d) => d.text && textAgreement(d.text, text) >= SKIP_AGREEMENT
             )
           done.push({ engine, text })
-          if (agreed) finish()
+          if (agreed || (late && text)) finish()
           else if (text && !grace)
             grace = setTimeout(
               finish,
@@ -649,6 +706,7 @@ export async function startDictation() {
     toast('This browser cannot record the microphone')
     return
   }
+  if (getDictationEngine() === 'auto') warmJudges()
   // The mic is already open: start right away
   if (mic && micReady(mic)) return begin(mic)
   const gen = ++generation
@@ -709,14 +767,23 @@ export async function stopDictation() {
       )
       // Known mistakes fixed first, so two engines sharing one still agree
       // on the right text
-      const results = (await gatherAuto(jobs)).map((r) => ({
+      const results = (await gatherAuto(jobs, AUTO_DEADLINE_MS)).map((r) => ({
         ...r,
         text: applyFixes(r.text),
       }))
       const best = pickBest(results)
       const judgeStart = Date.now()
+      const judgeMs = AUTO_DEADLINE_MS - (judgeStart - stoppedAt)
       const judged =
-        best && (await judgeDictation(results, best.text, keyTerms()))
+        best && judgeMs >= MIN_JUDGE_MS
+          ? await judgeDictation(
+              results,
+              best.text,
+              keyTerms(),
+              undefined,
+              judgeMs
+            )
+          : undefined
       text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
