@@ -47,9 +47,9 @@ describe('useInterfaceSettings', () => {
     expect(result.current.fontSize).toBe('15px')
     expect(result.current.chatWidth).toBe('compact')
     expect(result.current.appBgColor).toEqual({
-      r: 17,
-      g: 17,
-      b: 19,
+      r: 0,
+      g: 0,
+      b: 0,
       a: 1,
     })
     expect(result.current.threadScrollBehavior).toBe(THREAD_SCROLL_BEHAVIOR.FLOW)
