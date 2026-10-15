@@ -125,6 +125,60 @@ describe('chat question extraction', () => {
         .mock.calls.every((args) => args[4]?.length === 0 && args[5] === false)
     ).toBe(true)
   })
+  it('accepts a question the judge ended with a question mark', () => {
+    const prompts = [{ promptIndex: 1, text: 'tell me about your project' }]
+    expect(
+      parseChatQuestions(
+        JSON.stringify({
+          questions: [{ promptIndex: 1, text: 'Tell me about your project?' }],
+        }),
+        [{ promptIndex: 1, text: 'Tell me about your project' }]
+      )
+    ).toEqual([{ promptIndex: 1, text: 'Tell me about your project?' }])
+    expect(() =>
+      parseChatQuestions(
+        JSON.stringify({
+          questions: [{ promptIndex: 1, text: 'Tell me about yourself?' }],
+        }),
+        prompts
+      )
+    ).toThrow()
+  })
+  it('keeps the exactly quoted questions when every judge misquotes one', async () => {
+    vi.mocked(sendCompletion)
+      .mockResolvedValueOnce(
+        response([
+          { promptIndex: 1, text: 'Why ECS?' },
+          { promptIndex: 1, text: 'Why use Kubernetes?' },
+        ]) as never
+      )
+      .mockResolvedValueOnce(
+        response([{ promptIndex: 7, text: 'Hi' }]) as never
+      )
+    const questions = await extractChatQuestions(
+      thread,
+      [{ promptIndex: 1, text: 'Why ECS? Which is cheaper?' }],
+      providers,
+      new AbortController().signal
+    )
+    expect(questions).toEqual([{ promptIndex: 1, text: 'Why ECS?' }])
+  })
+  it('lists the prompts as sent when every judge fails', async () => {
+    vi.mocked(sendCompletion).mockRejectedValue(new Error('429'))
+    const questions = await extractChatQuestions(
+      thread,
+      [
+        { promptIndex: 1, text: 'Why ECS?' },
+        { promptIndex: 2, text: 'How do you deploy it?' },
+      ],
+      providers,
+      new AbortController().signal
+    )
+    expect(questions).toEqual([
+      { promptIndex: 1, text: 'Why ECS?' },
+      { promptIndex: 2, text: 'How do you deploy it?' },
+    ])
+  })
   it('cancels a provider that ignores abort without trying the next provider', async () => {
     vi.mocked(sendCompletion).mockImplementation(() => new Promise(() => {}))
     const controller = new AbortController()
