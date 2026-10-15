@@ -445,7 +445,7 @@ local function glide(to, done)
   glideTimer = hs.timer.doEvery(1 / 60, step)
 end
 
--- Dummy cursor: while the real pointer is over on Jan, a look-alike arrow stays
+-- Dummy cursor: while the real pointer is over on Jan, a look-alike pointer stays
 -- where it was on the laptop screen, so the shared screen still shows a cursor.
 -- Set DUMMY_CURSOR = false to turn it off.
 local DUMMY_CURSOR = true
@@ -455,33 +455,38 @@ do -- Accessibility scaling is in screen points, independent of Retina pixels.
   cursorScale = math.max(1, tonumber(out) or 1)
 end
 local dummy -- the canvas, while it is showing
-local cursorImage, cursorInfo
--- Read the native arrow once. Keep its logical size and hotspot; do not stretch
--- a hand-drawn polygon or add a second outline/shadow to the system artwork.
-do
+-- Read a native cursor's image, logical size and hotspot. Keep them as they
+-- are; do not stretch a hand-drawn polygon or add an outline/shadow.
+local function readCursor(expr)
   local path = os.tmpname() .. ".tiff"
   local ok, result = hs.osascript.javascript(string.format([[
     ObjC.import('AppKit');
-    const cursor = $.NSCursor.arrowCursor;
+    const cursor = %s;
     const image = cursor.image;
     const size = image.size;
     const hotspot = cursor.hotSpot;
     if (!image.TIFFRepresentation.writeToFileAtomically(%q, true))
       throw new Error('Could not export native cursor');
     JSON.stringify({w: size.width, h: size.height, x: hotspot.x, y: hotspot.y});
-  ]], path))
+  ]], expr, path))
+  local image, info
   if ok and type(result) == "string" then
-    local decoded, info = pcall(hs.json.decode, result)
-    if decoded and type(info) == "table" and tonumber(info.w) and tonumber(info.h)
-      and tonumber(info.x) and tonumber(info.y) and info.w > 0 and info.h > 0 then
-      cursorImage = hs.image.imageFromPath(path)
-      if cursorImage then cursorInfo = info end
+    local decoded, data = pcall(hs.json.decode, result)
+    if decoded and type(data) == "table" and tonumber(data.w) and tonumber(data.h)
+      and tonumber(data.x) and tonumber(data.y) and data.w > 0 and data.h > 0 then
+      image = hs.image.imageFromPath(path)
+      if image then info = data end
     end
   end
   os.remove(path)
-  if not cursorImage then
-    hs.printf("Jan remote: native cursor unavailable; dummy cursor disabled.")
-  end
+  if image then return image, info end
+end
+-- The arrow is read once as the fallback. Each time the dummy appears it
+-- copies whatever the pointer looks like right then (the I-beam while it
+-- is over text, the hand over a link), so the stand-in matches the real one.
+local cursorImage, cursorInfo = readCursor("$.NSCursor.arrowCursor")
+if not cursorImage then
+  hs.printf("Jan remote: native cursor unavailable; dummy cursor disabled.")
 end
 
 local function hideDummy()
@@ -491,15 +496,17 @@ end
 local function showDummy(at)
   hideDummy()
   if not DUMMY_CURSOR or not cursorImage then return end
+  local image, info = readCursor("$.NSCursor.currentSystemCursor")
+  if not image then image, info = cursorImage, cursorInfo end
   local k = cursorScale
   dummy = hs.canvas.new({
-    x = at.x - cursorInfo.x * k, y = at.y - cursorInfo.y * k,
-    w = cursorInfo.w * k, h = cursorInfo.h * k,
+    x = at.x - info.x * k, y = at.y - info.y * k,
+    w = info.w * k, h = info.h * k,
   })
   dummy:appendElements({
-    type = "image", image = cursorImage,
+    type = "image", image = image,
     imageScaling = "scaleToFit", imageAlignment = "center",
-    frame = { x = 0, y = 0, w = cursorInfo.w * k, h = cursorInfo.h * k },
+    frame = { x = 0, y = 0, w = info.w * k, h = info.h * k },
   })
   dummy:level(hs.canvas.windowLevels.cursor or hs.canvas.windowLevels.overlay)
   dummy:behavior({ "canJoinAllSpaces", "stationary" })
