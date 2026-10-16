@@ -501,7 +501,7 @@ test('muse live: sends the key in the handshake, then pipes the audio', async ()
       engine: 'muse',
     })
     const ws = new WebSocket(
-      `ws://127.0.0.1:${server.address().port}/api/muse-live?ticket=${ticket2}&keyterm=EKS&keyterm=eks`
+      `ws://127.0.0.1:${server.address().port}/api/muse-live?ticket=${ticket2}&keyterm=EKS&keyterm=eks&keyterm=${'Performance testing tools JMeter'}`
     )
     const got = []
     const closed = new Promise((r) => (ws.onclose = r))
