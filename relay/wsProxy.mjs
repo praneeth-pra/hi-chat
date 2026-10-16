@@ -14,6 +14,8 @@ const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const MAX_MESSAGE_BYTES = 1024 * 1024
 
 export const GROK_LIVE_URL = 'wss://api.x.ai/v1/stt'
+export const MUSE_LIVE_URL = 'wss://api.meta.ai/v1/asr/realtime'
+export const MUSE_MODEL = 'muse-voice-transcribe-1.0'
 
 /** xAI accepts up to 100 key terms of up to 50 characters each. */
 export function cleanKeyterms(terms) {
@@ -296,4 +298,119 @@ export function grokLive(
     finish('failed')
   }
   upstream.onclose = () => finish('done')
+}
+
+/**
+ * Pipes one browser socket to Meta's Muse Voice Transcribe. Meta takes the
+ * key in the first message (the handshake), so the relay sends it, then
+ * holds the browser's audio until Meta answers with a sessionId. One clip is
+ * one push-to-talk session: the browser's {"type":"endStream"} ends it and
+ * Meta replies with the final transcript, then closes.
+ */
+export function museLive(
+  client,
+  {
+    env = process.env,
+    WebSocketImpl = globalThis.WebSocket,
+    log = console.log,
+    keyterms = [],
+  } = {}
+) {
+  const started = Date.now()
+  const key = env.META_API_KEY
+  if (!key || !WebSocketImpl) {
+    client.send(
+      JSON.stringify({
+        type: 'error',
+        message: key ? 'WebSocket client unavailable' : 'META_API_KEY not set',
+      })
+    )
+    return client.close(1011)
+  }
+  const upstream = new WebSocketImpl(MUSE_LIVE_URL)
+  upstream.binaryType = 'arraybuffer'
+  let ready = false
+  const held = []
+  let heldBytes = 0
+  let done = false
+  const readiness = setTimeout(() => finish('readiness timeout'), 10_000)
+  readiness.unref?.()
+  const finish = (why) => {
+    if (done) return
+    done = true
+    clearTimeout(readiness)
+    held.length = 0
+    heldBytes = 0
+    log(`muse live ${why} after ${Date.now() - started} ms`)
+    try {
+      upstream.close()
+    } catch {
+      // Already closed
+    }
+    client.close()
+  }
+  upstream.onopen = () => {
+    upstream.send(
+      JSON.stringify({
+        authorization: { accessToken: `Bearer ${key}` },
+        audioEncoding: 'PCM_16KHZ',
+        model: MUSE_MODEL,
+        mode: 'PUSH_TO_TALK',
+        partialMode: 'CUMULATIVE',
+        emitAudioProgress: false,
+        languageBias: ['English'],
+        // Words to bias transcription toward (the assistant's key terms)
+        ...(keyterms.length ? { keywords: keyterms } : {}),
+      })
+    )
+  }
+  client.onmessage = (data) => {
+    if (done) return
+    const size =
+      typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+    if (
+      (ready ? upstream.bufferedAmount : heldBytes) + size >
+      MAX_MESSAGE_BYTES
+    )
+      return finish('audio backlog exceeded')
+    if (ready && upstream.readyState === 1) upstream.send(data)
+    else {
+      held.push(data)
+      heldBytes += size
+    }
+  }
+  client.onclose = () => finish('closed by browser')
+  upstream.onmessage = (e) => {
+    if (done) return
+    const text =
+      typeof e.data === 'string' ? e.data : Buffer.from(e.data).toString('utf8')
+    if (!ready) {
+      let reply = {}
+      try {
+        reply = JSON.parse(text)
+      } catch {
+        // Not JSON: passed on below
+      }
+      if (reply.sessionId && !reply.type) {
+        ready = true
+        clearTimeout(readiness)
+        log(
+          `muse live ready in ${Date.now() - started} ms` +
+            (keyterms.length ? ` (${keyterms.length} key terms)` : '')
+        )
+        client.send(JSON.stringify({ type: 'ready' }))
+        for (const msg of held.splice(0)) upstream.send(msg)
+        heldBytes = 0
+        return
+      }
+    }
+    client.send(text)
+  }
+  upstream.onerror = () => {
+    client.send(
+      JSON.stringify({ type: 'error', message: 'Muse live connection failed' })
+    )
+    finish('failed')
+  }
+  upstream.onclose = (e) => finish(`done (${e?.code ?? 'closed'})`)
 }

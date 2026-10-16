@@ -216,6 +216,7 @@ export function toPcm16(samples: Float32Array): ArrayBuffer {
 
 /** Grok live goes through our relay, which adds XAI_API_KEY (wsProxy.mjs). */
 export const GROK_LIVE_PATH = '/api/grok-live'
+export const MUSE_LIVE_PATH = '/api/muse-live'
 
 /**
  * When `text` starts with the same characters as `prefix` (ignoring spaces),
@@ -393,6 +394,157 @@ export class GrokLiveTranscriber {
       this.onPreview?.(
         msg.is_final ? this.heard() : `${this.heard()} ${text}`.trim()
       )
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}
+
+/**
+ * One utterance streamed to Meta's Muse Voice Transcribe through the relay
+ * (push-to-talk: one clip is one session). Muse sends the whole text so far
+ * with each partial; `finish()` sends endStream and Muse answers with the
+ * final transcript.
+ */
+export class MuseLiveTranscriber {
+  private onPreview?: (text: string) => void
+  private socket: SocketLike | null = null
+  private queue: (ArrayBuffer | string)[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private latest = ''
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
+
+  constructor(
+    ticket: Promise<string>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
+    origin: string = typeof location !== 'undefined'
+      ? location.origin
+      : 'http://localhost',
+    // Words to bias Muse toward; the relay passes them on to Meta
+    keyterms: string[] = []
+  ) {
+    ticket.then(
+      (t) => {
+        if (this.failed) return
+        const params = new URLSearchParams({ ticket: t })
+        for (const term of keyterms) params.append('keyterm', term)
+        const url = `${origin.replace(/^http/, 'ws')}${MUSE_LIVE_PATH}?${params}`
+        const socket = makeSocket(url)
+        this.socket = socket
+        socket.onopen = () => {
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('Muse live connection failed'))
+        socket.onclose = () => {
+          if (this.done && this.latest) this.resolveWith(this.latest)
+          else this.abort(new Error('Muse live connection closed early'))
+        }
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the audio and waits for the final text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        if (this.latest) this.resolveWith(this.latest)
+        else this.abort(new Error('Muse live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      if (this.pendingLen) this.flush()
+      this.sendMsg(JSON.stringify({ type: 'endStream' }))
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Muse live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    this.close()
+    this.fail?.(err)
+  }
+
+  private resolveWith(text: string) {
+    const finish = this.done
+    if (!finish) return
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Muse live transcription finished')
+    this.close()
+    finish(text.trim())
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(toPcm16(merged))
+  }
+
+  private sendMsg(msg: ArrayBuffer | string) {
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: {
+      type?: string
+      transcript?: string
+      final?: boolean
+      message?: string
+    }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.type === 'transcript') {
+      const text = msg.transcript?.trim() ?? ''
+      if (text) this.latest = text
+      this.onPreview?.(this.latest)
+      if (msg.final) this.resolveWith(text || this.latest)
+    } else if (msg.type === 'error') {
+      this.abort(new Error(`Muse live: ${msg.message ?? 'error'}`))
+    }
   }
 
   private close() {

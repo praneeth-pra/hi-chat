@@ -48,6 +48,8 @@ ENV PORT=80
 # main engine; Grok (xAI) is an optional second engine.
 ENV ELEVENLABS_API_KEY=""
 ENV XAI_API_KEY=""
+# Optional Muse (Meta) live engine for Auto dictation.
+ENV META_API_KEY=""
 # Optional web sources for Accuracy mode; set securely in Railway.
 ENV EXA_API_KEY=""
 # Site login (relay/auth.mjs): a code emailed to LOGIN_EMAIL through Resend.

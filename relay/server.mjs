@@ -12,7 +12,12 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
-import { acceptWebSocket, cleanKeyterms, grokLive } from './wsProxy.mjs'
+import {
+  acceptWebSocket,
+  cleanKeyterms,
+  grokLive,
+  museLive,
+} from './wsProxy.mjs'
 import { handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb } from './search.mjs'
@@ -207,7 +212,10 @@ export async function liveToken({
   fetchImpl = fetch,
   engine = 'elevenlabs',
 } = {}) {
-  if (engine === 'grok') return grokTicket(env)
+  if (engine === 'grok')
+    return liveTicket('grok', env.XAI_API_KEY, 'XAI_API_KEY')
+  if (engine === 'muse')
+    return liveTicket('muse', env.META_API_KEY, 'META_API_KEY')
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
   const key = env.ELEVENLABS_API_KEY
@@ -235,31 +243,36 @@ export async function liveToken({
 }
 
 /**
- * Grok live goes through the relay (wsProxy.mjs), so its "token" is a
- * single-use ticket for /api/grok-live?ticket=…, valid for 10 minutes.
- * The ticket, fetched by a signed-in browser, lets the WebSocket through to
- * the relay.
+ * Grok and Muse live go through the relay (wsProxy.mjs), so their "token" is
+ * a single-use ticket for /api/grok-live or /api/muse-live?ticket=…, valid
+ * for 10 minutes. The ticket, fetched by a signed-in browser, lets the
+ * WebSocket through to the relay.
  */
-const GROK_TICKET_MS = 10 * 60 * 1000
-const grokTickets = new Map()
+const TICKET_MS = 10 * 60 * 1000
+const tickets = new Map()
 
-function grokTicket(env) {
-  if (!env.XAI_API_KEY)
-    throw Object.assign(new Error('XAI_API_KEY not set'), { status: 503 })
+function liveTicket(engine, key, keyName) {
+  if (!key)
+    throw Object.assign(new Error(`${keyName} not set`), { status: 503 })
   const now = Date.now()
-  for (const [t, at] of grokTickets)
-    if (now - at > GROK_TICKET_MS) grokTickets.delete(t)
+  for (const [t, { at }] of tickets) if (now - at > TICKET_MS) tickets.delete(t)
   const ticket = randomBytes(24).toString('hex')
-  grokTickets.set(ticket, now)
+  tickets.set(ticket, { engine, at: now })
   return ticket
 }
 
-/** Spends a ticket; true if it was issued and is still fresh. */
-export function useGrokTicket(ticket) {
-  const at = grokTickets.get(ticket)
-  grokTickets.delete(ticket)
-  return at !== undefined && Date.now() - at <= GROK_TICKET_MS
+/** Spends a ticket; true if it was issued for `engine` and is still fresh. */
+export function useLiveTicket(ticket, engine) {
+  const issued = tickets.get(ticket)
+  tickets.delete(ticket)
+  return (
+    issued !== undefined &&
+    issued.engine === engine &&
+    Date.now() - issued.at <= TICKET_MS
+  )
 }
+
+export const useGrokTicket = (ticket) => useLiveTicket(ticket, 'grok')
 
 /**
  * Soniox live: a temporary key (valid 60 s, enough to open the socket) lets
@@ -357,7 +370,7 @@ export function dictionaryTerms(
 function liveTokenEngine(body) {
   try {
     const engine = JSON.parse(body.toString('utf8')).engine
-    return ['grok', 'soniox', 'cartesia'].includes(engine)
+    return ['grok', 'muse', 'soniox', 'cartesia'].includes(engine)
       ? engine
       : 'elevenlabs'
   } catch {
@@ -591,19 +604,26 @@ export function createRelay(options = {}) {
       send(res, err.status ?? 400, { error: err.message })
     }
   })
-  // Grok live: the browser's WebSocket is piped to xAI (see wsProxy.mjs)
+  // Grok and Muse live: the browser's WebSocket is piped to xAI or Meta
+  // (see wsProxy.mjs)
+  const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
-    if (url.pathname !== '/api/grok-live') return socket.destroy()
+    const engine = LIVE_PATHS[url.pathname]
+    if (!engine) return socket.destroy()
     if (!sameOriginRequest(req))
       return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
-    if (!useGrokTicket(url.searchParams.get('ticket') ?? '')) {
-      console.log('grok live refused: bad or used ticket')
+    if (!useLiveTicket(url.searchParams.get('ticket') ?? '', engine)) {
+      console.log(`${engine} live refused: bad or used ticket`)
       return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
     }
     const client = acceptWebSocket(req, socket, head)
     const keyterms = cleanKeyterms(url.searchParams.getAll('keyterm'))
-    if (client) grokLive(client, { ...options, keyterms })
+    if (client)
+      (engine === 'muse' ? museLive : grokLive)(client, {
+        ...options,
+        keyterms,
+      })
   })
   return server
 }

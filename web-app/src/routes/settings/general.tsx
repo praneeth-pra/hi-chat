@@ -83,6 +83,7 @@ const ENGINE_LABELS: Record<string, string> = {
   soniox: 'Soniox',
   elevenlabs: 'ElevenLabs',
   grok: 'Grok',
+  muse: 'Muse',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
