@@ -411,18 +411,33 @@ export class GrokLiveTranscriber {
 
 export const SONIOX_LIVE_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
 export const SONIOX_LIVE_MODEL = 'stt-rt-v5'
-/** Soniox's context holds about 10,000 characters. */
-const SONIOX_TERMS_CHARS = 9000
+/**
+ * Soniox bills the context as text on every clip, so it's kept short: about
+ * 1,500 characters instead of the 10,000 it holds (~80% cheaper per clip).
+ */
+const SONIOX_TERMS_CHARS = 1500
 
-/** Terms without repeats, cut to fit Soniox's context. */
-export function sonioxTerms(terms: string[]): string[] {
+/** Plain lowercase words ("filter", "star schema") the engines already know. */
+const isEverydayWord = (term: string) => /^[a-z][a-z' -]*$/.test(term)
+
+/**
+ * Terms without repeats, cut to fit Soniox's context: the assistant's key
+ * terms first, then the dictionary's technical terms (names, acronyms,
+ * products), then its everyday words if room is left.
+ */
+export function sonioxTerms(keyterms: string[], dictionary: string[] = []) {
+  const ordered = [
+    ...keyterms,
+    ...dictionary.filter((t) => !isEverydayWord(t.trim())),
+    ...dictionary.filter((t) => isEverydayWord(t.trim())),
+  ]
   const seen = new Set<string>()
   const out: string[] = []
   let chars = 0
-  for (const raw of terms) {
+  for (const raw of ordered) {
     const term = raw.replace(/\s+/g, ' ').trim()
     if (!term || seen.has(term.toLowerCase())) continue
-    if (chars + term.length + 2 > SONIOX_TERMS_CHARS) break
+    if (chars + term.length + 2 > SONIOX_TERMS_CHARS) continue
     seen.add(term.toLowerCase())
     out.push(term)
     chars += term.length + 2
@@ -475,7 +490,7 @@ export class SonioxLiveTranscriber {
               sample_rate: TARGET_SAMPLE_RATE,
               num_channels: 1,
               language_hints: ['en'],
-              context: { terms: sonioxTerms([...keyterms, ...terms]) },
+              context: { terms: sonioxTerms(keyterms, terms) },
             })
           )
           for (const msg of this.queue.splice(0)) socket.send(msg)
