@@ -16,6 +16,7 @@ const MAX_MESSAGE_BYTES = 1024 * 1024
 export const GROK_LIVE_URL = 'wss://api.x.ai/v1/stt'
 export const MUSE_LIVE_URL = 'wss://api.meta.ai/v1/asr/realtime'
 export const MUSE_MODEL = 'muse-voice-transcribe-1.0'
+const MUSE_KEYWORD_CHARS = 30
 
 /** xAI accepts up to 100 key terms of up to 50 characters each. */
 export function cleanKeyterms(terms) {
@@ -327,6 +328,8 @@ export function museLive(
     )
     return client.close(1011)
   }
+  // Meta rejects the whole session if any keyword is over 30 characters
+  const keywords = keyterms.filter((term) => term.length <= MUSE_KEYWORD_CHARS)
   const upstream = new WebSocketImpl(MUSE_LIVE_URL)
   upstream.binaryType = 'arraybuffer'
   let ready = false
@@ -360,7 +363,7 @@ export function museLive(
         emitAudioProgress: false,
         languageBias: ['English'],
         // Words to bias transcription toward (the assistant's key terms)
-        ...(keyterms.length ? { keywords: keyterms } : {}),
+        ...(keywords.length ? { keywords } : {}),
       })
     )
   }
@@ -401,7 +404,7 @@ export function museLive(
         clearTimeout(readiness)
         log(
           `muse live ready in ${Date.now() - started} ms` +
-            (keyterms.length ? ` (${keyterms.length} key terms)` : '')
+            (keywords.length ? ` (${keywords.length} key terms)` : '')
         )
         client.send(JSON.stringify({ type: 'ready' }))
         for (const msg of held.splice(0)) upstream.send(msg)
