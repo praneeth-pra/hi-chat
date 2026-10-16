@@ -17,6 +17,7 @@ import {
   CartesiaLiveTranscriber,
   GrokLiveTranscriber,
   LiveTranscriber,
+  MuseLiveTranscriber,
   SonioxLiveTranscriber,
 } from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
@@ -37,13 +38,14 @@ import {
 
 /**
  * Which service turns your voice into text. Soniox gets your dictionary as
- * context terms and Cartesia the 100 that fit; all four stream live while
+ * context terms and Cartesia the 100 that fit; all of them stream live while
  * you talk. Auto races the engines chosen in Settings (Cartesia, Soniox and
- * ElevenLabs by default; Grok can be added): as soon as two agree their text
+ * ElevenLabs by default; Grok or Muse can be added): as soon as two agree their text
  * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
   | 'grok'
+  | 'muse'
   | 'elevenlabs'
   | 'soniox'
   | 'cartesia'
@@ -53,6 +55,7 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
+  { value: 'muse', label: 'Muse (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
@@ -518,6 +521,13 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       keyTerms()
     )
+  if (engine === 'muse')
+    return new MuseLiveTranscriber(
+      fetchLiveToken('muse'),
+      undefined,
+      undefined,
+      keyTerms()
+    )
   if (engine === 'soniox')
     return new SonioxLiveTranscriber(
       fetchLiveKeyWithTerms('soniox'),
@@ -539,6 +549,7 @@ export const AUTO_ENGINE_CHOICES = [
   'soniox',
   'elevenlabs',
   'grok',
+  'muse',
 ] as const satisfies readonly DictationEngine[]
 export type AutoEngine = (typeof AUTO_ENGINE_CHOICES)[number]
 const DEFAULT_AUTO_ENGINES: AutoEngine[] = ['cartesia', 'soniox', 'elevenlabs']

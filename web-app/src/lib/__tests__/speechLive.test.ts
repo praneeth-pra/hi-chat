@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   GrokLiveTranscriber,
   LiveTranscriber,
+  MuseLiveTranscriber,
   LIVE_URL,
   CartesiaLiveTranscriber,
   elevenLabsTerms,
@@ -220,6 +221,83 @@ describe('speechLive', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('MuseLiveTranscriber', () => {
+  class MuseSocket extends FakeSocket {
+    raw: (ArrayBuffer | string)[] = []
+    send(data: string) {
+      this.raw.push(data)
+    }
+  }
+  const connect = async (keyterms: string[] = []) => {
+    let socket!: MuseSocket
+    const live = new MuseLiveTranscriber(
+      Promise.resolve('abc123'),
+      (url) => {
+        socket = new MuseSocket(url)
+        return socket as unknown as WebSocket
+      },
+      'https://chat.example',
+      keyterms
+    )
+    await tick()
+    return { live, socket }
+  }
+
+  it('streams through the relay with a ticket and key terms, then ends the stream', async () => {
+    const previews: string[] = []
+    const { live, socket } = await connect(['NAT gateway', 'VPC'])
+    live.setPreviewListener((t) => previews.push(t))
+    expect(socket.url).toBe(
+      'wss://chat.example/api/muse-live?ticket=abc123&keyterm=NAT+gateway&keyterm=VPC'
+    )
+    live.push(new Float32Array(1600))
+    socket.open()
+    expect((socket.raw[0] as ArrayBuffer).byteLength).toBe(3200)
+    socket.reply({ type: 'ready' })
+    socket.reply({ type: 'transcript', transcript: 'What is a', final: false })
+    socket.reply({
+      type: 'transcript',
+      transcript: 'What is a NAT gateway',
+      final: false,
+    })
+    const text = live.finish()
+    expect(socket.raw.at(-1)).toBe(JSON.stringify({ type: 'endStream' }))
+    socket.reply({
+      type: 'transcript',
+      transcript: 'What is a NAT gateway?',
+      final: true,
+    })
+    await expect(text).resolves.toBe('What is a NAT gateway?')
+    expect(previews).toEqual([
+      'What is a',
+      'What is a NAT gateway',
+      'What is a NAT gateway?',
+    ])
+    expect(socket.closed).toBe(true)
+  })
+
+  it('keeps the last partial if the socket closes before the final', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    socket.reply({
+      type: 'transcript',
+      transcript: 'Explain EKS',
+      final: false,
+    })
+    const text = live.finish()
+    socket.onclose?.(new CloseEvent('close'))
+    await expect(text).resolves.toBe('Explain EKS')
+  })
+
+  it('fails on an error message', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    const text = live.finish()
+    socket.reply({ type: 'error', message: 'invalid key' })
+    await expect(text).rejects.toThrow('Muse live: invalid key')
   })
 })
 

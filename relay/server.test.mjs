@@ -456,6 +456,88 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
   }
 })
 
+test('muse live: sends the key in the handshake, then pipes the audio', async () => {
+  const upstreams = []
+  class FakeMeta {
+    constructor(url) {
+      this.url = url
+      this.sent = []
+      this.readyState = 0
+      upstreams.push(this)
+      setTimeout(() => {
+        this.readyState = 1
+        this.onopen()
+      }, 10)
+    }
+    send(data) {
+      this.sent.push(data)
+      if (typeof data === 'string' && data.includes('authorization'))
+        setTimeout(() => this.onmessage({ data: '{"sessionId":"s1"}' }), 20)
+      if (typeof data === 'string' && data.includes('endStream')) {
+        this.onmessage({
+          data: '{"type":"transcript","transcript":"What is EKS?","final":true}',
+        })
+        this.readyState = 3
+        this.onclose({ code: 1000 })
+      }
+    }
+    close() {}
+  }
+  const server = createRelay({
+    env: { META_API_KEY: 'm' },
+    WebSocketImpl: FakeMeta,
+    log: () => {},
+  }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const ticket = await liveToken({
+      env: { META_API_KEY: 'm' },
+      engine: 'muse',
+    })
+    // A Muse ticket doesn't open Grok's socket
+    assert.equal(useGrokTicket(ticket), false)
+    const ticket2 = await liveToken({
+      env: { META_API_KEY: 'm' },
+      engine: 'muse',
+    })
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${server.address().port}/api/muse-live?ticket=${ticket2}&keyterm=EKS&keyterm=eks`
+    )
+    const got = []
+    const closed = new Promise((r) => (ws.onclose = r))
+    ws.onmessage = (e) => got.push(JSON.parse(e.data).type)
+    await new Promise((r) => (ws.onopen = r))
+    // Sent before Meta is ready: held, then delivered in order
+    ws.send(new Uint8Array(3200))
+    ws.send(JSON.stringify({ type: 'endStream' }))
+    await closed
+    const up = upstreams[0]
+    assert.equal(up.url, 'wss://api.meta.ai/v1/asr/realtime')
+    const handshake = JSON.parse(up.sent[0])
+    assert.deepEqual(handshake, {
+      authorization: { accessToken: 'Bearer m' },
+      audioEncoding: 'PCM_16KHZ',
+      model: 'muse-voice-transcribe-1.0',
+      mode: 'PUSH_TO_TALK',
+      partialMode: 'CUMULATIVE',
+      emitAudioProgress: false,
+      languageBias: ['English'],
+      keywords: ['EKS'],
+    })
+    assert.deepEqual(
+      up.sent.slice(1).map((d) => (typeof d === 'string' ? d : d.length)),
+      [3200, '{"type":"endStream"}']
+    )
+    assert.deepEqual(got, ['ready', 'transcript'])
+    await assert.rejects(
+      liveToken({ env: {}, engine: 'muse' }),
+      (err) => err.status === 503
+    )
+  } finally {
+    server.close()
+  }
+})
+
 test('soniox live: a temporary key plus the dictionary as terms', async () => {
   const calls = []
   const fetchImpl = async (url, init) => {
