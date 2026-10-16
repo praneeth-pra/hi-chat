@@ -384,13 +384,18 @@ export function museLive(
     if (done) return
     const text =
       typeof e.data === 'string' ? e.data : Buffer.from(e.data).toString('utf8')
+    let reply = {}
+    try {
+      reply = JSON.parse(text)
+    } catch {
+      // Not JSON: passed on below
+    }
+    // Meta's errors say what was wrong with the request (never speech text)
+    if (reply.type === 'error')
+      log(
+        `muse live error: ${String(reply.errorCode ?? reply.errorType ?? '')} ${String(reply.message ?? '').slice(0, 300)}`.trim()
+      )
     if (!ready) {
-      let reply = {}
-      try {
-        reply = JSON.parse(text)
-      } catch {
-        // Not JSON: passed on below
-      }
       if (reply.sessionId && !reply.type) {
         ready = true
         clearTimeout(readiness)
@@ -412,5 +417,8 @@ export function museLive(
     )
     finish('failed')
   }
-  upstream.onclose = (e) => finish(`done (${e?.code ?? 'closed'})`)
+  upstream.onclose = (e) =>
+    finish(
+      `done (${e?.code ?? 'closed'}${e?.reason ? ` ${String(e.reason).slice(0, 200)}` : ''})`
+    )
 }
