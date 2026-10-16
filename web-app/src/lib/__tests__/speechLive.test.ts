@@ -411,10 +411,25 @@ describe('SonioxLiveTranscriber', () => {
   })
 
   it('cuts terms to fit Soniox context', () => {
-    const many = Array.from({ length: 2000 }, (_, i) => `term number ${i}`)
+    const many = Array.from({ length: 2000 }, (_, i) => `Term ${i}`)
     const out = sonioxTerms(many)
-    expect(out.join(', ').length).toBeLessThan(9000)
-    expect(out[0]).toBe('term number 0')
+    expect(out.join(', ').length).toBeLessThanOrEqual(1500)
+    expect(out[0]).toBe('Term 0')
+  })
+
+  it('sends key terms, then technical terms, then everyday words', () => {
+    const out = sonioxTerms(
+      ['JMeter', 'filter'],
+      ['filter', 'select', 'Kafka', 'star schema', 'boto3', 'jmeter']
+    )
+    expect(out).toEqual([
+      'JMeter',
+      'filter',
+      'Kafka',
+      'boto3',
+      'select',
+      'star schema',
+    ])
   })
 })
 
