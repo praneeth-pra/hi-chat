@@ -730,7 +730,7 @@ local function drawMirror()
     mirror[2].image = image
     local box = mirror:frame()
     if dot then
-      mirror[3].frame = { x = dot.x - 5, y = dot.y - 5, w = 10, h = 10 }
+      mirror[3].center = { x = dot.x, y = dot.y }
       mirror[3].action = "fill"
     else
       mirror[3].action = "skip"
@@ -752,7 +752,7 @@ local function openMirror()
     { type = "image", imageScaling = "scaleProportionally", imageAlignment = "center",
       frame = { x = 0, y = 0, w = f.w, h = f.h } },
     { type = "circle", action = "skip", fillColor = { red = 1, green = 0.3, blue = 0.2, alpha = 0.9 },
-      frame = { x = 0, y = 0, w = 10, h = 10 } },
+      center = { x = 0, y = 0 }, radius = 5 }, -- a circle ignores frame: it needs centre and radius
     { id = "close", type = "text", text = "×", textSize = 16, textAlignment = "center",
       textColor = { white = 1, alpha = 0.5 }, trackMouseDown = true,
       frame = { x = "100%", y = 4, w = 22, h = 22 } },
