@@ -56,35 +56,22 @@ hs = {
 }
 print = function() end
 local start = assert(source:find("-- Second window: a live copy of Jan", 1, true))
-local finish = assert(source:find("mirrorTap:start()", start, true))
-local block = "local types, TAP_SECONDS, chatWindow = ...\n"
+local finish = assert(source:find("mirrorKey = hs.hotkey.bind", start, true))
+local block = "local types, TAP_SECONDS, hiChatWindow = ...\n"
   .. "local function inside(p, r) return p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end\n"
-  .. source:sub(start, finish - 1) .. "\nreturn mirrorTap\n"
-local tap = assert(load(block))(types, 0.35, function() return janWin end)
+  .. source:sub(start, finish - 1) .. "\nreturn switchMirror\n"
+local switchMirror = assert(load(block))(types, 0.35, function() return janWin end)
 
-local function flags(cmd)
-  return { containExactly = function(_, list) return cmd and #list == 1 and list[1] == "cmd" end, cmd = cmd }
-end
-local function key(code, cmd)
-  return { getType = function() return types.flagsChanged end, getKeyCode = function() return code end,
-    getFlags = function() return flags(cmd) end }
-end
-local function tapRightCmd()
-  assert(tap.fn(key(54, true)) == false)
-  now = now + 0.1
-  assert(tap.fn(key(54, false)) == false)
-  for _, fn in ipairs(later) do fn() end
-  later = {}
-end
+local function pressMirrorKey() switchMirror() end -- fn + Left
 
 -- First tap opens the mirror showing Jan, without taking focus
-tapRightCmd()
+pressMirrorKey()
 local m = canvases[1]
 assert(m and m.shown and m.activates == false)
 assert(m[2].image == "jan picture" and m[3].action == "skip")
 
 -- Second tap: the screen around the pointer, the size of the mirror, with a dot at the pointer
-tapRightCmd()
+pressMirrorKey()
 assert(m[2].image.area.w == 640 and m[2].image.area.x == 500 - 320)
 assert(m[3].action == "fill" and m[3].center.x == 320 and m[3].radius == 5)
 
@@ -105,15 +92,8 @@ timers[1].fn()
 assert(m[2].image == before)
 
 -- Third tap: back to Jan
-tapRightCmd()
+pressMirrorKey()
 assert(m[2].image == "jan picture")
-
--- Right Command with another key is not a tap
-assert(tap.fn(key(54, true)) == false)
-tap.fn({ getType = function() return types.keyDown end })
-now = now + 0.1
-tap.fn(key(54, false))
-assert(#later == 0)
 
 -- Dragging moves it and remembers the place
 pointer = { x = 900, y = 100 }
@@ -132,7 +112,7 @@ m.onMouse(m, "mouseDown", "close")
 for _, fn in ipairs(later) do fn() end
 later = {}
 assert(m.deleted and not timers[1].running)
-tapRightCmd()
+pressMirrorKey()
 assert(canvases[2].box == moved and canvases[2][2].image == "jan picture")
 assert(#alerts == 0)
 print = _G.print

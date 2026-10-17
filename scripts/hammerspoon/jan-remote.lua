@@ -27,14 +27,16 @@
 --                           so Safari never becomes the active app; tapping Option
 --                           again puts the pointer back. Two-finger scrolling
 --                           scrolls Jan while it is on, like holding fn.
---   tap Right Command       open a second window that mirrors Jan live; tap
+--   fn + Left               open a second window that mirrors Jan live; tap
 --                           again to switch it to the screen around the pointer
 --                           and back. Drag it to move, its corner to resize,
 --                           x to close. Needs Screen Recording for Hammerspoon.
+--                           Build JanMirror.swift (see its top) for a 60 fps
+--                           live stream; without it, screenshots are used.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
--- arrows and fn + Left remain available to the app in front.
+-- arrows remain available to the app in front; fn + Left (Home) is the mirror key.
 -- Option held with another key retains its normal modifier behavior.
 --
 -- Settings you may want to change:
@@ -253,6 +255,21 @@ local function typingWindow()
     if win and win:isStandard() and win:isVisible() and not title:find("sign in", 1, true)
       and (name == "Jan" or title:find("hi-chat", 1, true)) then
       return { app = app, win = win, id = win:id() }
+    end
+  end
+end
+
+-- The window showing Hi-chat, wherever it is: the Jan web app, or the
+-- Safari window whose current tab is Hi-chat (other Safari windows are not)
+local function hiChatWindow()
+  if typingTarget and typingTarget.win then return typingTarget.win end
+  for _, name in ipairs(APPS) do
+    local app = hs.application.get(name)
+    for _, win in ipairs(app and app:allWindows() or {}) do
+      local title = (win:title() or ""):lower()
+      if win:isStandard() and (name == "Jan" or title:find("hi-chat", 1, true)) then
+        return win
+      end
     end
   end
 end
@@ -665,15 +682,13 @@ pointerWatch = hs.timer.doEvery(0.2, function()
   end
 end)
 
--- Second window: a live copy of Jan, which a tap of Right Command switches
+-- Second window: a live copy of Jan, which fn + Left switches
 -- to a live view of the screen around the pointer and back. It is drawn by
 -- Hammerspoon (needs Screen Recording), never takes focus, and stays where
 -- you drag it; drag its bottom-right corner to resize, x closes it.
 local MIRROR_FPS = 30
 local MIRROR_EDGE = 0.2 -- the pointer view pans only once the pointer is this close to its edge
 local MIRROR_KEY = "janMirrorFrame"
-local RIGHT_CMD = hs.keycodes.map.rightcmd or 54
-local rightCmdDownAt = nil
 local mirror, mirrorTimer, mirrorMode, mirrorDrag = nil, nil, "jan", nil
 local mirrorWarned = false
 local mirrorArea = nil -- the part of the screen the pointer view shows
@@ -696,7 +711,7 @@ end
 local function snapshotOf(mode)
   local box = mirror:frame()
   if mode == "jan" then
-    local win = chatWindow()
+    local win = hiChatWindow()
     return win and win:snapshot(), nil
   end
   local p = hs.mouse.absolutePosition()
@@ -760,7 +775,7 @@ local function drawMirror()
       mirror[3].action = "skip"
     end
     mirror[2].frame = { x = 0, y = 0, w = box.w, h = box.h }
-  elseif not mirrorWarned and (not ok or (mirrorMode == "jan" and chatWindow())) then
+  elseif not mirrorWarned and (not ok or (mirrorMode == "jan" and hiChatWindow())) then
     mirrorWarned = true
     print("[jan mirror] no picture: allow Hammerspoon in System Settings > Privacy & Security > Screen Recording", image)
     hs.alert.show("Allow Hammerspoon in Screen Recording to show the mirror")
@@ -809,9 +824,40 @@ local function openMirror()
   drawMirror()
 end
 
--- Right Command on its own, pressed and let go within TAP_SECONDS: opens the
--- mirror, then switches it between Jan and the screen around the pointer.
+-- The live mirror: JanMirror, a small helper built from JanMirror.swift into
+-- ~/.hammerspoon/JanMirror, streams with ScreenCaptureKit at 60 fps. Without
+-- it, the screenshot mirror above is used instead.
+local MIRROR_HELPER = os.getenv("HOME") .. "/.hammerspoon/JanMirror"
+local MIRROR_NOTE = "dev.hitechie.janmirror"
+local helperTask = nil
+
+local function helperBuilt()
+  return hs.fs and hs.fs.attributes(MIRROR_HELPER, "mode") == "file"
+end
+
+local function tellHelper(info)
+  local function post() hs.distributednotifications.post(MIRROR_NOTE, nil, info) end
+  if helperTask and helperTask:isRunning() then return post() end
+  helperTask = hs.task.new(MIRROR_HELPER, function(code)
+    print("[jan mirror] helper exited", code)
+  end, function(_, out, err)
+    if out and out ~= "" then print(out) end
+    if err and err ~= "" then print(err) end
+    return true
+  end)
+  helperTask:start()
+  hs.timer.doAfter(0.5, post) -- give it a moment to start listening
+end
+
+-- fn + Left opens the mirror, then switches it between Jan and the
+-- screen around the pointer.
 local function switchMirror()
+  if helperBuilt() then
+    local win = hiChatWindow()
+    if not win then print("[jan mirror] no Safari window shows Hi-chat; open it in a window's front tab") end
+    tellHelper({ command = "toggle", window = win and tostring(win:id()) or "0" })
+    return
+  end
   if not mirror then
     mirrorMode = "jan"
     openMirror()
@@ -823,26 +869,9 @@ local function switchMirror()
   print("[jan mirror] showing", mirrorMode)
 end
 
-mirrorTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown,
-  types.rightMouseDown, types.scrollWheel }, function(e)
-  if e:getType() ~= types.flagsChanged then
-    rightCmdDownAt = nil -- Command + a key, a click or a scroll is not a tap
-    return false
-  end
-  local key, flags = e:getKeyCode(), e:getFlags()
-  if key == RIGHT_CMD and flags:containExactly({ "cmd" }) then
-    rightCmdDownAt = hs.timer.secondsSinceEpoch()
-  elseif key == RIGHT_CMD and not flags.cmd and rightCmdDownAt then
-    if hs.timer.secondsSinceEpoch() - rightCmdDownAt < TAP_SECONDS then
-      hs.timer.doAfter(0, switchMirror)
-    end
-    rightCmdDownAt = nil
-  else
-    rightCmdDownAt = nil -- another modifier joined in
-  end
-  return false
-end)
-mirrorTap:start()
+-- fn + Left: on a Mac keyboard fn + Left is Home. It reaches Hammerspoon
+-- even while Option typing is on; Home no longer reaches the app in front.
+mirrorKey = hs.hotkey.bind({}, "home", function() switchMirror() end)
 
 local function jumpBack()
   local here = hs.mouse.absolutePosition()
@@ -892,7 +921,7 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap, mirrorTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()
