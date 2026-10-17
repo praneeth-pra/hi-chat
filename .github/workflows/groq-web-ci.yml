@@ -63,7 +63,8 @@ jobs:
             grep -qi '^Referrer-Policy: no-referrer' response-headers.txt
             grep -qi '^Content-Security-Policy:.*object-src' response-headers.txt
           done
-          asset=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^index-.*\.js$" | head -1')
+          # The largest index chunk: small ones fall under gzip_min_length, and which sorts first changes with the hashes.
+          asset=$(docker exec jan-web-key sh -c 'ls -S /usr/share/nginx/html/assets | grep "^index-.*\.js$" | head -1')
           curl -sfI -b "$C" "http://localhost:8081/assets/$asset" | grep -qi '^cache-control: private, max-age=31536000, immutable'
           curl -sfI -b "$C" -H 'Accept-Encoding: gzip' "http://localhost:8081/assets/$asset" | grep -qi '^content-encoding: gzip'
           # Browser Origin checks use the public host forwarded by nginx.
