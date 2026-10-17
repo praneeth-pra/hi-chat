@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  needsFreshFacts,
+  groundFreshMessages,
   verifyAccuracyCompletion,
   getWebEvidence,
   buildAccuracyQuery,
@@ -752,5 +754,46 @@ describe('Accuracy review gate', () => {
       sources: [],
       searchMs: 6000,
     })
+  })
+})
+
+describe('fresh facts for hand-picked models', () => {
+  it('searches only for questions that need fresh facts', () => {
+    for (const q of [
+      'What is the latest version of Kubernetes?',
+      "What's new in Java 21?",
+      'When is Python 3.9 end of life?',
+      'What is the pricing of AWS Lambda?',
+      'What changed in Terraform in 2025?',
+      'Which version of Node is LTS?',
+    ])
+      expect(needsFreshFacts(q)).toBe(true)
+    for (const q of [
+      'What is ECS?',
+      'How do you troubleshoot a failed pod?',
+      'Explain blue green release strategy',
+      'How would you reduce cost in AWS?',
+      'Tell me about yourself',
+      'What is S3 versioning?',
+      'Tell me about a time you handled the latest production outage',
+    ])
+      expect(needsFreshFacts(q)).toBe(false)
+  })
+
+  it('adds excerpts without citations, and nothing when search failed', () => {
+    const messages = [{ role: 'user' as const, content: 'latest Go version?' }]
+    expect(
+      groundFreshMessages(messages, { status: 'unavailable', sources: [] })
+    ).toBe(messages)
+    const grounded = groundFreshMessages(messages, {
+      status: 'ready',
+      sources: [
+        { url: 'https://go.dev', title: 'Go', text: 'Go 1.25 released' },
+      ],
+    })
+    expect(grounded).toHaveLength(3)
+    expect(String(grounded[1].content)).toContain('add no citations')
+    expect(String(grounded[2].content)).toContain('Go 1.25 released')
+    expect(String(grounded[2].content)).not.toContain('go.dev')
   })
 })
