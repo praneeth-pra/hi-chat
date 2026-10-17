@@ -946,7 +946,7 @@ end)
 -- install.sh sets up), pull main when Hammerspoon starts and every 10
 -- minutes. A change rebuilds the mirror helper if JanMirror.swift changed,
 -- then reloads Hammerspoon, so nothing has to be copied by hand.
-local UPDATE_EVERY = 600
+local UPDATE_EVERY = 60 -- seconds; each check is one small ls-remote, pulling only on a change
 local scriptDir = (debug.getinfo(1, "S").source or ""):match("^@(.+)/[^/]+$")
 local repoDir = scriptDir and scriptDir:gsub("/scripts/hammerspoon$", "")
 local function quoted(path) return "'" .. path:gsub("'", "'\\''") .. "'" end
@@ -971,7 +971,8 @@ end
 
 local function checkForUpdate()
   local repo = quoted(repoDir)
-  shell("cd " .. repo .. " && git rev-parse HEAD && git pull -q --ff-only origin main && git rev-parse HEAD",
+  shell("cd " .. repo .. " && remote=$(git ls-remote origin refs/heads/main | cut -f1) && git rev-parse HEAD"
+    .. ' && { [ "$remote" = "$(git rev-parse HEAD)" ] || git pull -q --ff-only origin main; } && git rev-parse HEAD',
     function(code, out, err)
       if code ~= 0 then print("[jan update] could not pull: " .. err) return end
       local before, after = out:match("^(%x+)%s+(%x+)")

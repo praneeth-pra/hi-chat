@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-time setup on the Mac. After this, jan-remote.lua updates itself:
 # Hammerspoon loads it straight from a clone of the repo and pulls main
-# every 10 minutes, rebuilding the mirror helper when it changes.
+# every minute, rebuilding the mirror helper when it changes.
 #
 #   sh scripts/hammerspoon/install.sh        (from a clone of the repo)
 #
