@@ -7,12 +7,12 @@ if not source then
   file:close()
 end
 local types = { leftMouseDown = 1, leftMouseUp = 2, leftMouseDragged = 3,
-  rightMouseDown = 4, rightMouseUp = 5, otherMouseDown = 6, otherMouseUp = 7 }
+  rightMouseDown = 4, rightMouseUp = 5, otherMouseDown = 6, otherMouseUp = 7, mouseMoved = 8 }
 local frame = { x = 2000, y = 0, w = 1000, h = 800 }
 local app = { activate = function() error("Must not activate Safari") end }
 local win = { frame = function() return frame end,
   focus = function() error("Must not focus the window") end }
-local pointer, posted, dummy, stopped, signals = { x = 100, y = 100 }, {}, nil, nil, {}
+local pointer, posted, dummy, stopped, signals, moves = { x = 100, y = 100 }, {}, nil, nil, {}, {}
 local function event(kind, at, marker)
   local e = { kind = kind, at = at, marker = marker or 0 }
   e.getType = function(self) return self.kind end
@@ -29,7 +29,15 @@ end
 local tapFn
 hs = {
   mouse = { absolutePosition = function(to) if to then pointer = to end return pointer end },
-  eventtap = { new = function(_, fn) tapFn = fn return { start = function() end } end },
+  eventtap = { new = function(_, fn) tapFn = fn return { start = function() end } end,
+    event = { newMouseEvent = function(kind, at)
+      local e = event(kind, at)
+      e.post = function(self, target)
+        assert(target == nil and self.marker ~= 0)
+        moves[#moves + 1] = self
+      end
+      return e
+    end } },
 }
 local start = assert(source:find("-- Background typing takes the pointer along", 1, true))
 local finish = assert(source:find("-- Keep track of where the pointer was last seen off Jan", start, true))
@@ -53,11 +61,14 @@ target = { app = app, win = win }
 on(target)
 assert(dummy and dummy.x == 100 and pointer.x == 2500 and pointer.y == 720)
 
--- A click over Jan becomes Shift + F20 for Jan; the real click is swallowed
+-- A press over Jan becomes Shift + F20, the drag plain moves Safari can follow,
+-- and the release Shift + F18; the real click is swallowed
 assert(tapFn(event(types.leftMouseDown, { x = 2500, y = 400 })) == true)
 assert(tapFn(event(types.leftMouseDragged, { x = 2600, y = 400 })) == true)
+assert(#moves == 1 and moves[1].kind == types.mouseMoved and moves[1].at.x == 2600)
 assert(tapFn(event(types.leftMouseUp, { x = 2600, y = 400 })) == true)
-assert(#signals == 1 and signals[1].key == "f20" and signals[1].mods[1] == "shift")
+assert(#signals == 2 and signals[1].key == "f20" and signals[1].mods[1] == "shift")
+assert(signals[2].key == "f19" and signals[2].mods[1] == "shift")
 
 -- Clicks elsewhere still reach the app under them
 assert(tapFn(event(types.leftMouseDown, { x = 100, y = 100 })) == false)
@@ -67,7 +78,7 @@ assert(tapFn(event(types.leftMouseUp, { x = 100, y = 100 })) == false)
 assert(tapFn(event(types.rightMouseDown, { x = 2500, y = 400 })) == true)
 target = nil
 assert(tapFn(event(types.rightMouseUp, { x = 2500, y = 400 })) == true)
-assert(#signals == 1)
+assert(#signals == 2)
 target = { app = app, win = win }
 
 -- Typing off: the pointer comes back and the dummy goes

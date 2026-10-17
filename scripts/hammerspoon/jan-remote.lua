@@ -20,13 +20,16 @@
 --                           Escape works as usual the rest of the time.
 --   tap Left Option         toggle background typing into Jan's prompt box;
 --                           the main app stays active. Escape also turns it off.
---                           Enter adds a line; fn + Right sends the prompt.
+--                           Return sends the prompt; Shift + Return adds a line.
 --                           The pointer moves over to Jan too (a dummy cursor
---                           stays behind); hovering works and a click there
---                           is clicked by Jan itself, so Safari never becomes
---                           the active app; tapping Option
+--                           stays behind); hovering works, and a click or a
+--                           drag to select text there is done by Jan itself,
+--                           so Safari never becomes the active app; tapping Option
 --                           again puts the pointer back. Two-finger scrolling
 --                           scrolls Jan while it is on, like holding fn.
+--   tap Right Command       toggle macOS Zoom (Option + Command + 8). Set
+--                           Zoom's style to Picture-in-picture and it is a
+--                           window showing the screen around the pointer.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
@@ -609,8 +612,8 @@ local mouseKinds = { types.leftMouseDown, types.leftMouseUp, types.leftMouseDrag
 local heldClick = false -- a press over Jan is swallowed until it is let go
 
 -- Global so macOS cannot garbage-collect the tap. A real click would make
--- Safari the active app, so a click over Jan is swallowed and Shift + F20 is
--- sent instead: Jan clicks whatever is under the pointer itself.
+-- Safari the active app, so a press over Jan is swallowed and Shift + F20 is
+-- sent instead, with Shift + F19 on release: Jan clicks or selects text itself.
 typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if e:getProperty(typingProps.eventSourceUserData) == TYPING_MARK then return false end
   local kind = e:getType()
@@ -619,7 +622,17 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   local releasing = kind == types.leftMouseUp or kind == types.rightMouseUp
     or kind == types.otherMouseUp
   if heldClick then
-    if releasing then heldClick = false end
+    if kind == types.leftMouseDragged then
+      -- Safari only hears moves, so the drag goes on as moves it can select with.
+      local move = hs.eventtap.event.newMouseEvent(types.mouseMoved, e:location())
+      move:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+      pcall(function() move:post() end)
+    elseif releasing then
+      if heldClick == "left" and typingTarget then
+        pcall(typingSignal, typingTarget, "f19", { "shift" }) -- let go
+      end
+      heldClick = false
+    end
     return true
   end
   local target = typingTarget
@@ -631,7 +644,8 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if not (ok and over) then return false end -- clicks elsewhere work as usual
   heldClick = true
   if kind == types.leftMouseDown then
-    local sent = pcall(typingSignal, target, "f20", { "shift" })
+    heldClick = "left"
+    local sent = pcall(typingSignal, target, "f20", { "shift" }) -- press
     if not sent then stopTyping("Jan typing stopped — could not deliver the click") end
   end
   return true -- right and middle clicks over Jan do nothing
@@ -649,6 +663,40 @@ pointerWatch = hs.timer.doEvery(0.2, function()
     hideDummy() -- the real pointer is back, so the stand-in goes
   end
 end)
+
+-- Right Command on its own, pressed and let go within TAP_SECONDS: presses
+-- macOS Zoom's own toggle, Option + Command + 8. The keys carry TYPING_MARK
+-- so background typing lets them through instead of switching itself off.
+local RIGHT_CMD = hs.keycodes.map.rightcmd or 54
+local rightCmdDownAt = nil
+local function toggleZoom()
+  for _, down in ipairs({ true, false }) do
+    local key = hs.eventtap.event.newKeyEvent({ "alt", "cmd" }, "8", down)
+    key:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+    key:post()
+  end
+  print("[jan zoom] toggled macOS Zoom")
+end
+zoomTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown,
+  types.rightMouseDown, types.scrollWheel }, function(e)
+  if e:getType() ~= types.flagsChanged then
+    rightCmdDownAt = nil -- Command + a key, a click or a scroll is not a tap
+    return false
+  end
+  local key, flags = e:getKeyCode(), e:getFlags()
+  if key == RIGHT_CMD and flags:containExactly({ "cmd" }) then
+    rightCmdDownAt = hs.timer.secondsSinceEpoch()
+  elseif key == RIGHT_CMD and not flags.cmd and rightCmdDownAt then
+    if hs.timer.secondsSinceEpoch() - rightCmdDownAt < TAP_SECONDS then
+      hs.timer.doAfter(0, toggleZoom)
+    end
+    rightCmdDownAt = nil
+  else
+    rightCmdDownAt = nil -- another modifier joined in
+  end
+  return false
+end)
+zoomTap:start()
 
 local function jumpBack()
   local here = hs.mouse.absolutePosition()
@@ -698,7 +746,7 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap, zoomTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()

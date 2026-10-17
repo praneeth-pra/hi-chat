@@ -288,7 +288,7 @@ describe('remote keys without Speaker', () => {
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
   })
 
-  it('Shift + F20 clicks what is under the pointer, focusing a text box', () => {
+  it('Shift + F20 then Shift + F19 clicks what is under the pointer, focusing a text box', () => {
     const button = document.createElement('button')
     const box = document.createElement('textarea')
     document.body.append(button, box)
@@ -297,26 +297,69 @@ describe('remote keys without Speaker', () => {
     let under: Element = button
     document.elementFromPoint = () => under
     const stop = listenForRemoteKeys()
-    const press = () =>
+    const key = (name: string) =>
       window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'F20', shiftKey: true })
+        new KeyboardEvent('keydown', { key: name, shiftKey: true })
       )
+    const move = (x: number, y: number) =>
+      window.dispatchEvent(
+        new MouseEvent('pointermove', { clientX: x, clientY: y })
+      )
+    const click = () => {
+      key('F20')
+      key('F19')
+    }
 
     // No pointer seen over the page yet: nothing is clicked
-    press()
+    click()
     expect(clicked).not.toHaveBeenCalled()
 
-    window.dispatchEvent(
-      new MouseEvent('pointermove', { clientX: 40, clientY: 60 })
-    )
-    press()
+    move(40, 60)
+    click()
+    expect(clicked).toHaveBeenCalledTimes(1)
+
+    // Dragged between press and release: a selection, not a click
+    key('F20')
+    move(140, 60)
+    key('F19')
     expect(clicked).toHaveBeenCalledTimes(1)
 
     under = box
-    press()
+    move(300, 300)
+    click()
     expect(document.activeElement).toBe(box)
     stop()
     button.remove()
     box.remove()
+  })
+
+  it('a drag selects the text from the press to the pointer', () => {
+    const text = document.createElement('p')
+    text.textContent = 'hello world'
+    document.body.append(text)
+    const node = text.firstChild as Text
+    const caretRangeFromPoint = (x: number) => {
+      const range = document.createRange()
+      range.setStart(node, Math.min(x / 10, node.length))
+      return range
+    }
+    Object.assign(document, { caretRangeFromPoint })
+    const stop = listenForRemoteKeys()
+    const key = (name: string) =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: name, shiftKey: true })
+      )
+    window.dispatchEvent(
+      new MouseEvent('pointermove', { clientX: 0, clientY: 5 })
+    )
+    key('F20')
+    window.dispatchEvent(
+      new MouseEvent('pointermove', { clientX: 50, clientY: 5 })
+    )
+    key('F19')
+    expect(window.getSelection()?.toString()).toBe('hello')
+    stop()
+    text.remove()
+    Object.assign(document, { caretRangeFromPoint: undefined })
   })
 })

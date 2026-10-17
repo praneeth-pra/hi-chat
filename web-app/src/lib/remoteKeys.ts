@@ -39,26 +39,107 @@ export const DICTATION_CANCEL_KEY = 'Shift+F13'
 export const CODE_UP_KEY = 'Shift+F16'
 export const CODE_DOWN_KEY = 'Shift+F17'
 /**
- * Shift + F20 clicks whatever is under the pointer. While Option typing is
- * on, Hammerspoon sends it in place of a real click, which Safari would only
- * take by becoming the active app.
+ * Shift + F20 presses the mouse at the pointer and Shift + F19 lets it go.
+ * While Option typing is on, Hammerspoon sends them in place of a real click,
+ * which Safari would only take by becoming the active app. Let go where it was
+ * pressed, it clicks (twice selects a word, three times a paragraph); dragged
+ * in between, it selects the text from there to here.
  */
-export const POINTER_CLICK_KEY = 'Shift+F20'
+export const POINTER_DOWN_KEY = 'Shift+F20'
+export const POINTER_UP_KEY = 'Shift+F19'
 
 /** Where the pointer last was over this page (Safari reports moves even while in the background). */
 let pointerAt: { x: number; y: number } | null = null
+/** The press being held, with where the selection starts. */
+let pressed: { x: number; y: number; anchor: Range | null } | null = null
+/** Recent presses at one spot, for double and triple clicks. */
+let presses = { at: 0, x: 0, y: 0, count: 0 }
+const DRAG_PX = 4
+const MULTI_CLICK_MS = 400
 
-/** Clicks the element under the pointer; returns true. */
-export function clickAtPointer(): boolean {
-  const target = pointerAt
-    ? document.elementFromPoint(pointerAt.x, pointerAt.y)
-    : null
-  if (!(target instanceof HTMLElement)) {
+function caretAt(x: number, y: number): Range | null {
+  const range = document.caretRangeFromPoint?.(x, y)
+  return range ?? null
+}
+
+/** Starts a press at the pointer; returns true. */
+export function pressAtPointer(): boolean {
+  if (!pointerAt) {
     toast('Move the pointer over Hi-chat, then click')
     return true
   }
+  const { x, y } = pointerAt
+  pressed = { x, y, anchor: caretAt(x, y) }
+  return true
+}
+
+/** While pressed, selects from where the press began to the pointer. */
+function dragTo(x: number, y: number) {
+  if (!pressed?.anchor) return
+  if (Math.hypot(x - pressed.x, y - pressed.y) < DRAG_PX) return
+  const focus = caretAt(x, y)
+  if (!focus) return
+  window
+    .getSelection()
+    ?.setBaseAndExtent(
+      pressed.anchor.startContainer,
+      pressed.anchor.startOffset,
+      focus.startContainer,
+      focus.startOffset
+    )
+}
+
+function selectAround(x: number, y: number, count: number) {
+  const caret = caretAt(x, y)
+  const selection = window.getSelection()
+  if (!caret || !selection) return
+  if (count === 2) {
+    selection.collapse(caret.startContainer, caret.startOffset)
+    selection.modify?.('move', 'backward', 'word')
+    selection.modify?.('extend', 'forward', 'word')
+    return
+  }
+  const node = caret.startContainer
+  const element = node instanceof Element ? node : node.parentElement
+  const block = element?.closest(
+    'p, li, pre, h1, h2, h3, h4, h5, h6, td, blockquote'
+  )
+  if (block) selection.selectAllChildren(block)
+}
+
+/** Ends the press: a click where it began, or the dragged selection stays. */
+export function releaseAtPointer(): boolean {
+  const press = pressed
+  pressed = null
+  if (!press) return true
+  const at = pointerAt ?? press
+  if (Math.hypot(at.x - press.x, at.y - press.y) >= DRAG_PX) return true
+  const now = Date.now()
+  const again =
+    now - presses.at < MULTI_CLICK_MS &&
+    Math.hypot(press.x - presses.x, press.y - presses.y) < DRAG_PX
+  presses = {
+    at: now,
+    x: press.x,
+    y: press.y,
+    count: again ? presses.count + 1 : 1,
+  }
+  if (presses.count > 1) {
+    selectAround(press.x, press.y, Math.min(presses.count, 3))
+    return true
+  }
+  return clickAt(press.x, press.y)
+}
+
+/** Clicks the element at that spot; returns true. */
+function clickAt(x: number, y: number): boolean {
+  const target = document.elementFromPoint(x, y)
+  if (!(target instanceof HTMLElement)) return true
   if (target.matches('input, textarea, [contenteditable="true"]')) {
     target.focus()
+  } else {
+    // A plain click clears an old selection, as a real one would.
+    window.getSelection()?.removeAllRanges()
   }
   target.click()
   return true
@@ -197,7 +278,8 @@ export function handleRemoteKey(key: string): boolean {
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === CODE_UP_KEY) return stepCode(-1)
   if (key === CODE_DOWN_KEY) return stepCode(1)
-  if (key === POINTER_CLICK_KEY) return clickAtPointer()
+  if (key === POINTER_DOWN_KEY) return pressAtPointer()
+  if (key === POINTER_UP_KEY) return releaseAtPointer()
   if (key === DICTATION_TOGGLE_KEY) {
     toggleDictation()
     return true
@@ -234,6 +316,7 @@ export function listenForRemoteKeys() {
   }
   const onMove = (e: PointerEvent) => {
     pointerAt = { x: e.clientX, y: e.clientY }
+    if (pressed) dragTo(e.clientX, e.clientY)
   }
   const onLeave = () => {
     pointerAt = null
