@@ -115,14 +115,9 @@ function Index() {
             <h1
               className={cn(
                 'flex items-center justify-center gap-3 font-medium tracking-tight text-main-view-fg',
-                isMobile ? 'text-2xl' : 'text-3xl'
+                isMobile ? 'text-xl' : 'text-2xl'
               )}
             >
-              <img
-                src="/images/hi-chat-logo.png"
-                alt=""
-                className={cn('rounded-full', isMobile ? 'size-8' : 'size-10')}
-              />
               {isTemporaryChat
                 ? t('chat:temporaryChat')
                 : t('chat:description')}

@@ -1225,7 +1225,7 @@ const ChatInput = ({
             )}
             <TextareaAutosize
               ref={textareaRef}
-              minRows={2}
+              minRows={1}
               rows={1}
               maxRows={10}
               value={prompt}

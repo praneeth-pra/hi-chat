@@ -26,7 +26,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { formatDate } from '@/utils/formatDate'
 
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -256,9 +255,6 @@ export const ThreadContent = memo(
       Array.isArray(item.metadata.tool_calls) &&
       item.metadata.tool_calls.length
 
-    const assistant = item.metadata?.assistant as
-      | { avatar?: React.ReactNode; name?: React.ReactNode }
-      | undefined
 
     return (
       <Fragment>
@@ -417,21 +413,6 @@ export const ThreadContent = memo(
         )}
         {item.content?.[0]?.text && item.role !== 'user' && (
           <div className="group/assistant">
-            {item.showAssistant && (
-              <div className="flex items-center gap-2.5 mb-2 text-main-view-fg/50">
-                <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-main-view-fg font-medium text-[15px] truncate">
-                    {assistant?.name || 'Hi-chat'}
-                  </span>
-                  {item?.created_at && item?.created_at !== 0 && (
-                    <span className="text-xs shrink-0">
-                      {formatDate(item?.created_at)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
             {reasoningSegment && (
               <ThinkingBlock
                 id={

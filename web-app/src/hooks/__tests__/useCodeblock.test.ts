@@ -31,7 +31,7 @@ describe('useCodeblock', () => {
     const { result } = renderHook(() => useCodeblock())
 
     expect(result.current.codeBlockStyle).toBe('vsc-dark-plus')
-    expect(result.current.showLineNumbers).toBe(true)
+    expect(result.current.showLineNumbers).toBe(false)
   })
 
   it('should set code block style', () => {
@@ -78,7 +78,7 @@ describe('useCodeblock', () => {
     })
 
     expect(result.current.codeBlockStyle).toBe('vsc-dark-plus')
-    expect(result.current.showLineNumbers).toBe(true)
+    expect(result.current.showLineNumbers).toBe(false)
   })
 
   it('should handle different code block styles', () => {
