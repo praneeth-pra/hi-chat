@@ -75,7 +75,9 @@ The script retains scrolling, fn + Up/Down code navigation, Left Control dictati
 fn + Right sending, Z/X and the native-sized dummy cursor. The retired Speaker
 Option toggle and recommendation shortcuts are removed. Plain arrows and fn + Left remain free.
 Tap **Left Option** to toggle background typing into Jan; tap it again or press
-Escape to stop. Jan's keyboard symbol lights up while enabled. Your main app
+Escape to stop. The pointer moves onto Jan as well (a dummy cursor stays on the
+laptop screen), clicks over Jan are posted to Safari without making it active,
+and two-finger scrolling scrolls Jan; turning it off brings the pointer back. Jan's keyboard symbol lights up while enabled. Your main app
 stays active; ordinary typing goes to Jan, including Z/X. Enter adds a newline;
 fn + Right sends; fn + Return is released. Option used in a chord does not toggle the mode. The normal
 Z/X navigation resumes when typing is off. Fn navigation remains available.
