@@ -20,7 +20,7 @@ import {
 } from './wsProxy.mjs'
 import { handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
-import { searchWeb } from './search.mjs'
+import { searchWeb, warmSearch } from './search.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -502,6 +502,11 @@ export function createRelay(options = {}) {
         const body = JSON.parse(
           (await readBody(req, 16 * 1024)).toString('utf8')
         )
+        if (body?.warm === true) {
+          await warmSearch(options)
+          if (!res.destroyed) res.writeHead(204).end()
+          return
+        }
         const result = await searchWeb(body.query, {
           ...options,
           signal: controller.signal,

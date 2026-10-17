@@ -8,6 +8,7 @@ import {
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
 import { cn } from '@/lib/utils'
+import { warmAnswer } from '@/lib/answerWarm'
 import {
   cancelDictation,
   stripFunctionKeyChars,
@@ -1233,6 +1234,7 @@ const ChatInput = ({
               onChange={(e) => {
                 const value = stripFunctionKeyChars(e.target.value)
                 setPrompt(value)
+                if (value.trim()) warmAnswer()
                 // Count the number of newlines to estimate rows
                 const newRows = (e.target.value.match(/\n/g) || []).length + 1
                 setRows(Math.min(newRows, maxRows))
