@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { connect } from 'node:net'
 import {
   createRelay,
   liveToken,
@@ -451,6 +452,44 @@ test('grok live: refuses a socket without a fresh ticket', async () => {
       liveToken({ env: {}, engine: 'grok' }),
       (err) => err.status === 503
     )
+  } finally {
+    server.close()
+  }
+})
+
+test('live sockets: a malformed upgrade URL is dropped, the relay keeps running', async () => {
+  const lines = []
+  const server = createRelay({
+    env: {},
+    log: (line) => lines.push(line),
+  }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  const { port } = server.address()
+  try {
+    // nginx routes this to the live location (it normalizes the path) but
+    // passes the raw URI on, which `new URL` can't parse
+    const reply = await new Promise((resolve, reject) => {
+      const socket = connect(port, '127.0.0.1', () =>
+        socket.write(
+          'GET //[::1/../api/grok-live HTTP/1.1\r\nHost: localhost\r\n' +
+            'Connection: Upgrade\r\nUpgrade: websocket\r\n' +
+            'Sec-WebSocket-Version: 13\r\n' +
+            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n'
+        )
+      )
+      let data = ''
+      socket.setTimeout(2000, () => {
+        socket.destroy()
+        resolve('left open')
+      })
+      socket.on('data', (d) => (data += d))
+      socket.on('close', () => resolve(data))
+      socket.on('error', reject)
+    })
+    assert.equal(reply, '')
+    assert.equal(lines.length, 1)
+    assert.match(lines[0], /^live socket refused: /)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/x`)).status, 404)
   } finally {
     server.close()
   }

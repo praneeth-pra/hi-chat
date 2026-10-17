@@ -608,22 +608,28 @@ export function createRelay(options = {}) {
   // (see wsProxy.mjs)
   const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://relay')
-    const engine = LIVE_PATHS[url.pathname]
-    if (!engine) return socket.destroy()
-    if (!sameOriginRequest(req))
-      return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
-    if (!useLiveTicket(url.searchParams.get('ticket') ?? '', engine)) {
-      console.log(`${engine} live refused: bad or used ticket`)
-      return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+    // A throw here (e.g. a URL `new URL` can't parse) would end the process
+    try {
+      const url = new URL(req.url ?? '/', 'http://relay')
+      const engine = LIVE_PATHS[url.pathname]
+      if (!engine) return socket.destroy()
+      if (!sameOriginRequest(req))
+        return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      if (!useLiveTicket(url.searchParams.get('ticket') ?? '', engine)) {
+        console.log(`${engine} live refused: bad or used ticket`)
+        return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      }
+      const client = acceptWebSocket(req, socket, head)
+      const keyterms = cleanKeyterms(url.searchParams.getAll('keyterm'))
+      if (client)
+        (engine === 'muse' ? museLive : grokLive)(client, {
+          ...options,
+          keyterms,
+        })
+    } catch (err) {
+      ;(options.log ?? console.log)(`live socket refused: ${err.message}`)
+      socket.destroy()
     }
-    const client = acceptWebSocket(req, socket, head)
-    const keyterms = cleanKeyterms(url.searchParams.getAll('keyterm'))
-    if (client)
-      (engine === 'muse' ? museLive : grokLive)(client, {
-        ...options,
-        keyterms,
-      })
   })
   return server
 }
