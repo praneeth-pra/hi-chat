@@ -86,12 +86,17 @@ assert(m[2].image == "jan picture" and m[3].action == "skip")
 -- Second tap: the screen around the pointer, the size of the mirror, with a dot at the pointer
 tapRightCmd()
 assert(m[2].image.area.w == 640 and m[2].image.area.x == 500 - 320)
-assert(m[3].action == "fill" and m[3].frame.x == 320 - 5)
+assert(m[3].action == "fill" and m[3].center.x == 320 and m[3].radius == 5)
+
+-- Small moves inside the view: the picture holds still, only the dot moves
+pointer = { x = 560, y = 330 }
+timers[1].fn()
+assert(m[2].image.area.x == 180 and m[3].center.x == 380)
 
 -- Pointer near the edge: the area stays on the screen
 pointer = { x = 10, y = 10 }
 timers[1].fn()
-assert(m[2].image.area.x == 0 and m[2].image.area.y == 0 and m[3].frame.x == 10 - 5)
+assert(m[2].image.area.x == 0 and m[2].image.area.y == 0 and m[3].center.x == 10)
 
 -- Pointer over the mirror itself: the last picture stays
 pointer = { x = m.box.x + 5, y = m.box.y + 5 }
