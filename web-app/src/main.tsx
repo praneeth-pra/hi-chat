@@ -69,3 +69,12 @@ if (!rootElement.innerHTML) {
     </StrictMode>
   )
 }
+
+// The chat page's code is split out; fetch it while idle so the first
+// question after a reload doesn't wait for a download before it shows.
+const preloadChatRoute = () => {
+  const chatRoute = router.routesById['/threads/$threadId']
+  if (chatRoute) void router.loadRouteChunk(chatRoute).catch(() => {})
+}
+if ('requestIdleCallback' in window) requestIdleCallback(preloadChatRoute)
+else setTimeout(preloadChatRoute, 1000)
