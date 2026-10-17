@@ -80,7 +80,7 @@ const ScrollToBottom = ({ threadId }: { threadId: string }) => {
       className={cn(
         'absolute z-0 -top-6 h-8 py-1 flex w-full justify-center pointer-events-none opacity-0 visibility-hidden',
         appMainViewBgColor.a === 1
-          ? 'from-main-view/20 bg-gradient-to-b to-main-view backdrop-blur'
+          ? 'from-main-view/0 bg-gradient-to-b to-main-view'
           : 'bg-transparent',
         (showScrollToBottomBtn || showGenerateAIResponseBtn) &&
           'visibility-visible opacity-100'

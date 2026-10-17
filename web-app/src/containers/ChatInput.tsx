@@ -34,7 +34,6 @@ import { useGeneralSetting } from '@/hooks/useGeneralSetting'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
 import { useAppState } from '@/hooks/useAppState'
-import { MovingBorder } from './MovingBorder'
 import { useChat } from '@/hooks/useChat'
 import DropdownModelProvider from '@/containers/DropdownModelProvider'
 import { ModelLoader } from '@/containers/loaders/ModelLoader'
@@ -1129,27 +1128,15 @@ const ChatInput = ({
       <div className="relative">
         <div
           className={cn(
-            'relative overflow-hidden p-[2px] rounded-[18px]',
+            'relative overflow-hidden rounded-[22px]',
             Boolean(streamingContent) && 'opacity-70'
           )}
         >
-          {streamingContent && (
-            <div className="absolute inset-0">
-              <MovingBorder rx="16px" ry="16px">
-                <div
-                  className={cn(
-                    'h-100 w-100 bg-[radial-gradient(var(--app-primary),transparent_60%)]'
-                  )}
-                />
-              </MovingBorder>
-            </div>
-          )}
-
           <div
             className={cn(
-              'relative z-20 px-0 pb-12 border border-main-view-fg/10 rounded-2xl text-main-view-fg bg-main-view shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow]',
+              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-[22px] text-main-view-fg bg-surface transition-[border-color]',
               isFocused &&
-                'border-main-view-fg/20 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_12px_32px_-12px_rgba(0,0,0,0.18)]',
+                'border-main-view-fg/20',
               isDragOver && 'ring-2 ring-accent border-accent'
             )}
             data-drop-zone={hasMmproj ? 'true' : undefined}
@@ -1486,7 +1473,9 @@ const ChatInput = ({
                   size="icon"
                   className={cn(
                     'rounded-full',
-                    !prompt.trim() && 'bg-main-view-fg/[0.08]'
+                    prompt.trim()
+                      ? 'bg-main-view-fg hover:bg-main-view-fg/90'
+                      : 'bg-main-view-fg/[0.08]'
                   )}
                   disabled={!prompt.trim() || ingestingAny}
                   data-test-id="send-message-button"
@@ -1500,7 +1489,7 @@ const ChatInput = ({
                     <ArrowUp
                       className={cn(
                         prompt.trim()
-                          ? 'text-primary-fg'
+                          ? 'text-main-view'
                           : 'text-main-view-fg/40'
                       )}
                     />

@@ -84,33 +84,32 @@ const getAlphaValue = () => {
 
 // Default interface settings
 const defaultFontSize: FontSize = '15px'
-// Sidebar (app background): a soft neutral that sets the panel apart from
-// the chat surface. Dark mode is true black around a near-black chat (no
-// blue tint).
+// Focus Column: the sidebar and the chat share one page ground (warm
+// off-white in light mode, near-black in dark), split by a hairline.
 const defaultAppBgColor: RgbaColor = {
-  r: 0,
-  g: 0,
-  b: 0,
+  r: 11,
+  g: 11,
+  b: 10,
   a: getAlphaValue(),
 }
 const defaultLightAppBgColor: RgbaColor = {
   r: 244,
-  g: 244,
-  b: 242,
+  g: 243,
+  b: 239,
   a: getAlphaValue(),
 }
-const defaultAppMainViewBgColor: RgbaColor = { r: 10, g: 10, b: 10, a: 1 }
+const defaultAppMainViewBgColor: RgbaColor = { r: 11, g: 11, b: 10, a: 1 }
 const defaultLightAppMainViewBgColor: RgbaColor = {
-  r: 255,
-  g: 255,
-  b: 255,
+  r: 244,
+  g: 243,
+  b: 239,
   a: 1,
 }
 
 const defaultAppPrimaryBgColor: RgbaColor = { r: 108, g: 99, b: 255, a: 1 }
 const defaultLightAppPrimaryBgColor: RgbaColor = { r: 91, g: 80, b: 230, a: 1 }
 const defaultAppAccentBgColor: RgbaColor = { r: 99, g: 140, b: 255, a: 1 }
-const defaultLightAppAccentBgColor: RgbaColor = { r: 59, g: 99, b: 230, a: 1 }
+const defaultLightAppAccentBgColor: RgbaColor = { r: 59, g: 91, b: 219, a: 1 }
 const defaultAppDestructiveBgColor: RgbaColor = { r: 190, g: 70, b: 70, a: 1 }
 const defaultLightAppDestructiveBgColor: RgbaColor = {
   r: 217,
@@ -118,8 +117,8 @@ const defaultLightAppDestructiveBgColor: RgbaColor = {
   b: 72,
   a: 1,
 }
-const defaultDarkLeftPanelTextColor: string = '#ECECEF'
-const defaultLightLeftPanelTextColor: string = '#18181B'
+const defaultDarkLeftPanelTextColor: string = '#F1F0EC'
+const defaultLightLeftPanelTextColor: string = '#1C1C1A'
 
 /**
  * Defaults from before the 2026-10 redesign. Browsers that saved them are
@@ -135,6 +134,11 @@ const legacyDefaults: RgbaColor[] = [
   // Blue-tinted dark surfaces from the 12 Oct refresh
   { r: 17, g: 17, b: 19, a: 1 },
   { r: 26, g: 26, b: 29, a: 1 },
+  // True black / soft neutral surfaces from the 15 Oct dark mode
+  { r: 0, g: 0, b: 0, a: 1 },
+  { r: 10, g: 10, b: 10, a: 1 },
+  { r: 244, g: 244, b: 242, a: 1 },
+  { r: 59, g: 99, b: 230, a: 1 },
 ]
 const isLegacyDefault = (color: RgbaColor) =>
   legacyDefaults.some(
@@ -159,6 +163,7 @@ export const isDefaultColor = (color: RgbaColor): boolean => {
   const isDefault =
     sameRgb(defaultAppBgColor) ||
     sameRgb(defaultLightAppBgColor) ||
+    isLegacyDefault(color) ||
     (color.r === 17 && color.g === 17 && color.b === 19) ||
     color.r === 25 && color.g === 25 && color.b === 25 ||
     color.r === 255 && color.g === 255 && color.b === 255

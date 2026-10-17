@@ -102,7 +102,7 @@ function Index() {
           className={cn(
             'mx-auto',
             // Full width on mobile, constrained on desktop
-            isMobile ? 'w-full max-w-full' : 'w-full md:w-4/6'
+            isMobile ? 'w-full max-w-full' : 'w-full max-w-[680px]'
           )}
         >
           <div

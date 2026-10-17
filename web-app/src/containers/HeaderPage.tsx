@@ -54,7 +54,7 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
   return (
     <div
       className={cn(
-        'h-12 text-main-view-fg flex items-center shrink-0 border-b border-main-view-fg/[0.06]',
+        'h-12 text-main-view-fg flex items-center shrink-0',
         // Mobile-first responsive padding
         isMobile ? 'px-3' : 'px-4',
         // macOS-specific padding when panel is closed
@@ -69,7 +69,7 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
           isMobile ? 'gap-2' : 'gap-3'
         )}
       >
-        {!open && (
+        {!open && isSmallScreen && (
           <button
             className={cn(
               'cursor-pointer flex items-center justify-center rounded-lg hover:bg-main-view-fg/[0.07] transition-colors data-[state=open]:bg-main-view-fg/10',
