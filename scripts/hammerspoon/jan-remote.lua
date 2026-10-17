@@ -27,9 +27,10 @@
 --                           so Safari never becomes the active app; tapping Option
 --                           again puts the pointer back. Two-finger scrolling
 --                           scrolls Jan while it is on, like holding fn.
---   tap Right Command       toggle macOS Zoom (Option + Command + 8). Set
---                           Zoom's style to Picture-in-picture and it is a
---                           window showing the screen around the pointer.
+--   tap Right Command       open a second window that mirrors Jan live; tap
+--                           again to switch it to the screen around the pointer
+--                           and back. Drag it to move, its corner to resize,
+--                           x to close. Needs Screen Recording for Hammerspoon.
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
@@ -664,20 +665,137 @@ pointerWatch = hs.timer.doEvery(0.2, function()
   end
 end)
 
--- Right Command on its own, pressed and let go within TAP_SECONDS: presses
--- macOS Zoom's own toggle, Option + Command + 8. The keys carry TYPING_MARK
--- so background typing lets them through instead of switching itself off.
+-- Second window: a live copy of Jan, which a tap of Right Command switches
+-- to a live view of the screen around the pointer and back. It is drawn by
+-- Hammerspoon (needs Screen Recording), never takes focus, and stays where
+-- you drag it; drag its bottom-right corner to resize, x closes it.
+local MIRROR_FPS = 10
+local MIRROR_KEY = "janMirrorFrame"
 local RIGHT_CMD = hs.keycodes.map.rightcmd or 54
 local rightCmdDownAt = nil
-local function toggleZoom()
-  for _, down in ipairs({ true, false }) do
-    local key = hs.eventtap.event.newKeyEvent({ "alt", "cmd" }, "8", down)
-    key:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
-    key:post()
-  end
-  print("[jan zoom] toggled macOS Zoom")
+local mirror, mirrorTimer, mirrorMode, mirrorDrag = nil, nil, "jan", nil
+local mirrorWarned = false
+
+local function mirrorFrame()
+  local saved = hs.settings and hs.settings.get(MIRROR_KEY)
+  if saved and saved.w then return saved end
+  local f = hs.screen.mainScreen():frame()
+  return { x = f.x + f.w - 660, y = f.y + 40, w = 640, h = 420 }
 end
-zoomTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown,
+
+local function closeMirror()
+  if mirrorTimer then mirrorTimer:stop() mirrorTimer = nil end
+  if mirrorDrag then mirrorDrag.timer:stop() end
+  if mirror then mirror:delete() mirror = nil end
+  mirrorDrag = nil
+end
+
+local function snapshotOf(mode)
+  local box = mirror:frame()
+  if mode == "jan" then
+    local win = chatWindow()
+    return win and win:snapshot(), nil
+  end
+  local p = hs.mouse.absolutePosition()
+  if inside(p, box) then return nil end -- over the mirror itself: keep the last frame
+  local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+  local full = screen:fullFrame()
+  local w, h = math.min(box.w, full.w), math.min(box.h, full.h)
+  local x = math.max(full.x, math.min(p.x - w / 2, full.x + full.w - w))
+  local y = math.max(full.y, math.min(p.y - h / 2, full.y + full.h - h))
+  local area = { x = x, y = y, w = w, h = h }
+  return screen:snapshot(screen:absoluteToLocal(area)), { x = p.x - x, y = p.y - y }
+end
+
+local function followDrag()
+  local p, d = hs.mouse.absolutePosition(), mirrorDrag
+  local f = d.frame
+  if d.resize then
+    mirror:frame({ x = f.x, y = f.y, w = math.max(240, f.w + p.x - d.from.x),
+      h = math.max(160, f.h + p.y - d.from.y) })
+  else
+    mirror:frame({ x = f.x + p.x - d.from.x, y = f.y + p.y - d.from.y, w = f.w, h = f.h })
+  end
+  if not hs.eventtap.checkMouseButtons().left then
+    d.timer:stop()
+    mirrorDrag = nil
+    if hs.settings then hs.settings.set(MIRROR_KEY, mirror:frame()) end
+  end
+end
+
+local function drawMirror()
+  if not mirror or mirrorDrag then return end
+  local ok, image, dot = pcall(snapshotOf, mirrorMode)
+  if ok and image then
+    mirror[2].image = image
+    local box = mirror:frame()
+    if dot then
+      mirror[3].frame = { x = dot.x - 5, y = dot.y - 5, w = 10, h = 10 }
+      mirror[3].action = "fill"
+    else
+      mirror[3].action = "skip"
+    end
+    mirror[2].frame = { x = 0, y = 0, w = box.w, h = box.h }
+  elseif not mirrorWarned and (not ok or (mirrorMode == "jan" and chatWindow())) then
+    mirrorWarned = true
+    print("[jan mirror] no picture: allow Hammerspoon in System Settings > Privacy & Security > Screen Recording", image)
+    hs.alert.show("Allow Hammerspoon in Screen Recording to show the mirror")
+  end
+end
+
+local function openMirror()
+  local f = mirrorFrame()
+  mirror = hs.canvas.new(f)
+  mirror:appendElements(
+    { type = "rectangle", action = "fill", fillColor = { white = 0.09 },
+      roundedRectRadii = { xRadius = 10, yRadius = 10 } },
+    { type = "image", imageScaling = "scaleProportionally", imageAlignment = "center",
+      frame = { x = 0, y = 0, w = f.w, h = f.h } },
+    { type = "circle", action = "skip", fillColor = { red = 1, green = 0.3, blue = 0.2, alpha = 0.9 },
+      frame = { x = 0, y = 0, w = 10, h = 10 } },
+    { id = "close", type = "text", text = "×", textSize = 16, textAlignment = "center",
+      textColor = { white = 1, alpha = 0.5 }, trackMouseDown = true,
+      frame = { x = "100%", y = 4, w = 22, h = 22 } },
+    { id = "grip", type = "rectangle", action = "fill", fillColor = { white = 1, alpha = 0.15 },
+      trackMouseDown = true, frame = { x = 0, y = 0, w = 16, h = 16 } })
+  local function place()
+    local box = mirror:frame()
+    mirror[4].frame = { x = box.w - 26, y = 4, w = 22, h = 22 }
+    mirror[5].frame = { x = box.w - 16, y = box.h - 16, w = 16, h = 16 }
+  end
+  place()
+  mirror:canvasMouseEvents(true, false, false, false)
+  mirror:mouseCallback(function(_, message, id)
+    if message ~= "mouseDown" then return end
+    if id == "close" then hs.timer.doAfter(0, closeMirror) return end
+    mirrorDrag = { from = hs.mouse.absolutePosition(), frame = mirror:frame(), resize = id == "grip" }
+    mirrorDrag.timer = hs.timer.doEvery(1 / 60, followDrag)
+  end)
+  mirror:clickActivating(false) -- clicking it never takes focus from your app
+  mirror:level(hs.canvas.windowLevels.floating)
+  mirror:behavior({ "canJoinAllSpaces", "stationary" })
+  mirror:show()
+  mirrorTimer = hs.timer.doEvery(1 / MIRROR_FPS, function()
+    drawMirror()
+    if mirror then place() end
+  end)
+  drawMirror()
+end
+
+-- Right Command on its own, pressed and let go within TAP_SECONDS: opens the
+-- mirror, then switches it between Jan and the screen around the pointer.
+local function switchMirror()
+  if not mirror then
+    mirrorMode = "jan"
+    openMirror()
+  else
+    mirrorMode = mirrorMode == "jan" and "pointer" or "jan"
+    drawMirror()
+  end
+  print("[jan mirror] showing", mirrorMode)
+end
+
+mirrorTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown,
   types.rightMouseDown, types.scrollWheel }, function(e)
   if e:getType() ~= types.flagsChanged then
     rightCmdDownAt = nil -- Command + a key, a click or a scroll is not a tap
@@ -688,7 +806,7 @@ zoomTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDo
     rightCmdDownAt = hs.timer.secondsSinceEpoch()
   elseif key == RIGHT_CMD and not flags.cmd and rightCmdDownAt then
     if hs.timer.secondsSinceEpoch() - rightCmdDownAt < TAP_SECONDS then
-      hs.timer.doAfter(0, toggleZoom)
+      hs.timer.doAfter(0, switchMirror)
     end
     rightCmdDownAt = nil
   else
@@ -696,7 +814,7 @@ zoomTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDo
   end
   return false
 end)
-zoomTap:start()
+mirrorTap:start()
 
 local function jumpBack()
   local here = hs.mouse.absolutePosition()
@@ -746,7 +864,7 @@ jumpTap:start()
 -- macOS switches a listener off if it ever answers too slowly; switch it
 -- back on so fn + scroll keeps working
 tapWatchdog = hs.timer.doEvery(2, function()
-  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap, zoomTap }) do
+  for _, tap in ipairs({ scrollTap, jumpTap, sendTap, dictateTap, typingTap, typingMouseTap, mirrorTap }) do
     if not tap:isEnabled() then
       print("[jan] a listener was switched off by macOS, restarting it")
       tap:start()
