@@ -84,25 +84,25 @@ const getAlphaValue = () => {
 
 // Default interface settings
 const defaultFontSize: FontSize = '15px'
-// Focus Column: the sidebar and the chat share one page ground (warm
-// off-white in light mode, near-black in dark), split by a hairline.
+// Open WebUI look: a darker sidebar beside a neutral grey chat in dark mode,
+// a light grey sidebar beside a white chat in light mode.
 const defaultAppBgColor: RgbaColor = {
-  r: 11,
-  g: 11,
-  b: 10,
+  r: 13,
+  g: 13,
+  b: 13,
   a: getAlphaValue(),
 }
 const defaultLightAppBgColor: RgbaColor = {
-  r: 244,
-  g: 243,
-  b: 239,
+  r: 249,
+  g: 249,
+  b: 249,
   a: getAlphaValue(),
 }
-const defaultAppMainViewBgColor: RgbaColor = { r: 11, g: 11, b: 10, a: 1 }
+const defaultAppMainViewBgColor: RgbaColor = { r: 23, g: 23, b: 23, a: 1 }
 const defaultLightAppMainViewBgColor: RgbaColor = {
-  r: 244,
-  g: 243,
-  b: 239,
+  r: 255,
+  g: 255,
+  b: 255,
   a: 1,
 }
 
@@ -117,8 +117,8 @@ const defaultLightAppDestructiveBgColor: RgbaColor = {
   b: 72,
   a: 1,
 }
-const defaultDarkLeftPanelTextColor: string = '#F1F0EC'
-const defaultLightLeftPanelTextColor: string = '#1C1C1A'
+const defaultDarkLeftPanelTextColor: string = '#ECECEC'
+const defaultLightLeftPanelTextColor: string = '#0D0D0D'
 
 /**
  * Defaults from before the 2026-10 redesign. Browsers that saved them are
@@ -139,6 +139,9 @@ const legacyDefaults: RgbaColor[] = [
   { r: 10, g: 10, b: 10, a: 1 },
   { r: 244, g: 244, b: 242, a: 1 },
   { r: 59, g: 99, b: 230, a: 1 },
+  // Focus Column grounds from 17 Oct
+  { r: 11, g: 11, b: 10, a: 1 },
+  { r: 244, g: 243, b: 239, a: 1 },
 ]
 const isLegacyDefault = (color: RgbaColor) =>
   legacyDefaults.some(
@@ -165,8 +168,8 @@ export const isDefaultColor = (color: RgbaColor): boolean => {
     sameRgb(defaultLightAppBgColor) ||
     isLegacyDefault(color) ||
     (color.r === 17 && color.g === 17 && color.b === 19) ||
-    color.r === 25 && color.g === 25 && color.b === 25 ||
-    color.r === 255 && color.g === 255 && color.b === 255
+    (color.r === 25 && color.g === 25 && color.b === 25) ||
+    (color.r === 255 && color.g === 255 && color.b === 255)
 
   // Consider it default if RGB matches and alpha is either 0.4 or 1 (common values)
   const hasDefaultAlpha =
@@ -248,8 +251,8 @@ const createDefaultInterfaceValues = (): InterfaceSettingsPersistedSlice => {
   }
 }
 
-const interfaceStorage = createJSONStorage<InterfaceSettingsState>(() =>
-  localStorage
+const interfaceStorage = createJSONStorage<InterfaceSettingsState>(
+  () => localStorage
 )
 
 // Hook to check if alpha slider should be shown
@@ -429,21 +432,21 @@ export const useInterfaceSettings = create<InterfaceSettingsState>()(
           )
 
           // Update state
-        set({
-          fontSize: defaultFontSize,
-          appBgColor: defaultBg,
-          appMainViewBgColor: defaultMainView,
-          appPrimaryBgColor: defaultPrimary,
-          appAccentBgColor: defaultAccent,
+          set({
+            fontSize: defaultFontSize,
+            appBgColor: defaultBg,
+            appMainViewBgColor: defaultMainView,
+            appPrimaryBgColor: defaultPrimary,
+            appAccentBgColor: defaultAccent,
             appLeftPanelTextColor: defaultTextColor,
-          appMainViewTextColor: defaultTextColor,
-          appPrimaryTextColor: '#FFF',
-          appAccentTextColor: '#FFF',
-          appDestructiveBgColor: defaultDestructive,
-          appDestructiveTextColor: '#FFF',
-          threadScrollBehavior: DEFAULT_THREAD_SCROLL_BEHAVIOR,
-        })
-      },
+            appMainViewTextColor: defaultTextColor,
+            appPrimaryTextColor: '#FFF',
+            appAccentTextColor: '#FFF',
+            appDestructiveBgColor: defaultDestructive,
+            appDestructiveTextColor: '#FFF',
+            threadScrollBehavior: DEFAULT_THREAD_SCROLL_BEHAVIOR,
+          })
+        },
 
         setThreadScrollBehavior: (value: ThreadScrollBehavior) =>
           set({
