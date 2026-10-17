@@ -70,6 +70,14 @@ assert(tapFn(event(types.leftMouseUp, { x = 2600, y = 400 })) == true)
 assert(#signals == 2 and signals[1].key == "f20" and signals[1].mods[1] == "shift")
 assert(signals[2].key == "f19" and signals[2].mods[1] == "shift")
 
+-- Typing turned off mid-press: the release still reaches Jan, so no press is left stuck
+assert(tapFn(event(types.leftMouseDown, { x = 2500, y = 400 })) == true)
+target = nil
+assert(tapFn(event(types.leftMouseUp, { x = 2500, y = 400 })) == true)
+assert(#signals == 4 and signals[4].key == "f19" and signals[4].mods[1] == "shift")
+target = { app = app, win = win }
+signals = {}
+
 -- Clicks elsewhere still reach the app under them
 assert(tapFn(event(types.leftMouseDown, { x = 100, y = 100 })) == false)
 assert(tapFn(event(types.leftMouseUp, { x = 100, y = 100 })) == false)
@@ -78,7 +86,7 @@ assert(tapFn(event(types.leftMouseUp, { x = 100, y = 100 })) == false)
 assert(tapFn(event(types.rightMouseDown, { x = 2500, y = 400 })) == true)
 target = nil
 assert(tapFn(event(types.rightMouseUp, { x = 2500, y = 400 })) == true)
-assert(#signals == 2)
+assert(#signals == 0)
 target = { app = app, win = win }
 
 -- Typing off: the pointer comes back and the dummy goes
