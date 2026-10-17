@@ -119,9 +119,13 @@ for _, key in ipairs({ keymap.z, keymap.x }) do
   assert(callback(event(types.keyDown, key, {}, "letter")) == true)
   callback(event(types.keyUp, key, {}))
 end
+local before = #posted
 assert(callback(event(types.keyDown, 36, {}, "\r")) == true)
-assert(posted[#posted].flags.shift == true) -- newline, not auto-send
+assert(#posted == before + 2 and posted[before + 1].key == keymap.f15) -- Return sends
 callback(event(types.keyUp, 36, {}))
+assert(callback(event(types.keyDown, 36, { shift = true }, "\r")) == true)
+assert(posted[#posted].key == 36 and posted[#posted].flags.shift == true) -- newline
+callback(event(types.keyUp, 36, { shift = true }))
 assert(callback(event(types.keyDown, 36, { fn = true }, "\r")) == false)
 assert(callback(event(types.keyDown, keymap.pageup, {}, "")) == false)
 assert(callback(event(types.keyDown, keymap.v, { cmd = true }, "v")) == true)

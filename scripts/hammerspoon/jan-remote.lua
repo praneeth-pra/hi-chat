@@ -347,11 +347,14 @@ typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
     or key == typingKeys.left or key == typingKeys.right
     or key == typingKeys.up or key == typingKeys.down
   if not editing and (not chars or chars == "") then return false end
-  local copy = e:copy()
-  if key == RETURN or key == PAD_ENTER then
-    flags.shift = true
-    copy:setFlags(flags) -- a normal Enter is a newline, not a send
+  if (key == RETURN or key == PAD_ENTER) and not flags.shift then
+    -- Return sends the question like fn+Right; Shift+Return stays a newline.
+    local target = typingTarget
+    if pcall(typingSignal, target, "f15") then heldTypingKeys[key] = target
+    else stopTyping("Jan typing stopped — could not deliver text") end
+    return true
   end
+  local copy = e:copy()
   copy:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
   local target = typingTarget
   local ok = pcall(function() copy:post(target.app) end)
