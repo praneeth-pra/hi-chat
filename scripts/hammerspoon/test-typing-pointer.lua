@@ -12,7 +12,7 @@ local frame = { x = 2000, y = 0, w = 1000, h = 800 }
 local app = { activate = function() error("Must not activate Safari") end }
 local win = { frame = function() return frame end,
   focus = function() error("Must not focus the window") end }
-local pointer, posted, dummy, stopped = { x = 100, y = 100 }, {}, nil, nil
+local pointer, posted, dummy, stopped, signals = { x = 100, y = 100 }, {}, nil, nil, {}
 local function event(kind, at, marker)
   local e = { kind = kind, at = at, marker = marker or 0 }
   e.getType = function(self) return self.kind end
@@ -33,7 +33,8 @@ hs = {
 }
 local start = assert(source:find("-- Background typing takes the pointer along", 1, true))
 local finish = assert(source:find("-- Keep track of where the pointer was last seen off Jan", start, true))
-local block = "local types, typingProps, TYPING_MARK, getTarget, stopTyping, showDummy, hideDummy, chatWindow = ...\n"
+print = function() end
+local block = "local types, typingProps, TYPING_MARK, getTarget, stopTyping, showDummy, hideDummy, chatWindow, typingSignal = ...\n"
   .. "local typingPointerOn, typingPointerOff, lastBox\n"
   .. "local function inside(p, r) return p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end\n"
   .. source:sub(start, finish - 1):gsub("typingTarget", "getTarget()")
@@ -41,7 +42,8 @@ local block = "local types, typingProps, TYPING_MARK, getTarget, stopTyping, sho
 local target
 local on, off = assert(load(block))(types, { eventSourceUserData = 1 }, 0x4A545950,
   function() return target end, function(m) stopped = m end,
-  function(at) dummy = at end, function() dummy = nil end, function() return win end)
+  function(at) dummy = at end, function() dummy = nil end, function() return win end,
+  function(_, key, mods) signals[#signals + 1] = { key = key, mods = mods } end)
 
 -- Not typing: clicks are left alone
 assert(tapFn(event(types.leftMouseDown, { x = 2500, y = 400 })) == false and #posted == 0)
@@ -51,23 +53,25 @@ target = { app = app, win = win }
 on(target)
 assert(dummy and dummy.x == 100 and pointer.x == 2500 and pointer.y == 720)
 
--- A click over Jan goes to Safari, press and release, without activating it
+-- A click over Jan becomes Shift + F20 for Jan; the real click is swallowed
 assert(tapFn(event(types.leftMouseDown, { x = 2500, y = 400 })) == true)
 assert(tapFn(event(types.leftMouseDragged, { x = 2600, y = 400 })) == true)
 assert(tapFn(event(types.leftMouseUp, { x = 2600, y = 400 })) == true)
-assert(#posted == 3 and posted[1].marker ~= 0)
-assert(tapFn(posted[1]) == false) -- its own copies are not caught again
+assert(#signals == 1 and signals[1].key == "f20" and signals[1].mods[1] == "shift")
 
 -- Clicks elsewhere still reach the app under them
 assert(tapFn(event(types.leftMouseDown, { x = 100, y = 100 })) == false)
 assert(tapFn(event(types.leftMouseUp, { x = 100, y = 100 })) == false)
 
--- A release after typing turned off still goes to the app that got the press
-tapFn(event(types.rightMouseDown, { x = 2500, y = 400 }))
+-- A right click over Jan does nothing, and its release is swallowed too
+assert(tapFn(event(types.rightMouseDown, { x = 2500, y = 400 })) == true)
 target = nil
 assert(tapFn(event(types.rightMouseUp, { x = 2500, y = 400 })) == true)
+assert(#signals == 1)
+target = { app = app, win = win }
 
 -- Typing off: the pointer comes back and the dummy goes
+target = nil
 off()
 assert(dummy == nil and pointer.x == 100 and pointer.y == 100)
 
@@ -81,4 +85,4 @@ assert(pointer.x == 300 and dummy == nil)
 -- Scrolling follows Option typing like it follows fn
 assert(source:find("if e:getFlags().fn or typingTarget then", 1, true))
 assert(stopped == nil)
-print("Typing pointer passed: pointer moves to Jan and back, clicks go to Safari without activating it, scrolling follows.")
+print("Typing pointer passed: pointer moves to Jan and back, clicks become Shift + F20 for Jan, scrolling follows.")

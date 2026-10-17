@@ -22,8 +22,9 @@
 --                           the main app stays active. Escape also turns it off.
 --                           Enter adds a line; fn + Right sends the prompt.
 --                           The pointer moves over to Jan too (a dummy cursor
---                           stays behind) and its clicks go to Jan without
---                           making Safari the active app; tapping Option
+--                           stays behind); hovering works and a click there
+--                           is clicked by Jan itself, so Safari never becomes
+--                           the active app; tapping Option
 --                           again puts the pointer back. Two-finger scrolling
 --                           scrolls Jan while it is on, like holding fn.
 --
@@ -264,9 +265,9 @@ local function typingValid(target)
   return ok and valid
 end
 
-local function typingSignal(target, key)
+local function typingSignal(target, key, mods)
   for _, down in ipairs({ true, false }) do
-    local event = hs.eventtap.event.newKeyEvent({}, key, down)
+    local event = hs.eventtap.event.newKeyEvent(mods or {}, key, down)
     event:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
     event:post(target.app)
   end
@@ -293,7 +294,10 @@ local function toggleTyping()
   end)
   if not ok then print("[jan typing] Could not enable Jan typing") return end
   typingTarget = target
-  if typingPointerOn then pcall(typingPointerOn, target) end
+  if typingPointerOn then
+    local ok, err = pcall(typingPointerOn, target)
+    if not ok then print("[jan typing] could not move the pointer:", err) end
+  end
 end
 
 -- Global so macOS cannot garbage-collect the tap. Copied events are tagged
@@ -562,19 +566,27 @@ end
 
 -- Background typing takes the pointer along: it moves onto Jan's window
 -- without activating Safari, a dummy cursor keeps its place on the laptop,
--- and clicks over Jan are posted straight to Safari so your main app stays
+-- and clicks over Jan are handed to Jan as a key so your main app stays
 -- the active one (nothing greys out). Scrolling over Jan already works for
 -- an inactive window, so it is left alone.
 local typingPointerHome -- where the pointer was when typing turned on
 
 typingPointerOn = function(target)
   local here = hs.mouse.absolutePosition()
-  local f = target.win:frame()
-  if inside(here, f) then return end -- already over Jan: nothing to move
+  local win = chatWindow() or target.win -- the window on the monitor, as Z uses
+  local f = win:frame()
+  if inside(here, f) then
+    print("[jan typing] pointer already over Jan, left where it is")
+    return
+  end
   typingPointerHome = here
-  showDummy(here)
+  -- The stand-in copies the pointer's shape before it leaves; a failure
+  -- there must not stop the pointer from moving
+  local ok, err = pcall(showDummy, here)
+  if not ok then print("[jan typing] dummy cursor failed:", err) end
   local to = (lastBox and inside(lastBox, f)) and lastBox or { x = f.x + f.w / 2, y = f.y + f.h - 80 }
   hs.mouse.absolutePosition(to)
+  print("[jan typing] pointer moved to Jan at", to.x, to.y)
 end
 
 typingPointerOff = function()
@@ -591,35 +603,35 @@ end
 
 local mouseKinds = { types.leftMouseDown, types.leftMouseUp, types.leftMouseDragged,
   types.rightMouseDown, types.rightMouseUp, types.otherMouseDown, types.otherMouseUp }
-local heldClick = nil -- the app a pressed button was sent to, until it is let go
+local heldClick = false -- a press over Jan is swallowed until it is let go
 
--- Global so macOS cannot garbage-collect the tap
+-- Global so macOS cannot garbage-collect the tap. A real click would make
+-- Safari the active app, so a click over Jan is swallowed and Shift + F20 is
+-- sent instead: Jan clicks whatever is under the pointer itself.
 typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if e:getProperty(typingProps.eventSourceUserData) == TYPING_MARK then return false end
   local kind = e:getType()
+  local pressing = kind == types.leftMouseDown or kind == types.rightMouseDown
+    or kind == types.otherMouseDown
   local releasing = kind == types.leftMouseUp or kind == types.rightMouseUp
     or kind == types.otherMouseUp
-  local app = heldClick
-  if not app then
-    local target = typingTarget
-    if not target or releasing then return false end
-    local ok, over = pcall(function() return inside(e:location(), target.win:frame()) end)
-    if not (ok and over) then return false end -- clicks elsewhere work as usual
-    app = target.app
+  if heldClick then
+    if releasing then heldClick = false end
+    return true
   end
-  local copy = e:copy()
-  copy:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
-  if not pcall(function() copy:post(app) end) then
-    heldClick = nil
-    stopTyping("Jan typing stopped — could not deliver the click")
-    return false
+  local target = typingTarget
+  if not target or not pressing then return false end
+  local ok, over = pcall(function()
+    local win = chatWindow() or target.win
+    return inside(e:location(), win:frame())
+  end)
+  if not (ok and over) then return false end -- clicks elsewhere work as usual
+  heldClick = true
+  if kind == types.leftMouseDown then
+    local sent = pcall(typingSignal, target, "f20", { "shift" })
+    if not sent then stopTyping("Jan typing stopped — could not deliver the click") end
   end
-  if kind == types.leftMouseDown or kind == types.rightMouseDown or kind == types.otherMouseDown then
-    heldClick = app
-  elseif releasing then
-    heldClick = nil
-  end
-  return true
+  return true -- right and middle clicks over Jan do nothing
 end)
 typingMouseTap:start()
 
@@ -695,4 +707,4 @@ tapWatchdog = hs.timer.doEvery(2, function()
   end
 end)
 
-hs.alert.show("Jan scroller ready")
+hs.alert.show("Jan remote ready (Option moves the pointer)")
