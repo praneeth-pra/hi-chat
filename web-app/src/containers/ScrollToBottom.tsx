@@ -1,22 +1,17 @@
-﻿import { useThreadScrollState } from './ThreadScrollProvider'
-import { memo, useEffect } from 'react'
+﻿import { memo, useEffect } from 'react'
 import { GenerateResponseButton } from './GenerateResponseButton'
 import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { useInterfaceSettings } from '@/hooks/useInterfaceSettings'
 import { cn } from '@/lib/utils'
-import { ArrowDown } from 'lucide-react'
-import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useAppState } from '@/hooks/useAppState'
 import { MessageStatus } from '@janhq/core'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
 const ScrollToBottom = ({ threadId }: { threadId: string }) => {
-  const { t } = useTranslation()
   const appMainViewBgColor = useInterfaceSettings(
     (state) => state.appMainViewBgColor
   )
-  const { showScrollToBottomBtn, scrollToBottom } = useThreadScrollState()
   const { messages } = useMessages(
     useShallow((state) => ({
       messages: state.messages[threadId],
@@ -82,21 +77,9 @@ const ScrollToBottom = ({ threadId }: { threadId: string }) => {
         appMainViewBgColor.a === 1
           ? 'from-main-view/0 bg-gradient-to-b to-main-view'
           : 'bg-transparent',
-        (showScrollToBottomBtn || showGenerateAIResponseBtn) &&
-          'visibility-visible opacity-100'
+        showGenerateAIResponseBtn && 'visibility-visible opacity-100'
       )}
     >
-      {showScrollToBottomBtn && (
-        <div
-          className="bg-main-view-fg/10 px-2 border border-main-view-fg/5 flex items-center justify-center rounded-xl gap-x-2 cursor-pointer pointer-events-auto"
-          onClick={() => {
-            scrollToBottom(true)
-          }}
-        >
-          <p className="text-xs">{t('scrollToBottom')}</p>
-          <ArrowDown size={12} />
-        </div>
-      )}
       {showGenerateAIResponseBtn && (
         <GenerateResponseButton
           threadId={threadId}

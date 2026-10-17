@@ -19,7 +19,6 @@ type SearchParams = {
   'temporary-chat'?: boolean
 }
 import DropdownAssistant from '@/containers/DropdownAssistant'
-import { HeaderModelPicker } from '@/containers/HeaderModelPicker'
 import { useEffect } from 'react'
 import { useThreads } from '@/hooks/useThreads'
 import { useMobileScreen } from '@/hooks/useMediaQuery'
@@ -89,9 +88,8 @@ function Index() {
     <div className="flex h-full flex-col justify-center pb-[calc(env(safe-area-inset-bottom)+env(safe-area-inset-top))]">
       <HeaderPage>
         <div className="flex items-center justify-between w-full pr-2">
-          <HeaderModelPicker model={selectedModel} useLastUsedModel />
           {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-            <DropdownAssistant compact />
+            <DropdownAssistant />
           )}
         </div>
       </HeaderPage>

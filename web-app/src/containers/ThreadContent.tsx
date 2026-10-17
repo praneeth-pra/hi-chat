@@ -28,8 +28,6 @@ import {
 } from '@/components/ui/tooltip'
 import { formatDate } from '@/utils/formatDate'
 
-import TokenSpeedIndicator from '@/containers/TokenSpeedIndicator'
-
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
@@ -418,14 +416,9 @@ export const ThreadContent = memo(
           </div>
         )}
         {item.content?.[0]?.text && item.role !== 'user' && (
-          <>
+          <div className="group/assistant">
             {item.showAssistant && (
               <div className="flex items-center gap-2.5 mb-2 text-main-view-fg/50">
-                <img
-                  src="/images/hi-chat-logo.png"
-                  alt=""
-                  className="size-7 rounded-full shrink-0"
-                />
                 <div className="flex items-baseline gap-2 min-w-0">
                   <span className="text-main-view-fg font-medium text-[15px] truncate">
                     {assistant?.name || 'Hi-chat'}
@@ -503,7 +496,14 @@ export const ThreadContent = memo(
             ) : null}
 
             {!isToolCalls && (
-              <div className="flex items-center gap-2 text-main-view-fg/45 text-xs mt-1">
+              <div
+                className={cn(
+                  'flex items-center gap-2 text-main-view-fg/45 text-xs mt-1',
+                  // Older answers keep their buttons out of the way until hovered
+                  !item.isLastMessage &&
+                    'md:opacity-0 md:group-hover/assistant:opacity-100 focus-within:opacity-100 transition-opacity'
+                )}
+              >
                 <div className={cn('flex items-center gap-3')}>
                   <div
                     className={cn(
@@ -537,17 +537,10 @@ export const ThreadContent = memo(
                       </Tooltip>
                     )}
                   </div>
-
-                  <TokenSpeedIndicator
-                    streaming={Boolean(
-                      item.isLastMessage && isStreamingThisThread
-                    )}
-                    metadata={item.metadata}
-                  />
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
 
         {item.type === 'image_url' && image && (
