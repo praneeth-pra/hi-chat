@@ -21,25 +21,38 @@ function elapsed(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-/** Bars that move with your voice while recording. */
-function LevelBars({ level }: { level: number }) {
-  const shape = [0.5, 0.8, 1, 0.8, 0.5]
+/**
+ * A dot that breathes while listening; its halo swells with your voice.
+ * Only transform and opacity change, so the browser animates it on the GPU.
+ */
+function BreathingDot({ level }: { level?: number }) {
+  const voice = level === undefined ? undefined : Math.min(1, level * 1.6)
   return (
-    <span className="flex items-center gap-0.5 h-4" aria-hidden>
-      {shape.map((k, i) => (
-        <span
-          key={i}
-          className="w-0.5 rounded-full bg-destructive transition-[height] duration-75"
-          style={{ height: `${Math.max(15, Math.min(100, level * k * 100))}%` }}
-        />
-      ))}
+    <span
+      className="relative flex size-5 items-center justify-center shrink-0"
+      aria-hidden
+    >
+      <span
+        className={cn(
+          'absolute inset-0 rounded-full bg-current opacity-15',
+          voice === undefined
+            ? 'animate-[breathe_1.8s_ease-in-out_infinite]'
+            : 'transition-transform duration-100'
+        )}
+        style={
+          voice === undefined
+            ? undefined
+            : { transform: `scale(${0.55 + voice * 0.65})` }
+        }
+      />
+      <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
     </span>
   )
 }
 
 /**
- * A row above the prompt while dictating: a pulsing dot, bars that follow
- * your voice and the time, then "Transcribing" while the engines finish.
+ * A row above the prompt while dictating: a breathing dot that follows your
+ * voice and the time, then "Transcribing" while the engines finish.
  * When a dictation fails its audio is kept, and the row offers Retry.
  */
 export function DictationBanner() {
@@ -84,30 +97,26 @@ export function DictationBanner() {
   return (
     <div
       data-test-id="dictation-banner"
-      className="flex items-center gap-2 mx-2 mt-2 px-2 h-8 rounded-md text-xs bg-destructive/10 text-destructive"
+      className="flex items-center gap-2.5 mx-2 mt-2 pl-2 pr-1 h-9 rounded-full text-[13px] bg-main-view-fg/[0.04] text-main-view-fg"
     >
       {status === 'transcribing' ? (
         <>
-          <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full" />
-          <span>Transcribing…</span>
+          <BreathingDot />
+          <span className="text-main-view-fg/70">Transcribing…</span>
         </>
       ) : (
         <>
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75 animate-ping" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-destructive" />
-          </span>
+          <BreathingDot level={status === 'recording' ? level : undefined} />
           <span className="font-medium">
-            {status === 'starting' ? 'Opening the mic…' : 'Recording'}
+            {status === 'starting' ? 'Opening the mic…' : 'Listening'}
           </span>
           {status === 'recording' && (
             <>
-              <LevelBars level={level} />
-              <span className="tabular-nums">
+              <span className="tabular-nums text-main-view-fg/55">
                 {elapsed(Math.max(0, now - startedAt))}
               </span>
-              <span className="hidden sm:inline opacity-70">
-                · tap Left Control or click stop to send
+              <span className="hidden sm:inline text-main-view-fg/45">
+                Tap Left Control to send · Esc to discard
               </span>
             </>
           )}
@@ -115,7 +124,7 @@ export function DictationBanner() {
             type="button"
             aria-label="Cancel dictation"
             onClick={cancelDictation}
-            className="ml-auto p-1 rounded-sm hover:bg-destructive/15"
+            className="ml-auto size-7 flex items-center justify-center rounded-full text-main-view-fg/55 hover:text-main-view-fg hover:bg-main-view-fg/[0.07]"
           >
             <IconX size={14} />
           </button>
@@ -146,7 +155,7 @@ export function DictationButton() {
       onClick={toggleDictation}
       className={cn(
         'h-7 px-2 flex items-center rounded-sm hover:bg-main-view-fg/10 transition-colors',
-        recording ? 'text-destructive' : 'text-main-view-fg/50'
+        recording ? 'text-main-view-fg' : 'text-main-view-fg/50'
       )}
     >
       {recording ? (
