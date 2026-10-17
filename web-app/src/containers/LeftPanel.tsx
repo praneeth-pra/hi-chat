@@ -235,10 +235,7 @@ const LeftPanel = () => {
           className="fixed inset-0 bg-black/50 backdrop-blur z-30"
           onClick={(e) => {
             // Don't close if clicking on search container or if currently searching
-            if (
-              searchContainerRef.current?.contains(e.target as Node) ||
-              searchContainerMacRef.current?.contains(e.target as Node)
-            ) {
+            if (searchContainerRef.current?.contains(e.target as Node)) {
               return
             }
             setLeftPanel(false)
