@@ -46,6 +46,7 @@ final class PictureView: NSView {
     layer?.masksToBounds = true
     picture.frame = bounds
     picture.contentsGravity = .resizeAspect
+    picture.zPosition = -1
     layer?.addSublayer(picture)
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -118,7 +119,9 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     panel.setFrameAutosaveName("JanMirror")
 
-    let grip = GripView(frame: NSRect(x: 640 - 16, y: 0, width: 16, height: 16))
+    // Placed from the current size: a saved frame has already resized the view
+    let size = view.bounds.size
+    let grip = GripView(frame: NSRect(x: size.width - 16, y: 0, width: 16, height: 16))
     grip.autoresizingMask = [.minXMargin, .maxYMargin]
     grip.layer?.zPosition = 10
     view.addSubview(grip)
@@ -132,7 +135,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     close.layer?.backgroundColor = NSColor(white: 0, alpha: 0.6).cgColor
     close.layer?.cornerRadius = 12
     close.layer?.zPosition = 10
-    close.frame = NSRect(x: 640 - 32, y: 420 - 32, width: 24, height: 24)
+    close.frame = NSRect(x: size.width - 32, y: size.height - 32, width: 24, height: 24)
     close.autoresizingMask = [.minXMargin, .minYMargin]
     close.toolTip = "Close the mirror (fn + Shift + Left)"
     view.addSubview(close)
