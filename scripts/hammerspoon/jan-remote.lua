@@ -669,12 +669,15 @@ end)
 -- to a live view of the screen around the pointer and back. It is drawn by
 -- Hammerspoon (needs Screen Recording), never takes focus, and stays where
 -- you drag it; drag its bottom-right corner to resize, x closes it.
-local MIRROR_FPS = 10
+local MIRROR_FPS = 30
+local MIRROR_EDGE = 0.2 -- the pointer view pans only once the pointer is this close to its edge
 local MIRROR_KEY = "janMirrorFrame"
 local RIGHT_CMD = hs.keycodes.map.rightcmd or 54
 local rightCmdDownAt = nil
 local mirror, mirrorTimer, mirrorMode, mirrorDrag = nil, nil, "jan", nil
 local mirrorWarned = false
+local mirrorArea = nil -- the part of the screen the pointer view shows
+local captureMs, captureCount, captureSince = 0, 0, 0
 
 local function mirrorFrame()
   local saved = hs.settings and hs.settings.get(MIRROR_KEY)
@@ -701,10 +704,20 @@ local function snapshotOf(mode)
   local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
   local full = screen:fullFrame()
   local w, h = math.min(box.w, full.w), math.min(box.h, full.h)
-  local x = math.max(full.x, math.min(p.x - w / 2, full.x + full.w - w))
-  local y = math.max(full.y, math.min(p.y - h / 2, full.y + full.h - h))
-  local area = { x = x, y = y, w = w, h = h }
-  return screen:snapshot(screen:absoluteToLocal(area)), { x = p.x - x, y = p.y - y }
+  local a = mirrorArea
+  if not a or a.w ~= w or a.h ~= h or not inside(a, full) then
+    a = { x = p.x - w / 2, y = p.y - h / 2, w = w, h = h } -- centre on the pointer
+  else
+    -- Hold still while the pointer moves inside; pan only near the edge, so
+    -- the picture doesn't shake with every small movement
+    local mx, my = w * MIRROR_EDGE, h * MIRROR_EDGE
+    a = { x = math.max(p.x - w + mx, math.min(a.x, p.x - mx)),
+          y = math.max(p.y - h + my, math.min(a.y, p.y - my)), w = w, h = h }
+  end
+  a.x = math.max(full.x, math.min(a.x, full.x + full.w - w))
+  a.y = math.max(full.y, math.min(a.y, full.y + full.h - h))
+  mirrorArea = a
+  return screen:snapshot(screen:absoluteToLocal(a)), { x = p.x - a.x, y = p.y - a.y }
 end
 
 local function followDrag()
@@ -725,7 +738,18 @@ end
 
 local function drawMirror()
   if not mirror or mirrorDrag then return end
+  local started = hs.timer.absoluteTime and hs.timer.absoluteTime()
   local ok, image, dot = pcall(snapshotOf, mirrorMode)
+  if started then
+    captureMs = captureMs + (hs.timer.absoluteTime() - started) / 1e6
+    captureCount = captureCount + 1
+    local now = hs.timer.secondsSinceEpoch()
+    if now - captureSince >= 5 then
+      print(string.format("[jan mirror] %s view: %d frames, capture %.1f ms each",
+        mirrorMode, captureCount, captureMs / captureCount))
+      captureMs, captureCount, captureSince = 0, 0, now
+    end
+  end
   if ok and image then
     mirror[2].image = image
     local box = mirror:frame()
@@ -758,8 +782,11 @@ local function openMirror()
       frame = { x = "100%", y = 4, w = 22, h = 22 } },
     { id = "grip", type = "rectangle", action = "fill", fillColor = { white = 1, alpha = 0.15 },
       trackMouseDown = true, frame = { x = 0, y = 0, w = 16, h = 16 } })
+  local placed
   local function place()
     local box = mirror:frame()
+    if placed and placed.w == box.w and placed.h == box.h then return end
+    placed = { w = box.w, h = box.h }
     mirror[4].frame = { x = box.w - 26, y = 4, w = 22, h = 22 }
     mirror[5].frame = { x = box.w - 16, y = box.h - 16, w = 16, h = 16 }
   end
@@ -790,6 +817,7 @@ local function switchMirror()
     openMirror()
   else
     mirrorMode = mirrorMode == "jan" and "pointer" or "jan"
+    mirrorArea = nil
     drawMirror()
   end
   print("[jan mirror] showing", mirrorMode)

@@ -88,6 +88,11 @@ tapRightCmd()
 assert(m[2].image.area.w == 640 and m[2].image.area.x == 500 - 320)
 assert(m[3].action == "fill" and m[3].center.x == 320 and m[3].radius == 5)
 
+-- Small moves inside the view: the picture holds still, only the dot moves
+pointer = { x = 560, y = 330 }
+timers[1].fn()
+assert(m[2].image.area.x == 180 and m[3].center.x == 380)
+
 -- Pointer near the edge: the area stays on the screen
 pointer = { x = 10, y = 10 }
 timers[1].fn()
