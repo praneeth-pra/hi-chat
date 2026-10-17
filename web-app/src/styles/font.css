@@ -49,3 +49,25 @@
   font-weight: 300;
   font-style: italic;
 }
+
+/* Instrument Sans (SIL Open Font License 1.1), self-hosted latin subset */
+@font-face {
+  font-family: 'Instrument Sans';
+  font-display: swap;
+  src: url('/fonts/InstrumentSans/InstrumentSans-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Instrument Sans';
+  font-display: swap;
+  src: url('/fonts/InstrumentSans/InstrumentSans-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Instrument Sans';
+  font-display: swap;
+  src: url('/fonts/InstrumentSans/InstrumentSans-600.woff2') format('woff2');
+  font-weight: 600 700;
+}

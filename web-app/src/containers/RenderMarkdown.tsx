@@ -148,7 +148,7 @@ const CodeComponent = memo(
     return (
       <div
         data-code-block
-        className="relative overflow-hidden border rounded-xl border-main-view-fg/[0.08] scroll-mt-4 my-1"
+        className="relative overflow-hidden rounded-xl bg-surface border border-main-view-fg/[0.06] scroll-mt-4 my-1"
       >
         <style>
           {`
@@ -160,7 +160,7 @@ const CodeComponent = memo(
         }
       `}
         </style>
-        <div className="flex items-center justify-between px-4 py-2 bg-main-view-fg/[0.04] text-main-view-fg/60 border-b border-main-view-fg/[0.06]">
+        <div className="flex items-center justify-between px-4 py-2 text-main-view-fg/55">
           <span className="font-medium text-xs font-sans">
             {getReadableLanguageName(language)}
           </span>

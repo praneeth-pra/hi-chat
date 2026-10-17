@@ -282,7 +282,7 @@ function ThreadDetail() {
                 // Mobile and small screens always use full width, otherwise compact chat uses constrained width
                 isMobile || isSmallScreen || chatWidth !== 'compact'
                   ? 'w-full'
-                  : 'w-full md:w-4/6'
+                  : 'w-full max-w-[680px]'
               )}
             >
               {messages &&
@@ -332,7 +332,7 @@ function ThreadDetail() {
               // Width: mobile/small screens or non-compact always full, compact desktop uses constrained
               isMobile || isSmallScreen || chatWidth !== 'compact'
                 ? 'w-full'
-                : 'w-full md:w-4/6'
+                : 'w-full max-w-[680px]'
             )}
           >
             <ScrollToBottom threadId={threadId} />

@@ -2,6 +2,7 @@
 // import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 import LeftPanel from '@/containers/LeftPanel'
+import { SideRail } from '@/containers/SideRail'
 import DialogAppUpdater from '@/containers/dialogs/AppUpdater'
 import BackendUpdater from '@/containers/dialogs/BackendUpdater'
 import { Fragment } from 'react/jsx-runtime'
@@ -134,7 +135,7 @@ const AppLayout = () => {
               maxSize={40}
               collapsible
             >
-              <div className="h-full p-2 pr-1">
+              <div className="h-full p-2 pr-1 border-r border-main-view-fg/[0.07]">
                 <LeftPanel />
               </div>
             </ResizablePanel>
@@ -144,8 +145,8 @@ const AppLayout = () => {
 
             {/* Main Content Panel */}
             <ResizablePanel defaultSize={100 - leftPanelSize} minSize={60}>
-              <div className="h-full p-2 pl-0">
-                <div className="bg-main-view text-main-view-fg border border-main-view-fg/[0.07] w-full h-full rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.04)]">
+              <div className="h-full">
+                <div className="bg-main-view text-main-view-fg w-full h-full overflow-hidden">
                   <Outlet />
                 </div>
               </div>
@@ -155,15 +156,16 @@ const AppLayout = () => {
           <div className="flex h-full">
             {/* left content panel - only show if not logs route */}
             <LeftPanel />
+            {!isSmallScreen && !isLeftPanelOpen && <SideRail />}
 
             {/* Main content panel */}
             <div
               className={cn(
-                'h-svh flex w-full md:p-2',
+                'h-svh flex w-full',
                 isLeftPanelOpen && 'w-full md:w-[calc(100%-198px)]'
               )}
             >
-              <div className="bg-main-view text-main-view-fg border border-main-view-fg/[0.07] w-full md:rounded-xl overflow-hidden md:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.04)]">
+              <div className="bg-main-view text-main-view-fg w-full overflow-hidden">
                 <Outlet />
               </div>
             </div>
