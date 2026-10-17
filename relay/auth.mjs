@@ -19,6 +19,11 @@ export const CODE_MINUTES = 10
 const CODE_TRIES = 5
 const CODE_GAP_MS = 30_000
 const CODES_PER_HOUR = 5
+// Wrong codes from everyone together, over a rolling 24 hours. Past this,
+// sign-in pauses until the oldest one is a day old, so guessing a 6-digit
+// code takes years. Kept in memory: a relay restart clears it.
+const WRONG_CODES_PER_DAY = 20
+const DAY_MS = 86_400_000
 const SESSION_DAYS = 365
 const COOKIE = 'hc_auth'
 const RESEND_URL = 'https://api.resend.com/emails'
@@ -27,6 +32,7 @@ const NOT_SET_UP = "Sign-in isn't set up: LOGIN_EMAIL is missing on the server."
 // One person, one pending code at a time
 let pending = null
 let asks = []
+let misses = []
 let fallbackSecret
 
 const loginEmail = (env) => (env.LOGIN_EMAIL ?? '').trim().toLowerCase()
@@ -79,8 +85,19 @@ const cookie = (value, maxAgeSec) =>
 const hashCode = (code) =>
   createHash('sha256').update(`hc-code:${code}`).digest('hex')
 
-/** Starts a new code; returns it, or 'wait' / 'limit' when asked too often. */
+/** Hours until sign-in reopens after too many wrong codes; 0 when open. */
+export function pausedHours(now = Date.now()) {
+  misses = misses.filter((t) => now - t < DAY_MS)
+  if (misses.length < WRONG_CODES_PER_DAY) return 0
+  return Math.ceil((misses[0] + DAY_MS - now) / 3_600_000)
+}
+
+/**
+ * Starts a new code; returns it, or 'wait' / 'limit' when asked too often,
+ * or 'paused' after too many wrong codes (an email it couldn't use).
+ */
 export function newCode(now = Date.now()) {
+  if (pausedHours(now)) return 'paused'
   asks = asks.filter((t) => now - t < 3_600_000)
   if (asks.length && now - asks.at(-1) < CODE_GAP_MS) return 'wait'
   if (asks.length >= CODES_PER_HOUR) return 'limit'
@@ -90,22 +107,33 @@ export function newCode(now = Date.now()) {
   return code
 }
 
-/** 'ok' spends the code; anything else is a wrong, expired or used-up code. */
+/**
+ * 'ok' spends the code; 'wrong', 'expired' (or used up) and 'paused' (too
+ * many wrong codes, even the right one is refused) don't.
+ */
 export function checkCode(code, now = Date.now()) {
+  if (pausedHours(now)) {
+    pending = null
+    return 'paused'
+  }
   if (!pending || pending.exp < now || pending.tries >= CODE_TRIES) {
     pending = null
     return 'expired'
   }
   pending.tries++
-  if (!safeEqual(hashCode(code), pending.hash)) return 'wrong'
+  if (!safeEqual(hashCode(code), pending.hash)) {
+    misses.push(now)
+    return 'wrong'
+  }
   pending = null
   return 'ok'
 }
 
-/** For tests: forget codes and the ask history. */
+/** For tests: forget codes, the ask history and wrong codes. */
 export function resetCodes() {
   pending = null
   asks = []
+  misses = []
 }
 
 async function emailCode(env, code, fetchImpl) {
@@ -127,12 +155,14 @@ async function emailCode(env, code, fetchImpl) {
     }),
     signal: AbortSignal.timeout(15_000),
   })
-  if (!res.ok)
-    throw new Error(`Resend HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`Resend HTTP ${res.status}`)
 }
 
 // "Info.hi-techie@gmail.com" shows as "in***@gmail.com"
 const masked = (email) => email.replace(/^(.{2}).*@/, '$1***@')
+
+const pausedError = (hours) =>
+  `Too many wrong codes today, so sign-in is paused for about ${Math.max(1, hours)} hour${hours > 1 ? 's' : ''}. Browsers that are already signed in keep working.`
 
 function json(res, status, body, headers = {}) {
   res.writeHead(status, {
@@ -199,6 +229,8 @@ export async function handleAuth(
   if (path === '/auth/code' && req.method === 'POST') {
     if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
     const code = newCode()
+    if (code === 'paused')
+      return (json(res, 429, { error: pausedError(pausedHours()) }), true)
     if (code === 'wait')
       return (
         json(res, 429, {
@@ -230,6 +262,13 @@ export async function handleAuth(
     if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
     const body = await readJson(req)
     const r = checkCode(String(body?.code ?? '').replace(/\D/g, ''))
+    const hours = pausedHours()
+    if (hours) {
+      console.log(
+        `login: ${r === 'wrong' ? 'wrong code, ' : ''}sign-in paused (${WRONG_CODES_PER_DAY} wrong codes in 24 hours)`
+      )
+      return (json(res, 429, { error: pausedError(hours) }), true)
+    }
     if (r !== 'ok') {
       console.log(`login: ${r} code`)
       return (

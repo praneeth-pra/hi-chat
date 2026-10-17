@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   checkCode,
   newCode,
+  pausedHours,
   resetCodes,
   sessionToken,
   signedIn,
@@ -64,6 +65,45 @@ test('codes: right code once, wrong codes, five tries, expiry, ask limits', () =
   assert.equal(newCode(t + 155_000), 'limit') // five an hour
 })
 
+const DAY = 86_400_000
+const wrongFor = (code) => (code === '000000' ? '111111' : '000000')
+
+test('codes: 20 wrong codes a day (from anyone) pause sign-in', () => {
+  const t = 5_000_000
+  // 19 wrong codes over four codes: the right one still works
+  let code
+  for (let i = 0; i < 4; i++) {
+    code = newCode(t + i * 31_000)
+    for (let j = 0; j < (i < 3 ? 5 : 4); j++)
+      assert.equal(checkCode(wrongFor(code), t + i * 31_000), 'wrong')
+  }
+  assert.equal(pausedHours(t + 93_000), 0)
+  assert.equal(checkCode(code, t + 93_000), 'ok')
+
+  // The 20th pauses sign-in: even the right code is refused, and no code
+  // is emailed
+  code = newCode(t + 124_000)
+  assert.equal(checkCode(wrongFor(code), t + 124_000), 'wrong')
+  assert.equal(pausedHours(t + 124_000), 24)
+  assert.equal(checkCode(code, t + 124_000), 'paused')
+  assert.equal(newCode(t + 2 * 3_600_000), 'paused')
+  assert.equal(pausedHours(t + DAY - 1), 1)
+
+  // A rolling 24 hours: once the first five are a day old, it reopens
+  assert.equal(pausedHours(t + DAY), 0)
+  code = newCode(t + DAY)
+  assert.match(code, /^\d{6}$/)
+  assert.equal(checkCode(code, t + DAY), 'ok')
+})
+
+test("codes: expired or missing codes don't count as wrong codes", () => {
+  const t = 5_000_000
+  for (let i = 0; i < 30; i++) assert.equal(checkCode('123456', t), 'expired')
+  const code = newCode(t)
+  assert.equal(checkCode(code, t + 11 * 60_000), 'expired')
+  assert.equal(pausedHours(t + 11 * 60_000), 0)
+})
+
 async function call(server, path, init = {}) {
   const { port } = server.address()
   return fetch(`http://127.0.0.1:${port}${path}`, {
@@ -118,6 +158,39 @@ test('relay: check, login page, email a code, sign in with it', async () => {
     const headers = { cookie: cookie.split(';')[0] }
     assert.equal((await call(server, '/auth/check', { headers })).status, 204)
     assert.equal((await call(server, '/login', { headers })).status, 302)
+  } finally {
+    server.close()
+  }
+})
+
+test('relay: after 20 wrong codes, sign-in says it is paused', async () => {
+  const sent = []
+  const fetchImpl = async (_url, init) => {
+    sent.push(JSON.parse(init.body))
+    return new Response('{}', { status: 200 })
+  }
+  // 19 wrong codes in the last few minutes (the relay checks at Date.now())
+  const now = Date.now()
+  let pending
+  for (let i = 0; i < 4; i++) {
+    pending = newCode(now - 150_000 + i * 31_000)
+    for (let j = 0; j < (i < 3 ? 5 : 4); j++) checkCode(wrongFor(pending), now)
+  }
+  const server = createRelay({ env, fetchImpl }).listen(0)
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const verify = (code) =>
+      call(server, '/auth/verify', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      })
+    const last = await verify(wrongFor(pending))
+    assert.equal(last.status, 429)
+    assert.match((await last.json()).error, /paused for about 24 hours/)
+    const code = await call(server, '/auth/code', { method: 'POST' })
+    assert.equal(code.status, 429)
+    assert.match((await code.json()).error, /already signed in keep working/)
+    assert.equal(sent.length, 0)
   } finally {
     server.close()
   }
