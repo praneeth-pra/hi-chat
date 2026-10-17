@@ -6,6 +6,8 @@ import {
   verifyAccuracyCompletion,
   isPersonalQuestion,
   personalEvidence,
+  needsFreshFacts,
+  groundFreshMessages,
   accuracyLogLine,
   type WebEvidence,
   type AccuracyReview,
@@ -102,6 +104,8 @@ const createThreadContent = (
 }
 
 const ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES = 512 * 1024
+// The longest a hand-picked model's answer waits for a fresh-facts search
+const FRESH_SEARCH_MS = 2500
 
 // Helper to finalize and save a message
 const finalizeMessage = (
@@ -905,6 +909,22 @@ export const useChat = () => {
               threadId: activeThread.id,
               phase: 'drafting',
             })
+          } else if (
+            !autoState.auto &&
+            !continueFromMessageId &&
+            needsFreshFacts(message)
+          ) {
+            // Fresh facts (latest versions, prices, news) for a hand-picked
+            // model (Auto · Speed never waits for a search):
+            // a short search; if it is slow or fails, the model answers alone
+            webEvidence ??= await getWebEvidence(
+              buildAccuracyQuery(message, getMessages(activeThread.id)),
+              abortController.signal,
+              FRESH_SEARCH_MS
+            )
+            if (abortController.signal.aborted)
+              throw abortController.signal.reason
+            requestMessages = groundFreshMessages(originalMessages, webEvidence)
           }
           const draftStartedAt = Date.now()
           // With a Claude provider, Accuracy streams Claude's answer from the

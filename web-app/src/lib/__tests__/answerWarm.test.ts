@@ -11,6 +11,9 @@ vi.mock('@/hooks/useModelProvider', () => ({
 const okFetch = () =>
   vi.fn(async (_url: string, _init?: RequestInit) => new Response(null))
 const urls = (f: ReturnType<typeof okFetch>) => f.mock.calls.map(([u]) => u)
+// The model services only, without the search warm-up every mode does
+const modelCalls = (f: ReturnType<typeof okFetch>) =>
+  f.mock.calls.filter(([u]) => u !== '/api/search')
 
 const load = async (auto: boolean, mode: 'speed' | 'accuracy') => {
   const { warmAnswer } = await import('../answerWarm')
@@ -48,9 +51,10 @@ describe('warmAnswer', () => {
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
     expect(urls(fetcher)).toEqual([
+      '/api/search',
       'https://api.groq.com/openai/v1/chat/completions',
     ])
-    const init = fetcher.mock.calls[0][1]!
+    const init = fetcher.mock.calls[1][1]!
     expect(init.body).toBe('{}')
     expect(init.headers).toMatchObject({
       'authorization': 'Bearer gsk',
@@ -63,8 +67,11 @@ describe('warmAnswer', () => {
     const warmAnswer = await load(false, 'speed')
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
-    expect(urls(fetcher)).toEqual(['https://api.anthropic.com/v1/messages'])
-    expect(fetcher.mock.calls[0][1]!.headers).toMatchObject({
+    expect(urls(fetcher)).toEqual([
+      '/api/search',
+      'https://api.anthropic.com/v1/messages',
+    ])
+    expect(fetcher.mock.calls[1][1]!.headers).toMatchObject({
       'x-api-key': 'sk-ant',
       'anthropic-dangerous-direct-browser-access': 'true',
     })
@@ -75,7 +82,7 @@ describe('warmAnswer', () => {
     const warmAnswer = await load(false, 'speed')
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
-    expect(fetcher).not.toHaveBeenCalled()
+    expect(urls(fetcher)).toEqual(['/api/search'])
   })
 
   it('Auto · Speed warms Cerebras and Groq once each', async () => {
@@ -107,11 +114,11 @@ describe('warmAnswer', () => {
     const f = fetcher as unknown as typeof fetch
     warmAnswer({}, f, 100_000)
     warmAnswer({}, f, 105_000)
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(modelCalls(fetcher)).toHaveLength(1)
     warmAnswer({ soon: true }, f, 106_000)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(modelCalls(fetcher)).toHaveLength(2)
     warmAnswer({}, f, 114_500)
-    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(modelCalls(fetcher)).toHaveLength(3)
   })
 
   it('never throws, even when the stores or network fail', async () => {

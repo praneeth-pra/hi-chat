@@ -67,15 +67,20 @@ function warm(soon: boolean, fetcher: typeof fetch, now: number) {
   const withKey = (name: string) =>
     state.providers.find((p) => p.provider === name && !!p.api_key)
 
+  // Accuracy always searches and a hand-picked model searches for fresh facts
+  // (latest versions, prices, news); Auto · Speed never searches
+  if (
+    (!auto || mode === 'accuracy') &&
+    due('search', SEARCH_WARM_AGAIN_MS, now)
+  )
+    discard(
+      fetcher('/api/search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ warm: true }),
+      })
+    )
   if (auto && mode === 'accuracy') {
-    if (due('search', SEARCH_WARM_AGAIN_MS, now))
-      discard(
-        fetcher('/api/search', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ warm: true }),
-        })
-      )
     warmClaude(anthropicConfig(state.providers), fetcher, now)
     return
   }
