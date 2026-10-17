@@ -62,6 +62,8 @@ jobs:
             grep -qi '^X-Frame-Options: DENY' response-headers.txt
             grep -qi '^Referrer-Policy: no-referrer' response-headers.txt
             grep -qi '^Content-Security-Policy:.*object-src' response-headers.txt
+            grep -qi '^Strict-Transport-Security: max-age=31536000' response-headers.txt
+            grep -qiE '^Server: nginx[[:space:]]*$' response-headers.txt
           done
           asset=$(docker exec jan-web-key sh -c 'ls /usr/share/nginx/html/assets | grep "^index-.*\.js$" | head -1')
           curl -sfI -b "$C" "http://localhost:8081/assets/$asset" | grep -qi '^cache-control: private, max-age=31536000, immutable'
