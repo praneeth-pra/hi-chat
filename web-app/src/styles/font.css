@@ -50,24 +50,24 @@
   font-style: italic;
 }
 
-/* Inter (SIL Open Font License 1.1), self-hosted latin subset */
+/* Onest (SIL Open Font License 1.1), self-hosted latin subset */
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Onest';
   font-display: swap;
-  src: url('/fonts/Inter/Inter-400.woff2') format('woff2');
+  src: url('/fonts/Onest/Onest-400.woff2') format('woff2');
   font-weight: 400;
 }
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Onest';
   font-display: swap;
-  src: url('/fonts/Inter/Inter-500.woff2') format('woff2');
+  src: url('/fonts/Onest/Onest-500.woff2') format('woff2');
   font-weight: 500;
 }
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Onest';
   font-display: swap;
-  src: url('/fonts/Inter/Inter-600.woff2') format('woff2');
+  src: url('/fonts/Onest/Onest-600.woff2') format('woff2');
   font-weight: 600 700;
 }

@@ -11,7 +11,7 @@
   --radius-xl: calc(var(--radius) + 4px);
   --font-editorialnew: 'PPEditorialNew', serif;
   --font-sans:
-    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --color-surface: var(--app-surface);
   --color-app: var(--app-bg);
   --color-left-panel-fg: var(--app-left-panel-fg);
@@ -86,7 +86,7 @@
   body {
     @apply overflow-hidden;
     font-family:
-      'Inter',
+      'Onest',
       ui-sans-serif,
       system-ui,
       -apple-system,
