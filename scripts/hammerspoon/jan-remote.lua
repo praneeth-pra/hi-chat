@@ -629,6 +629,7 @@ end
 local mouseKinds = { types.leftMouseDown, types.leftMouseUp, types.leftMouseDragged,
   types.rightMouseDown, types.rightMouseUp, types.otherMouseDown, types.otherMouseUp }
 local heldClick = false -- a press over Jan is swallowed until it is let go
+local heldTarget = nil -- where the press went: the release goes there even if typing stopped since
 
 -- Global so macOS cannot garbage-collect the tap. A real click would make
 -- Safari the active app, so a press over Jan is swallowed and Shift + F20 is
@@ -647,10 +648,10 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
       move:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
       pcall(function() move:post() end)
     elseif releasing then
-      if heldClick == "left" and typingTarget then
-        pcall(typingSignal, typingTarget, "f19", { "shift" }) -- let go
+      if heldClick == "left" and heldTarget then
+        pcall(typingSignal, heldTarget, "f19", { "shift" }) -- let go
       end
-      heldClick = false
+      heldClick, heldTarget = false, nil
     end
     return true
   end
@@ -663,7 +664,7 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if not (ok and over) then return false end -- clicks elsewhere work as usual
   heldClick = true
   if kind == types.leftMouseDown then
-    heldClick = "left"
+    heldClick, heldTarget = "left", target
     local sent = pcall(typingSignal, target, "f20", { "shift" }) -- press
     if not sent then stopTyping("Jan typing stopped — could not deliver the click") end
   end
@@ -975,7 +976,17 @@ local function quietReload()
   hs.reload()
 end
 
+-- An update reloads the script, which drops whatever is in progress, so it
+-- waits until nothing is: no typing mode, held click or dictation, and no
+-- keyboard or mouse use for a while. The next check tries again.
+local UPDATE_IDLE_SECONDS = 120
+local function busy()
+  return typingTarget ~= nil or heldClick or dictating()
+    or (hs.host and hs.host.idleTime and hs.host.idleTime() < UPDATE_IDLE_SECONDS)
+end
+
 local function checkForUpdate()
+  if busy() then return end
   local repo = quoted(repoDir)
   shell("cd " .. repo .. " && remote=$(git ls-remote origin refs/heads/main | cut -f1) && git rev-parse HEAD"
     .. ' && { [ "$remote" = "$(git rev-parse HEAD)" ] || git pull -q --ff-only origin main; } && git rev-parse HEAD',
