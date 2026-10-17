@@ -9,6 +9,7 @@
 //   { command = "toggle", window = "<CGWindowID of Jan>" }
 //     hidden -> shows Jan; Jan -> the screen around the pointer; and back
 //   { command = "hide" }   { command = "quit" }
+// fn + Shift + Left in Hammerspoon sends "hide".
 //
 // fn + Left in Hammerspoon sends "toggle".
 //
@@ -119,13 +120,21 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
 
     let grip = GripView(frame: NSRect(x: 640 - 16, y: 0, width: 16, height: 16))
     grip.autoresizingMask = [.minXMargin, .maxYMargin]
+    grip.layer?.zPosition = 10
     view.addSubview(grip)
-    let close = NSButton(title: "×", target: self, action: #selector(hide))
+    // A clear round x on a dark disc, above the picture, so it shows on any content
+    let close = NSButton(title: "", target: self, action: #selector(hide))
     close.isBordered = false
-    close.font = .systemFont(ofSize: 16)
-    close.contentTintColor = NSColor(white: 1, alpha: 0.5)
-    close.frame = NSRect(x: 640 - 28, y: 420 - 28, width: 24, height: 24)
+    close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")?
+      .withSymbolConfiguration(.init(pointSize: 11, weight: .bold))
+    close.contentTintColor = .white
+    close.wantsLayer = true
+    close.layer?.backgroundColor = NSColor(white: 0, alpha: 0.6).cgColor
+    close.layer?.cornerRadius = 12
+    close.layer?.zPosition = 10
+    close.frame = NSRect(x: 640 - 32, y: 420 - 32, width: 24, height: 24)
     close.autoresizingMask = [.minXMargin, .minYMargin]
+    close.toolTip = "Close the mirror (fn + Shift + Left)"
     view.addSubview(close)
 
     DistributedNotificationCenter.default().addObserver(

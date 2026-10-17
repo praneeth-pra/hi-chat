@@ -30,7 +30,8 @@
 --   fn + Left               open a second window that mirrors Jan live; tap
 --                           again to switch it to the screen around the pointer
 --                           and back. Drag it to move, its corner to resize,
---                           x to close. Needs Screen Recording for Hammerspoon.
+--                           x or fn + Shift + Left to close. Needs Screen
+--                           Recording for Hammerspoon.
 --                           Build JanMirror.swift (see its top) for a 60 fps
 --                           live stream; without it, screenshots are used.
 --
@@ -872,6 +873,14 @@ end
 -- fn + Left: on a Mac keyboard fn + Left is Home. It reaches Hammerspoon
 -- even while Option typing is on; Home no longer reaches the app in front.
 mirrorKey = hs.hotkey.bind({}, "home", function() switchMirror() end)
+-- fn + Shift + Left closes the mirror altogether
+mirrorCloseKey = hs.hotkey.bind({ "shift" }, "home", function()
+  if helperBuilt() then
+    if helperTask and helperTask:isRunning() then tellHelper({ command = "hide" }) end
+  elseif mirror then
+    closeMirror()
+  end
+end)
 
 local function jumpBack()
   local here = hs.mouse.absolutePosition()
@@ -932,5 +941,57 @@ tapWatchdog = hs.timer.doEvery(2, function()
     elseif not pcall(typingSignal, typingTarget, "f18") then stopTyping("Jan typing stopped") end
   end
 end)
+
+-- Auto-update: when this script is loaded from a clone of the repo (as
+-- install.sh sets up), pull main when Hammerspoon starts and every 10
+-- minutes. A change rebuilds the mirror helper if JanMirror.swift changed,
+-- then reloads Hammerspoon, so nothing has to be copied by hand.
+local UPDATE_EVERY = 600
+local scriptDir = (debug.getinfo(1, "S").source or ""):match("^@(.+)/[^/]+$")
+local repoDir = scriptDir and scriptDir:gsub("/scripts/hammerspoon$", "")
+local function quoted(path) return "'" .. path:gsub("'", "'\\''") .. "'" end
+
+local function shell(command, done)
+  local task = hs.task.new("/bin/sh", function(code, out, err)
+    done(code, out or "", err or "")
+  end, { "-c", command })
+  task:start()
+  return task
+end
+
+local function buildHelper(done)
+  local source = repoDir .. "/scripts/hammerspoon/JanMirror.swift"
+  print("[jan update] building the mirror helper")
+  shell("/usr/bin/swiftc -O -parse-as-library " .. quoted(source) .. " -o " .. quoted(MIRROR_HELPER)
+    .. " && (/usr/bin/pkill -x JanMirror; true)", function(code, _, err)
+    if code ~= 0 then print("[jan update] helper build failed: " .. err) end
+    if done then done() end
+  end)
+end
+
+local function checkForUpdate()
+  local repo = quoted(repoDir)
+  shell("cd " .. repo .. " && git rev-parse HEAD && git pull -q --ff-only origin main && git rev-parse HEAD",
+    function(code, out, err)
+      if code ~= 0 then print("[jan update] could not pull: " .. err) return end
+      local before, after = out:match("^(%x+)%s+(%x+)")
+      if not before or before == after then return end
+      print("[jan update] updated " .. before:sub(1, 7) .. " -> " .. after:sub(1, 7))
+      shell("cd " .. repo .. " && git diff --name-only " .. before .. " " .. after, function(_, files)
+        if files:find("JanMirror.swift", 1, true) then
+          buildHelper(function() hs.reload() end)
+        elseif files:find("scripts/hammerspoon/", 1, true) then
+          hs.reload()
+        end
+      end)
+    end)
+end
+
+if repoDir and hs.fs and hs.fs.attributes(repoDir .. "/.git", "mode") == "directory" then
+  if not helperBuilt() then buildHelper() end
+  updateTimer = hs.timer.doEvery(UPDATE_EVERY, checkForUpdate)
+  hs.timer.doAfter(5, checkForUpdate)
+  print("[jan update] watching " .. repoDir .. " for updates")
+end
 
 hs.alert.show("Jan remote ready (Option moves the pointer)")
