@@ -15,9 +15,10 @@
 // Build once (needs the Xcode Command Line Tools, macOS 14 or later):
 //   swiftc -O -parse-as-library JanMirror.swift -o ~/.hammerspoon/JanMirror
 
-import AppKit
-import CoreMedia
-import ScreenCaptureKit
+@preconcurrency import AppKit
+@preconcurrency import CoreMedia
+@preconcurrency import ScreenCaptureKit
+@preconcurrency import IOSurface
 
 let notificationName = Notification.Name("dev.hitechie.janmirror")
 let frameRate: Int32 = 60
