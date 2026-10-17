@@ -89,3 +89,10 @@ jobs:
           test "$code" = 502
           grep -q '"name":"elevenlabs"' body.json
           grep -q '"name":"grok"' body.json
+          # A clip over 1 MB reaches the relay too (the login check once
+          # refused any body over nginx's 1 MB default with a 500)
+          head -c 2000000 /dev/urandom > long-clip.flac
+          code=$(curl -s -o body.json -w '%{http_code}' -X POST -b "$C" -F file=@long-clip.flac http://localhost:8081/api/transcribe)
+          test "$code" = 502
+          grep -q '"results"' body.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -F file=@long-clip.flac http://localhost:8081/api/transcribe)" = 401
