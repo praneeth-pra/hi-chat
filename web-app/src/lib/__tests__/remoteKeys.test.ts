@@ -135,12 +135,18 @@ describe('remote keys without Speaker', () => {
 
   it('Escape or Shift+F13 discards a recording without sending it', () => {
     const stop = listenForRemoteKeys()
-    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    const esc = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      cancelable: true,
+    })
     window.dispatchEvent(esc)
     expect(discardRecording).not.toHaveBeenCalled()
     expect(esc.defaultPrevented).toBe(false)
     dictationState.status = 'recording'
-    const esc2 = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    const esc2 = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      cancelable: true,
+    })
     window.dispatchEvent(esc2)
     expect(discardRecording).toHaveBeenCalledTimes(1)
     expect(esc2.defaultPrevented).toBe(true)
@@ -280,5 +286,37 @@ describe('remote keys without Speaker', () => {
     stepCode(1, 50_000)
     expect(scrolled.length).toBe(count) // No code below
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
+  })
+
+  it('Shift + F20 clicks what is under the pointer, focusing a text box', () => {
+    const button = document.createElement('button')
+    const box = document.createElement('textarea')
+    document.body.append(button, box)
+    const clicked = vi.fn()
+    button.addEventListener('click', clicked)
+    let under: Element = button
+    document.elementFromPoint = () => under
+    const stop = listenForRemoteKeys()
+    const press = () =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'F20', shiftKey: true })
+      )
+
+    // No pointer seen over the page yet: nothing is clicked
+    press()
+    expect(clicked).not.toHaveBeenCalled()
+
+    window.dispatchEvent(
+      new MouseEvent('pointermove', { clientX: 40, clientY: 60 })
+    )
+    press()
+    expect(clicked).toHaveBeenCalledTimes(1)
+
+    under = box
+    press()
+    expect(document.activeElement).toBe(box)
+    stop()
+    button.remove()
+    box.remove()
   })
 })

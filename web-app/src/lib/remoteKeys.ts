@@ -38,6 +38,31 @@ export const DICTATION_CANCEL_KEY = 'Shift+F13'
  */
 export const CODE_UP_KEY = 'Shift+F16'
 export const CODE_DOWN_KEY = 'Shift+F17'
+/**
+ * Shift + F20 clicks whatever is under the pointer. While Option typing is
+ * on, Hammerspoon sends it in place of a real click, which Safari would only
+ * take by becoming the active app.
+ */
+export const POINTER_CLICK_KEY = 'Shift+F20'
+
+/** Where the pointer last was over this page (Safari reports moves even while in the background). */
+let pointerAt: { x: number; y: number } | null = null
+
+/** Clicks the element under the pointer; returns true. */
+export function clickAtPointer(): boolean {
+  const target = pointerAt
+    ? document.elementFromPoint(pointerAt.x, pointerAt.y)
+    : null
+  if (!(target instanceof HTMLElement)) {
+    toast('Move the pointer over Hi-chat, then click')
+    return true
+  }
+  if (target.matches('input, textarea, [contenteditable="true"]')) {
+    target.focus()
+  }
+  target.click()
+  return true
+}
 
 /** A press within this long of the last continues from where it was going. */
 const CODE_STEP_MS = 1000
@@ -172,6 +197,7 @@ export function handleRemoteKey(key: string): boolean {
   if (key === FOCUS_CHAT_DRAFT_KEY) return focusChatBox(false)
   if (key === CODE_UP_KEY) return stepCode(-1)
   if (key === CODE_DOWN_KEY) return stepCode(1)
+  if (key === POINTER_CLICK_KEY) return clickAtPointer()
   if (key === DICTATION_TOGGLE_KEY) {
     toggleDictation()
     return true
@@ -206,6 +232,18 @@ export function listenForRemoteKeys() {
     const name = keyName(e)
     if (handleRemoteKey(e.shiftKey ? `Shift+${name}` : name)) e.preventDefault()
   }
+  const onMove = (e: PointerEvent) => {
+    pointerAt = { x: e.clientX, y: e.clientY }
+  }
+  const onLeave = () => {
+    pointerAt = null
+  }
   window.addEventListener('keydown', onKey)
-  return () => window.removeEventListener('keydown', onKey)
+  window.addEventListener('pointermove', onMove, { passive: true })
+  document.documentElement.addEventListener('pointerleave', onLeave)
+  return () => {
+    window.removeEventListener('keydown', onKey)
+    window.removeEventListener('pointermove', onMove)
+    document.documentElement.removeEventListener('pointerleave', onLeave)
+  }
 }
