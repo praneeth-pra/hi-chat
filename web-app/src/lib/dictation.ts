@@ -21,6 +21,7 @@ import {
   SonioxLiveTranscriber,
 } from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
+import { warmAnswer } from '@/lib/answerWarm'
 import { findMicDevice, getDictationMic } from '@/lib/micActivity'
 import { deliverDictation } from './dictationDelivery'
 import {
@@ -718,6 +719,7 @@ export async function startDictation() {
     return
   }
   if (getDictationEngine() === 'auto') warmJudges()
+  warmAnswer()
   // The mic is already open: start right away
   if (mic && micReady(mic)) return begin(mic)
   const gen = ++generation
@@ -758,6 +760,8 @@ export async function stopDictation() {
     return
   }
   useDictation.setState({ status: 'transcribing', level: 0 })
+  // The question goes out in a moment: make sure the answer's connections are open
+  warmAnswer({ soon: true })
   const stoppedAt = Date.now()
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
   let text = ''

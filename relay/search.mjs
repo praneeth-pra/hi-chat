@@ -92,3 +92,21 @@ export async function searchWeb(
     controller.signal.removeEventListener('abort', cancel)
   }
 }
+
+// Opens the connection to Exa just before a question (the browser asks while
+// you speak), so the search skips the connection setup. Searches nothing.
+export async function warmSearch({
+  env = process.env,
+  fetchImpl = fetch,
+} = {}) {
+  if (!env.EXA_API_KEY) return
+  try {
+    const response = await fetchImpl('https://api.exa.ai/search', {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(3000),
+    })
+    await response.body?.cancel()
+  } catch {
+    // Only a warm-up: the real search opens its own connection if this failed
+  }
+}

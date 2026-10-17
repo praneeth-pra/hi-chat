@@ -18,16 +18,30 @@ import { remarkTablesAsLists } from '@/lib/tablesToLists'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { FlowDiagram, TreeLayout, isDiagramLanguage } from './DiagramBlocks'
 
+// Same box as highlighted code, so if the highlighter isn't loaded yet only
+// the colours change when it arrives, not the layout
+const CODE_PADDING = '12px 8px'
 function PlainCode({ children }: { children: string | string[] }) {
   return (
-    <pre className="p-2 overflow-auto whitespace-pre-wrap">
+    <pre
+      className="overflow-auto whitespace-pre-wrap"
+      style={{ margin: 0, padding: CODE_PADDING }}
+    >
       <code>{children}</code>
     </pre>
   )
 }
-const CodeHighlight = lazy<(typeof import('./CodeHighlight'))['default']>(() =>
+const loadCodeHighlight = () =>
   import('./CodeHighlight').catch(() => ({ default: PlainCode }))
-)
+const CodeHighlight =
+  lazy<(typeof import('./CodeHighlight'))['default']>(loadCodeHighlight)
+// Fetch the highlighter while idle, so the first answer's code is coloured
+// from its first line instead of switching over when the answer ends
+if (typeof window !== 'undefined') {
+  if ('requestIdleCallback' in window)
+    requestIdleCallback(() => void loadCodeHighlight())
+  else setTimeout(() => void loadCodeHighlight(), 1000)
+}
 
 interface MarkdownProps {
   content: string
@@ -111,8 +125,10 @@ const CodeComponent = memo(
     const code = String(children).replace(/\n$/, '')
     const [highlightedCode, setHighlightedCode] = useState<string | null>(null)
     // Tokenizing a large block creates thousands of spans on the UI thread.
+    // Smaller blocks are coloured while they stream, so nothing is redrawn
+    // when the answer finishes.
     const largeCode = code.length > 4000
-    const highlight = !isStreaming && (!largeCode || highlightedCode === code)
+    const highlight = !largeCode || highlightedCode === code
 
     // Generate a stable ID based on content hash instead of position
     const codeId = useMemo(() => {
@@ -190,13 +206,7 @@ const CodeComponent = memo(
           </button>
         </div>
         {highlight ? (
-          <Suspense
-            fallback={
-              <pre className="p-2 overflow-auto whitespace-pre-wrap">
-                <code>{code}</code>
-              </pre>
-            }
-          >
+          <Suspense fallback={<PlainCode>{code}</PlainCode>}>
             <CodeHighlight
               codeBlockStyle={codeBlockStyle}
               language={language}
@@ -225,7 +235,7 @@ const CodeComponent = memo(
               }
               customStyle={{
                 margin: 0,
-                padding: '12px 8px',
+                padding: CODE_PADDING,
                 borderRadius: 0,
                 overflow: 'auto',
                 border: 'none',

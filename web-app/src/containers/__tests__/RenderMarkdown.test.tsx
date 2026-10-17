@@ -25,7 +25,9 @@ describe('RenderMarkdown', () => {
   it('draws a flow block as stacked steps that fit a narrow window', () => {
     const { container } = render(
       <RenderMarkdown
-        content={'```flow\n1. Test class: calls page methods\n->\nPage Object: holds locators\n- WebDriver\n```'}
+        content={
+          '```flow\n1. Test class: calls page methods\n->\nPage Object: holds locators\n- WebDriver\n```'
+        }
       />
     )
     const flow = container.querySelector('[data-flow-diagram]')
@@ -322,19 +324,20 @@ describe('RenderMarkdown', () => {
 })
 
 describe('code rendering latency', () => {
-  it('shows and copies all streaming code before enabling syntax highlighting', async () => {
+  it('colours code while it streams, so finishing redraws nothing', async () => {
     const code = 'print("first")\nprint("second")'
     const { container, rerender } = render(
       <RenderMarkdown content={'```python\n' + code + '\n```'} isStreaming />
     )
     expect(container.querySelector('code')?.textContent).toBe(code)
-    expect(screen.queryByTestId('highlighted-code')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /copy/i }))
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code)
-    rerender(<RenderMarkdown content={'```python\n' + code + '\n```'} />)
     await waitFor(() =>
       expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
     )
+    rerender(<RenderMarkdown content={'```python\n' + code + '\n```'} />)
+    // Still coloured, with no plain-text frame in between
+    expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
   })
 
   it('keeps large finished blocks readable until highlighting is requested', async () => {
