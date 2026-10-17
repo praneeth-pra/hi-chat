@@ -1,6 +1,13 @@
 .markdown {
   @apply text-inherit;
 
+  /* Answers read in a serif, the rest of the app stays in Inter */
+  &:not(.is-user) {
+    font-family: var(--font-answer);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+  }
+
   &.is-user {
     p {
       line-height: 1.6;
