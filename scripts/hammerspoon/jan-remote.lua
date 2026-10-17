@@ -609,8 +609,8 @@ local mouseKinds = { types.leftMouseDown, types.leftMouseUp, types.leftMouseDrag
 local heldClick = false -- a press over Jan is swallowed until it is let go
 
 -- Global so macOS cannot garbage-collect the tap. A real click would make
--- Safari the active app, so a click over Jan is swallowed and Shift + F20 is
--- sent instead: Jan clicks whatever is under the pointer itself.
+-- Safari the active app, so a press over Jan is swallowed and Shift + F20 is
+-- sent instead, with Shift + F19 on release: Jan clicks or selects text itself.
 typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if e:getProperty(typingProps.eventSourceUserData) == TYPING_MARK then return false end
   local kind = e:getType()
@@ -619,7 +619,17 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   local releasing = kind == types.leftMouseUp or kind == types.rightMouseUp
     or kind == types.otherMouseUp
   if heldClick then
-    if releasing then heldClick = false end
+    if kind == types.leftMouseDragged then
+      -- Safari only hears moves, so the drag goes on as moves it can select with.
+      local move = hs.eventtap.event.newMouseEvent(types.mouseMoved, e:location())
+      move:setProperty(typingProps.eventSourceUserData, TYPING_MARK)
+      pcall(function() move:post() end)
+    elseif releasing then
+      if heldClick == "left" and typingTarget then
+        pcall(typingSignal, typingTarget, "f19", { "shift" }) -- let go
+      end
+      heldClick = false
+    end
     return true
   end
   local target = typingTarget
@@ -631,7 +641,8 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   if not (ok and over) then return false end -- clicks elsewhere work as usual
   heldClick = true
   if kind == types.leftMouseDown then
-    local sent = pcall(typingSignal, target, "f20", { "shift" })
+    heldClick = "left"
+    local sent = pcall(typingSignal, target, "f20", { "shift" }) -- press
     if not sent then stopTyping("Jan typing stopped — could not deliver the click") end
   end
   return true -- right and middle clicks over Jan do nothing
