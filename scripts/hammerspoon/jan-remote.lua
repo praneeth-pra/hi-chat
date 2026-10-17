@@ -79,6 +79,26 @@ local function chatWindow()
   return fallback
 end
 
+-- Asking Safari where its window is goes through Accessibility, and Safari
+-- answers only when its page isn't busy (say, drawing a streaming answer).
+-- While Hammerspoon waits, every key and click on the Mac waits with it, then
+-- they all land at once. So the frame is looked up at most every couple of
+-- seconds and remembered, and a slow answer is given up on quickly.
+if hs.window and hs.window.timeout then pcall(hs.window.timeout, 0.25) end
+local frameCache, frameAt = nil, -math.huge
+local function chatFrame(maxAge)
+  local now = hs.timer.secondsSinceEpoch()
+  if now - frameAt > (maxAge or 2) then
+    frameAt = now
+    local ok, frame = pcall(function()
+      local win = chatWindow()
+      return win and win:frame()
+    end)
+    frameCache = ok and frame or nil
+  end
+  return frameCache
+end
+
 local function post(px, at)
   if FLIP then px = -px end
   local event = hs.eventtap.event.newScrollEvent({ 0, px }, {}, "pixel")
@@ -275,8 +295,15 @@ local function hiChatWindow()
   end
 end
 
-local function typingValid(target)
+-- Checking the window asks Safari through Accessibility, which stalls every
+-- key on the Mac while Safari is busy, so a key re-checks at most this often
+-- (the watchdog below also checks every 2 s)
+local VALID_FOR = 1.5
+local validAt, validTarget = -math.huge, nil
+local function typingValid(target, recent)
   if hs.eventtap.isSecureInputEnabled and hs.eventtap.isSecureInputEnabled() then return false end
+  local now = hs.timer.secondsSinceEpoch()
+  if recent and validTarget == target and now - validAt < VALID_FOR then return true end
   local ok, valid = pcall(function()
     local win = target.app:focusedWindow() or target.app:mainWindow()
     local title = win and (win:title() or ""):lower() or ""
@@ -284,6 +311,7 @@ local function typingValid(target)
       and not title:find("sign in", 1, true)
       and (target.app:name() == "Jan" or title:find("hi-chat", 1, true))
   end)
+  if ok and valid then validAt, validTarget = now, target else validTarget = nil end
   return ok and valid
 end
 
@@ -355,7 +383,7 @@ typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
     stopTyping("Jan typing OFF")
     return true
   end
-  if not typingValid(typingTarget) then
+  if not typingValid(typingTarget, true) then
     stopTyping("Jan typing stopped — select Hi-chat again")
     return true -- do not leak this character into the main app
   end
@@ -396,12 +424,8 @@ local cached, cachedAt = nil, 0
 
 local function chatCenter()
   if hs.timer.secondsSinceEpoch() - cachedAt > 1 then
-    local win = chatWindow()
-    cached = nil
-    if win then
-      local f = win:frame()
-      cached = { x = f.x + f.w / 2, y = f.y + f.h / 2 }
-    end
+    local f = chatFrame(2)
+    cached = f and { x = f.x + f.w / 2, y = f.y + f.h / 2 } or nil
     cachedAt = hs.timer.secondsSinceEpoch()
   end
   return cached
@@ -658,8 +682,7 @@ typingMouseTap = hs.eventtap.new(mouseKinds, function(e)
   local target = typingTarget
   if not target or not pressing then return false end
   local ok, over = pcall(function()
-    local win = chatWindow() or target.win
-    return inside(e:location(), win:frame())
+    return inside(e:location(), chatFrame(2) or target.win:frame())
   end)
   if not (ok and over) then return false end -- clicks elsewhere work as usual
   heldClick = true
@@ -677,8 +700,11 @@ typingMouseTap:start()
 pointerWatch = hs.timer.doEvery(0.2, function()
   if glideTimer then return end -- ignore the pointer mid-glide
   local here = hs.mouse.absolutePosition()
-  local win = chatWindow()
-  if not (win and inside(here, win:frame())) then
+  -- On the laptop's own screen it is off Jan, with no need to ask Safari
+  local screen = hs.mouse.getCurrentScreen()
+  local onLaptop = screen and (screen:name() or ""):find("Built%-in")
+  local frame = not onLaptop and chatFrame(2)
+  if not (frame and inside(here, frame)) then
     lastOnLaptop = here
     hideDummy() -- the real pointer is back, so the stand-in goes
   end

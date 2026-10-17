@@ -42,7 +42,7 @@ hs = {
 local start = assert(source:find("-- Background typing takes the pointer along", 1, true))
 local finish = assert(source:find("-- Keep track of where the pointer was last seen off Jan", start, true))
 print = function() end
-local block = "local types, typingProps, TYPING_MARK, getTarget, stopTyping, showDummy, hideDummy, chatWindow, typingSignal = ...\n"
+local block = "local types, typingProps, TYPING_MARK, getTarget, stopTyping, showDummy, hideDummy, chatWindow, typingSignal, chatFrame = ...\n"
   .. "local typingPointerOn, typingPointerOff, lastBox\n"
   .. "local function inside(p, r) return p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end\n"
   .. source:sub(start, finish - 1):gsub("typingTarget", "getTarget()")
@@ -51,7 +51,8 @@ local target
 local on, off = assert(load(block))(types, { eventSourceUserData = 1 }, 0x4A545950,
   function() return target end, function(m) stopped = m end,
   function(at) dummy = at end, function() dummy = nil end, function() return win end,
-  function(_, key, mods) signals[#signals + 1] = { key = key, mods = mods } end)
+  function(_, key, mods) signals[#signals + 1] = { key = key, mods = mods } end,
+  function() return frame end)
 
 -- Not typing: clicks are left alone
 assert(tapFn(event(types.leftMouseDown, { x = 2500, y = 400 })) == false and #posted == 0)
