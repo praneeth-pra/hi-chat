@@ -55,11 +55,11 @@
   --app-destructive: '';
   --app-destructive-fg: '';
   /* Raised surfaces (chat box, code blocks) on the page ground */
-  --app-surface: #ffffff;
+  --app-surface: #f3f3f3;
 }
 
 :root.dark {
-  --app-surface: #161615;
+  --app-surface: #2a2a2a;
 }
 
 @keyframes breathe {

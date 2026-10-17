@@ -269,8 +269,8 @@ export const ThreadContent = memo(
           <div className="w-full group/user">
             {/* Render text content in the message bubble */}
             {cleanPrompt && (
-              <div className="flex w-full h-full text-start break-words whitespace-normal pt-4">
-                <div className="relative text-main-view-fg text-lg leading-snug font-semibold tracking-[-0.01em] w-full">
+              <div className="flex justify-end w-full h-full text-start break-words whitespace-normal pt-4">
+                <div className="relative text-main-view-fg max-w-[90%] rounded-3xl bg-surface px-5 py-2.5">
                   <div className="select-text">
                     <RenderMarkdown
                       content={cleanPrompt}

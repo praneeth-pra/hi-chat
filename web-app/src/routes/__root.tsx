@@ -135,7 +135,7 @@ const AppLayout = () => {
               maxSize={40}
               collapsible
             >
-              <div className="h-full p-2 pr-1 border-r border-main-view-fg/[0.07]">
+              <div className="h-full p-2 pr-1">
                 <LeftPanel />
               </div>
             </ResizablePanel>

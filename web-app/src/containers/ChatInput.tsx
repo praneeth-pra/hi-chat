@@ -1129,13 +1129,13 @@ const ChatInput = ({
       <div className="relative">
         <div
           className={cn(
-            'relative overflow-hidden rounded-[22px]',
+            'relative overflow-hidden rounded-3xl shadow-lg shadow-black/5',
             Boolean(streamingContent) && 'opacity-70'
           )}
         >
           <div
             className={cn(
-              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-[22px] text-main-view-fg bg-surface transition-[border-color]',
+              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-3xl text-main-view-fg bg-surface transition-[border-color]',
               isFocused &&
                 'border-main-view-fg/20',
               isDragOver && 'ring-2 ring-accent border-accent'
