@@ -1,6 +1,6 @@
 // JanMirror: a floating window that mirrors Jan's window live and, on
 // request, the screen around the pointer. It uses ScreenCaptureKit, so the
-// picture is a 60 fps stream about one frame behind the real screen.
+// picture is a live stream about one frame behind the real screen.
 //
 // The window never takes focus: it is a non-activating panel of a helper
 // with no Dock icon. Drag it to move, drag its bottom-right corner to
@@ -21,7 +21,7 @@
 @preconcurrency import IOSurface
 
 let notificationName = Notification.Name("dev.hitechie.janmirror")
-let frameRate: Int32 = 60
+let frameRate: Int32 = 120 // a cap only: frames come as fast as the display updates
 let edge: CGFloat = 0.2 // the pointer view pans only once the pointer is this close to its edge
 
 func say(_ message: String) {
@@ -96,7 +96,6 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   var area: NSRect?
   var janWindow: CGWindowID = 0
   var generation = 0
-  let frames = DispatchQueue(label: "jan-mirror-frames", qos: .userInteractive)
 
   override init() {
     panel = MirrorPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -227,7 +226,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         guard mine == generation else { return } // switched again meanwhile
         let next = SCStream(filter: filter, configuration: config, delegate: self)
-        try next.addStreamOutput(self, type: .screen, sampleHandlerQueue: frames)
+        try next.addStreamOutput(self, type: .screen, sampleHandlerQueue: .main)
         try await next.startCapture()
         guard mine == generation else {
           try? await next.stopCapture()
@@ -285,14 +284,15 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
           let buffer = CMSampleBufferGetImageBuffer(sample),
           let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue()
     else { return }
-    DispatchQueue.main.async {
-      MainActor.assumeIsolated {
-        guard stream === self.stream else { return } // a frame from a stream already replaced
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        self.view.picture.contents = surface
-        CATransaction.commit()
-      }
+    // Frames arrive on the main queue, so each one is drawn at once, with no
+    // hop between threads, and flushed to the screen straight away.
+    MainActor.assumeIsolated {
+      guard stream === self.stream else { return } // a frame from a stream already replaced
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      self.view.picture.contents = surface
+      CATransaction.commit()
+      CATransaction.flush()
     }
   }
 
