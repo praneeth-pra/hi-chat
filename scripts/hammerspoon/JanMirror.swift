@@ -10,7 +10,7 @@
 //     hidden -> shows Jan; Jan -> the screen around the pointer; and back
 //   { command = "hide" }   { command = "quit" }
 //
-// fn + Option + Left in Hammerspoon sends "toggle".
+// fn + Left in Hammerspoon sends "toggle".
 //
 // Build once (needs the Xcode Command Line Tools, macOS 14 or later):
 //   swiftc -O -parse-as-library JanMirror.swift -o ~/.hammerspoon/JanMirror

@@ -27,7 +27,7 @@
 --                           so Safari never becomes the active app; tapping Option
 --                           again puts the pointer back. Two-finger scrolling
 --                           scrolls Jan while it is on, like holding fn.
---   fn + Option + Left      open a second window that mirrors Jan live; tap
+--   fn + Left               open a second window that mirrors Jan live; tap
 --                           again to switch it to the screen around the pointer
 --                           and back. Drag it to move, its corner to resize,
 --                           x to close. Needs Screen Recording for Hammerspoon.
@@ -36,7 +36,7 @@
 --
 -- On a Mac keyboard fn + Up / Down are Page Up / Page Down, so while
 -- Hammerspoon runs, those keys no longer reach other apps. Left / Right
--- arrows and fn + Left remain available to the app in front.
+-- arrows remain available to the app in front; fn + Left (Home) is the mirror key.
 -- Option held with another key retains its normal modifier behavior.
 --
 -- Settings you may want to change:
@@ -667,7 +667,7 @@ pointerWatch = hs.timer.doEvery(0.2, function()
   end
 end)
 
--- Second window: a live copy of Jan, which fn + Option + Left switches
+-- Second window: a live copy of Jan, which fn + Left switches
 -- to a live view of the screen around the pointer and back. It is drawn by
 -- Hammerspoon (needs Screen Recording), never takes focus, and stays where
 -- you drag it; drag its bottom-right corner to resize, x closes it.
@@ -834,7 +834,7 @@ local function tellHelper(info)
   hs.timer.doAfter(0.5, post) -- give it a moment to start listening
 end
 
--- fn + Option + Left opens the mirror, then switches it between Jan and the
+-- fn + Left opens the mirror, then switches it between Jan and the
 -- screen around the pointer.
 local function switchMirror()
   if helperBuilt() then
@@ -853,9 +853,9 @@ local function switchMirror()
   print("[jan mirror] showing", mirrorMode)
 end
 
--- fn + Option + Left: on a Mac keyboard fn + Left is Home, so this is
--- Option + Home. It reaches Hammerspoon even while Option typing is on.
-mirrorKey = hs.hotkey.bind({ "alt" }, "home", function() switchMirror() end)
+-- fn + Left: on a Mac keyboard fn + Left is Home. It reaches Hammerspoon
+-- even while Option typing is on; Home no longer reaches the app in front.
+mirrorKey = hs.hotkey.bind({}, "home", function() switchMirror() end)
 
 local function jumpBack()
   local here = hs.mouse.absolutePosition()

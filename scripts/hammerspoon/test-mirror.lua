@@ -62,7 +62,7 @@ local block = "local types, TAP_SECONDS, chatWindow = ...\n"
   .. source:sub(start, finish - 1) .. "\nreturn switchMirror\n"
 local switchMirror = assert(load(block))(types, 0.35, function() return janWin end)
 
-local function pressMirrorKey() switchMirror() end -- fn + Option + Left
+local function pressMirrorKey() switchMirror() end -- fn + Left
 
 -- First tap opens the mirror showing Jan, without taking focus
 pressMirrorKey()
