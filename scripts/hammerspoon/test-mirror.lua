@@ -57,7 +57,7 @@ hs = {
 print = function() end
 local start = assert(source:find("-- Second window: a live copy of Jan", 1, true))
 local finish = assert(source:find("mirrorKey = hs.hotkey.bind", start, true))
-local block = "local types, TAP_SECONDS, chatWindow = ...\n"
+local block = "local types, TAP_SECONDS, hiChatWindow = ...\n"
   .. "local function inside(p, r) return p.x >= r.x and p.x < r.x + r.w and p.y >= r.y and p.y < r.y + r.h end\n"
   .. source:sub(start, finish - 1) .. "\nreturn switchMirror\n"
 local switchMirror = assert(load(block))(types, 0.35, function() return janWin end)

@@ -259,6 +259,21 @@ local function typingWindow()
   end
 end
 
+-- The window showing Hi-chat, wherever it is: the Jan web app, or the
+-- Safari window whose current tab is Hi-chat (other Safari windows are not)
+local function hiChatWindow()
+  if typingTarget and typingTarget.win then return typingTarget.win end
+  for _, name in ipairs(APPS) do
+    local app = hs.application.get(name)
+    for _, win in ipairs(app and app:allWindows() or {}) do
+      local title = (win:title() or ""):lower()
+      if win:isStandard() and (name == "Jan" or title:find("hi-chat", 1, true)) then
+        return win
+      end
+    end
+  end
+end
+
 local function typingValid(target)
   if hs.eventtap.isSecureInputEnabled and hs.eventtap.isSecureInputEnabled() then return false end
   local ok, valid = pcall(function()
@@ -696,7 +711,7 @@ end
 local function snapshotOf(mode)
   local box = mirror:frame()
   if mode == "jan" then
-    local win = chatWindow()
+    local win = hiChatWindow()
     return win and win:snapshot(), nil
   end
   local p = hs.mouse.absolutePosition()
@@ -760,7 +775,7 @@ local function drawMirror()
       mirror[3].action = "skip"
     end
     mirror[2].frame = { x = 0, y = 0, w = box.w, h = box.h }
-  elseif not mirrorWarned and (not ok or (mirrorMode == "jan" and chatWindow())) then
+  elseif not mirrorWarned and (not ok or (mirrorMode == "jan" and hiChatWindow())) then
     mirrorWarned = true
     print("[jan mirror] no picture: allow Hammerspoon in System Settings > Privacy & Security > Screen Recording", image)
     hs.alert.show("Allow Hammerspoon in Screen Recording to show the mirror")
@@ -838,7 +853,8 @@ end
 -- screen around the pointer.
 local function switchMirror()
   if helperBuilt() then
-    local win = chatWindow()
+    local win = hiChatWindow()
+    if not win then print("[jan mirror] no Safari window shows Hi-chat; open it in a window's front tab") end
     tellHelper({ command = "toggle", window = win and tostring(win:id()) or "0" })
     return
   end
