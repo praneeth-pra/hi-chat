@@ -761,7 +761,7 @@ export async function stopDictation() {
   }
   useDictation.setState({ status: 'transcribing', level: 0 })
   // The question goes out in a moment: make sure the answer's connections are open
-  warmAnswer()
+  warmAnswer({ soon: true })
   const stoppedAt = Date.now()
   const label = DICTATION_ENGINES.find((e) => e.value === engine)?.label
   let text = ''
