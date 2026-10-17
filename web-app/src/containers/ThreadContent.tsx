@@ -27,7 +27,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { formatDate } from '@/utils/formatDate'
-import { AvatarEmoji } from '@/containers/AvatarEmoji'
 
 import TokenSpeedIndicator from '@/containers/TokenSpeedIndicator'
 
@@ -421,23 +420,18 @@ export const ThreadContent = memo(
         {item.content?.[0]?.text && item.role !== 'user' && (
           <>
             {item.showAssistant && (
-              <div className="flex items-center gap-2.5 mb-3 text-main-view-fg/50">
-                {assistant?.avatar && (
-                  <div className="flex items-center gap-2 size-8 rounded-full justify-center border border-main-view-fg/[0.08] bg-main-view-fg/[0.04] p-1">
-                    <AvatarEmoji
-                      avatar={assistant?.avatar}
-                      imageClassName="w-6 h-6 object-contain"
-                      textClassName="text-base"
-                    />
-                  </div>
-                )}
-
-                <div className="flex flex-col">
-                  <span className="text-main-view-fg font-semibold text-sm leading-tight">
+              <div className="flex items-center gap-2.5 mb-2 text-main-view-fg/50">
+                <img
+                  src="/images/hi-chat-logo.png"
+                  alt=""
+                  className="size-7 rounded-full shrink-0"
+                />
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span className="text-main-view-fg font-medium text-[15px] truncate">
                     {assistant?.name || 'Hi-chat'}
                   </span>
                   {item?.created_at && item?.created_at !== 0 && (
-                    <span className="text-[11px] mt-0.5">
+                    <span className="text-xs shrink-0">
                       {formatDate(item?.created_at)}
                     </span>
                   )}

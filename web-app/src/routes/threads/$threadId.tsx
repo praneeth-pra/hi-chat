@@ -21,6 +21,7 @@ import { StreamingContent } from '@/containers/StreamingContent'
 import { useMessages } from '@/hooks/useMessages'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import DropdownAssistant from '@/containers/DropdownAssistant'
+import { HeaderModelPicker } from '@/containers/HeaderModelPicker'
 import { useAssistant } from '@/hooks/useAssistant'
 import { useInterfaceSettings } from '@/hooks/useInterfaceSettings'
 import { ContentType, ThreadMessage } from '@janhq/core'
@@ -251,18 +252,19 @@ function ThreadDetail() {
     >
       <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))] md:h-[calc(100dvh-18px)]">
         <HeaderPage>
-          <div className="flex items-center justify-between w-full pr-2">
-            <div>
-              {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-                <DropdownAssistant />
-              )}
-            </div>
+          <div className="flex items-center justify-between w-full gap-2">
+            <HeaderModelPicker model={threadModel} />
             <div className="flex-1 flex justify-center">
               {threadId === TEMPORARY_CHAT_ID && (
                 <TemporaryChatIndicator t={t} />
               )}
             </div>
-            {thread && <ThreadActions key={thread.id} thread={thread} />}
+            <div className="flex items-center gap-1">
+              {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
+                <DropdownAssistant compact />
+              )}
+              {thread && <ThreadActions key={thread.id} thread={thread} />}
+            </div>
           </div>
         </HeaderPage>
         <div className="flex flex-col h-[calc(100%-48px)]">

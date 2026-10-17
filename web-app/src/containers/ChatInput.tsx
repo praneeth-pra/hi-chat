@@ -36,7 +36,6 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 
 import { useAppState } from '@/hooks/useAppState'
 import { useChat } from '@/hooks/useChat'
-import DropdownModelProvider from '@/containers/DropdownModelProvider'
 import { ModelLoader } from '@/containers/loaders/ModelLoader'
 import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
 import { useServiceHub } from '@/hooks/useServiceHub'
@@ -1135,9 +1134,8 @@ const ChatInput = ({
         >
           <div
             className={cn(
-              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-3xl text-main-view-fg bg-surface transition-[border-color]',
-              isFocused &&
-                'border-main-view-fg/20',
+              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-3xl text-main-view-fg bg-main-view dark:bg-surface transition-[border-color]',
+              isFocused && 'border-main-view-fg/20',
               isDragOver && 'ring-2 ring-accent border-accent'
             )}
             data-drop-zone={hasMmproj ? 'true' : undefined}
@@ -1289,16 +1287,9 @@ const ChatInput = ({
                   streamingContent && 'opacity-50 pointer-events-none'
                 )}
               >
-                <div data-testid="composer-model-selector">
-                  {model?.provider === 'llamacpp' && loadingModel ? (
-                    <ModelLoader />
-                  ) : (
-                    <DropdownModelProvider
-                      model={model}
-                      useLastUsedModel={initialMessage}
-                    />
-                  )}
-                </div>
+                {model?.provider === 'llamacpp' && loadingModel && (
+                  <ModelLoader />
+                )}
                 {/* RAG document attachments - desktop-only via dialog; shown when feature enabled */}
                 {selectedModel?.capabilities?.includes('tools') &&
                   showAttachmentButton && (
