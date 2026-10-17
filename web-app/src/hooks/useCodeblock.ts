@@ -13,7 +13,7 @@ interface CodeBlockState {
 }
 
 const defaultCodeBlockStyle: CodeBlockStyle = 'vsc-dark-plus'
-const defaultShowLineNumbers: boolean = true
+const defaultShowLineNumbers: boolean = false
 
 export const useCodeblock = create<CodeBlockState>()(
   persist(
@@ -41,6 +41,12 @@ export const useCodeblock = create<CodeBlockState>()(
     {
       name: localStorageKey.settingCodeBlock,
       storage: createJSONStorage(() => localStorage),
+      version: 1,
+      // v1: line numbers off for everyone, including saved settings
+      migrate: (persisted) => ({
+        ...(persisted as CodeBlockState),
+        showLineNumbers: false,
+      }),
     }
   )
 )

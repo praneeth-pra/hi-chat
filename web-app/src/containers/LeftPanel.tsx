@@ -12,7 +12,6 @@ import {
   IconApps,
   IconX,
   IconSearch,
-  IconUser,
   IconFolder,
   IconPencil,
   IconTrash,
@@ -495,11 +494,12 @@ const LeftPanel = () => {
                 )}
 
                 {unFavoritedThreads.length > 0 && (
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="group/recents flex items-center justify-between mb-2">
                     <span className="block text-xs text-left-panel-fg/50 px-2.5 font-medium">
                       {t('common:recents')}
                     </span>
-                    <div className="relative flex items-center gap-0.5">
+                    {/* Housekeeping stays hidden until the pointer is on this row */}
+                    <div className="relative flex items-center gap-0.5 opacity-0 group-hover/recents:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 transition-opacity">
                       <CleanUpThreadsDialog />
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -577,7 +577,6 @@ const LeftPanel = () => {
               const isActive = menu.route.includes(route.settings.index)
                 ? currentPath.includes(route.settings.index)
                 : currentPath === menu.route
-              const isSettings = menu.route === route.settings.general
               return (
                 <Link
                   key={menu.title}
@@ -590,13 +589,7 @@ const LeftPanel = () => {
                     isActive && 'bg-left-panel-fg/[0.08]'
                   )}
                 >
-                  {isSettings ? (
-                    <span className="size-7 shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center">
-                      <IconUser size={16} className="text-white" />
-                    </span>
-                  ) : (
-                    <menu.icon size={18} className="text-left-panel-fg/70" />
-                  )}
+                  <menu.icon size={18} className="text-left-panel-fg/70" />
                   <span className="text-left-panel-fg/90">{t(menu.title)}</span>
                 </Link>
               )
