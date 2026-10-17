@@ -18,7 +18,7 @@ import {
   grokLive,
   museLive,
 } from './wsProxy.mjs'
-import { handleAuth } from './auth.mjs'
+import { handleAuth, secretWarning } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb } from './search.mjs'
 
@@ -636,6 +636,9 @@ export function createRelay(options = {}) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(process.env.RELAY_PORT ?? 3001)
+  // Railway shows stdout lines as info (stderr ones as errors)
+  const warning = secretWarning()
+  if (warning) console.log(warning)
   createRelay().listen(port, '127.0.0.1', () =>
     console.log(`transcription relay on 127.0.0.1:${port}`)
   )

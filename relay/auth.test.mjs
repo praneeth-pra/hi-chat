@@ -1,10 +1,13 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import {
   checkCode,
   newCode,
   pausedHours,
   resetCodes,
+  secretWarning,
   sessionToken,
   signedIn,
 } from './auth.mjs'
@@ -38,6 +41,44 @@ test('session cookie: valid, expired, tampered, other secret', () => {
     false
   )
   assert.equal(signedIn('', env, now), false)
+})
+
+test('AUTH_SECRET unset: a warning names the fallback key', () => {
+  assert.match(
+    secretWarning(env),
+    /^warning: AUTH_SECRET is not set.*RESEND_API_KEY/
+  )
+  assert.match(secretWarning({ LOGIN_EMAIL: 'a@b.c' }), /random key/)
+  assert.equal(secretWarning({ ...env, AUTH_SECRET: 's' }), '')
+  assert.equal(secretWarning({ RESEND_API_KEY: 'k' }), '') // sign-in is off
+})
+
+// The relay's first lines when it starts, as Railway's logs show them
+function startupLines(extraEnv) {
+  const relay = spawn(
+    process.execPath,
+    [fileURLToPath(new URL('./server.mjs', import.meta.url))],
+    { env: { PATH: process.env.PATH, RELAY_PORT: '0', ...extraEnv } }
+  )
+  let out = ''
+  return new Promise((resolve, reject) => {
+    relay.stdout.on('data', (d) => {
+      out += d
+      if (out.includes('transcription relay on')) relay.kill()
+    })
+    relay.on('error', reject)
+    relay.on('exit', () => resolve(out.trim().split('\n')))
+  })
+}
+
+test('relay start: logs the AUTH_SECRET warning once, only when unset', async () => {
+  const lines = await startupLines({ ...env, RESEND_API_KEY: 're_xyz123' })
+  assert.equal(lines.length, 2)
+  assert.match(lines[0], /^warning: AUTH_SECRET is not set/)
+  assert.doesNotMatch(lines[0], /xyz123/) // never the key itself
+  assert.match(lines[1], /^transcription relay on 127\.0\.0\.1:\d+$/)
+  const quiet = await startupLines({ ...env, AUTH_SECRET: 's' })
+  assert.equal(quiet.length, 1)
 })
 
 test('codes: right code once, wrong codes, five tries, expiry, ask limits', () => {

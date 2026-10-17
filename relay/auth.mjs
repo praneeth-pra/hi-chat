@@ -52,6 +52,17 @@ function secret(env) {
   return (fallbackSecret ??= randomBytes(32).toString('hex'))
 }
 
+/**
+ * A line for the relay's startup log when the cookie key isn't AUTH_SECRET,
+ * else ''. The fallback stays: changing the key signs every browser out.
+ */
+export function secretWarning(env = process.env) {
+  if (!loginOn(env) || (env.AUTH_SECRET ?? '').trim()) return ''
+  if ((env.RESEND_API_KEY ?? '').trim())
+    return 'warning: AUTH_SECRET is not set, so sign-in cookies are signed with a key derived from RESEND_API_KEY and anyone with that key can make one. Setting AUTH_SECRET fixes this and signs every browser out once.'
+  return 'warning: AUTH_SECRET is not set, so sign-in cookies are signed with a random key and every relay restart signs browsers out.'
+}
+
 const sign = (env, exp) =>
   createHmac('sha256', secret(env))
     .update(`${exp}:${loginEmail(env)}`)
