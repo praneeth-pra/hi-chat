@@ -403,6 +403,7 @@ describe('ChatInput', () => {
     expect(
       screen.queryByRole('button', { name: 'Coding mode' })
     ).not.toBeInTheDocument()
+    expect(screen.getByTestId('composer-model-selector')).toBeInTheDocument()
     expect(
       screen.getByRole('img', { name: 'Background typing off' })
     ).toBeInTheDocument()
@@ -519,14 +520,16 @@ describe('ChatInput', () => {
     expect(stopButton).toBeInTheDocument()
   })
 
-  it('leaves the model picker to the top bar', async () => {
+  it('shows model selection dropdown', async () => {
     await act(async () => {
       renderWithRouter()
     })
 
-    expect(
-      document.querySelector('[data-slot="popover-trigger"]')
-    ).not.toBeInTheDocument()
+    // Model selection dropdown should be rendered (look for popover trigger)
+    const modelDropdown = document.querySelector(
+      '[data-slot="popover-trigger"]'
+    )
+    expect(modelDropdown).toBeInTheDocument()
   })
 
   it('shows error message when no model is selected', async () => {

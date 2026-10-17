@@ -37,6 +37,7 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { useAppState } from '@/hooks/useAppState'
 import { useChat } from '@/hooks/useChat'
 import { ModelLoader } from '@/containers/loaders/ModelLoader'
+import DropdownModelProvider from '@/containers/DropdownModelProvider'
 import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useTools } from '@/hooks/useTools'
@@ -1269,7 +1270,7 @@ const ChatInput = ({
               data-gramm_editor={spellCheckChatInput}
               data-gramm_grammarly={spellCheckChatInput}
               className={cn(
-                'bg-transparent pt-4 w-full flex-shrink-0 border-none resize-none outline-0 px-4 leading-relaxed placeholder:text-main-view-fg/40',
+                'bg-transparent pt-4 w-full flex-shrink-0 border-none resize-none outline-0 px-4 text-[14px] leading-relaxed placeholder:text-main-view-fg/40',
                 rows < maxRows && 'scrollbar-hide',
                 className
               )}
@@ -1422,6 +1423,19 @@ const ChatInput = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              <div
+                data-testid="composer-model-selector"
+                className={cn(
+                  'min-w-0 max-w-48',
+                  streamingContent && 'opacity-50 pointer-events-none'
+                )}
+              >
+                <DropdownModelProvider
+                  model={model}
+                  useLastUsedModel={initialMessage}
+                  variant="plain"
+                />
+              </div>
               <BackgroundTypingIndicator />
               <DictationButton />
               {selectedProvider === 'llamacpp' &&

@@ -12,29 +12,34 @@
   }
 
   /* Headings */
+  & > :first-child {
+    margin-top: 0;
+  }
+
+  /* Answer headings stay close to body size so they guide, not shout */
   :is(h1, h2, h3, h4, h5, h6) {
     font-weight: 600;
-    margin-top: 1em;
+    margin-top: 1.4em;
     margin-bottom: 0.5em;
   }
   h1 {
-    font-size: var(--text-3xl);
-    line-height: 1.2;
-  }
-
-  h2 {
-    font-size: var(--text-2xl);
+    font-size: 1.375em;
     line-height: 1.3;
   }
 
+  h2 {
+    font-size: 1.25em;
+    line-height: 1.35;
+  }
+
   h3 {
-    font-size: var(--text-xl);
+    font-size: 1.125em;
     line-height: 1.4;
   }
 
   h4 {
-    font-size: var(--text-lg);
-    line-height: 1.4;
+    font-size: 1em;
+    line-height: 1.5;
   }
 
   h5 {
@@ -49,12 +54,14 @@
 
   /* Paragraphs and text */
   p {
-    line-height: 1.7;
-    margin-bottom: 0.9em;
+    line-height: 1.75;
+    margin-bottom: 1em;
   }
 
+  /* Key terms stand out by brightness more than weight */
   strong {
-    font-weight: 600;
+    font-weight: 550;
+    @apply text-main-view-fg;
   }
 
   em {
@@ -65,11 +72,16 @@
     text-decoration: line-through;
   }
 
+  /* Soft off-white answers in dark mode; bold terms keep full brightness */
+  :where(.dark) &:not(.is-user) {
+    color: color-mix(in srgb, var(--color-main-view-fg) 88%, transparent);
+  }
+
   /* Lists */
   ul,
   ol {
-    line-height: 1.7;
-    margin-bottom: 0.9em;
+    line-height: 1.75;
+    margin-bottom: 1em;
     padding-left: 1.5em;
   }
 
@@ -90,7 +102,7 @@
   }
 
   li {
-    margin-bottom: 0.4em;
+    margin-bottom: 0.6em;
     padding-left: 0.15em;
   }
 
@@ -121,10 +133,8 @@
 
   /* Code */
   code {
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
-      monospace;
-    font-size: 0.9em;
+    font-family: var(--font-code);
+    font-size: 0.875em;
     @apply bg-main-view-fg/[0.06] text-main-view-fg;
     padding: 0.15em 0.4em;
     border-radius: 5px;
@@ -237,4 +247,12 @@
 
 [data-tool-call-block] + [data-tool-call-block] {
   margin-top: 16px;
+}
+
+/* Code blocks read as code: JetBrains Mono, a touch smaller than text */
+[data-code-block] pre,
+[data-code-block] pre * {
+  font-family: var(--font-code) !important;
+  font-size: 13.5px;
+  line-height: 1.6;
 }

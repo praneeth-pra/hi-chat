@@ -9,7 +9,6 @@ import ChatInput from '@/containers/ChatInput'
 import HeaderPage from '@/containers/HeaderPage'
 import ThreadList from '@/containers/ThreadList'
 import DropdownAssistant from '@/containers/DropdownAssistant'
-import { HeaderModelPicker } from '@/containers/HeaderModelPicker'
 
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformGuard } from '@/lib/platform/PlatformGuard'
@@ -69,9 +68,8 @@ function ProjectPageContent() {
     <div className="flex h-full flex-col">
       <HeaderPage>
         <div className="flex items-center justify-between w-full">
-          <HeaderModelPicker useLastUsedModel />
           {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-            <DropdownAssistant compact />
+            <DropdownAssistant />
           )}
         </div>
       </HeaderPage>

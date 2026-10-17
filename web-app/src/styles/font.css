@@ -200,3 +200,18 @@
   src: url('/fonts/PlusJakartaSans/PlusJakartaSans-600.woff2') format('woff2');
   font-weight: 600 700;
 }
+
+/* JetBrains Mono (SIL Open Font License 1.1) for code, latin subset */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono/JetBrainsMono-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono/JetBrainsMono-500.woff2') format('woff2');
+  font-weight: 500 700;
+}

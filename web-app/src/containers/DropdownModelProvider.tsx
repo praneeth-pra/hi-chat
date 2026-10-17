@@ -35,8 +35,8 @@ const WEB_DEFAULT_PROVIDER = 'groq'
 type DropdownModelProviderProps = {
   model?: ThreadModel
   useLastUsedModel?: boolean
-  /** 'header': plain model name with an arrow, as in Open WebUI's top bar */
-  variant?: 'composer' | 'header'
+  /** 'plain': just the model name and an arrow, beside the dictation buttons */
+  variant?: 'composer' | 'plain'
 }
 
 interface SearchableModel {
@@ -523,8 +523,8 @@ const DropdownModelProvider = ({
       <div
         className={cn(
           'flex items-center gap-1.5 transition-colors min-w-0',
-          variant === 'header'
-            ? 'px-2 py-1 rounded-xl hover:bg-main-view-fg/[0.05]'
+          variant === 'plain'
+            ? 'px-2 py-1 rounded-lg hover:bg-main-view-fg/[0.07]'
             : 'border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] hover:bg-main-view-fg/[0.07] px-2.5 py-1 rounded-full'
         )}
       >
@@ -533,10 +533,10 @@ const DropdownModelProvider = ({
             type="button"
             className={cn(
               'cursor-pointer flex items-center gap-1.5 relative z-20 min-w-0',
-              variant === 'header' ? 'text-lg' : 'font-medium'
+              variant === 'plain' ? 'text-sm' : 'font-medium'
             )}
           >
-            {provider && variant !== 'header' && (
+            {provider && variant !== 'plain' && (
               <div className="shrink-0">
                 <ProvidersAvatar provider={provider} />
               </div>
@@ -544,17 +544,17 @@ const DropdownModelProvider = ({
             <span
               className={cn(
                 'truncate leading-normal',
-                variant === 'header'
-                  ? 'text-main-view-fg'
+                variant === 'plain'
+                  ? 'text-main-view-fg/60'
                   : 'text-main-view-fg/80',
                 !selectedModel?.id && 'text-main-view-fg/50'
               )}
             >
               {displayModel}
             </span>
-            {variant === 'header' && (
+            {variant === 'plain' && (
               <IconChevronDown
-                size={16}
+                size={14}
                 className="shrink-0 text-main-view-fg/60"
               />
             )}
@@ -579,22 +579,16 @@ const DropdownModelProvider = ({
 
       <PopoverContent
         className={cn(
-          variant === 'header'
+          variant === 'plain'
             ? 'w-72 p-0 backdrop-blur-2xl'
             : 'w-60 p-0 backdrop-blur-2xl',
           searchValue.length === 0 && 'h-[320px]'
         )}
-        align="start"
+        align={variant === 'plain' ? 'end' : 'start'}
         sideOffset={10}
         alignOffset={-8}
-        side={
-          variant === 'header'
-            ? 'bottom'
-            : searchValue.length === 0
-              ? undefined
-              : 'top'
-        }
-        avoidCollisions={variant === 'header' || searchValue.length === 0}
+        side={searchValue.length === 0 ? undefined : 'top'}
+        avoidCollisions={searchValue.length === 0 ? true : false}
       >
         <div className="flex flex-col w-full h-full">
           {/* Search input */}

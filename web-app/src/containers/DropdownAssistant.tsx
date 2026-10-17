@@ -9,15 +9,15 @@ import {
 import { useAssistant } from '@/hooks/useAssistant'
 import AddEditAssistant from './dialogs/AddEditAssistant'
 import {
-  IconAdjustmentsHorizontal,
+  IconChevronDown,
   IconCirclePlus,
   IconSettings,
 } from '@tabler/icons-react'
 import { useThreads } from '@/hooks/useThreads'
 import { AvatarEmoji } from '@/containers/AvatarEmoji'
 
-/** compact: a settings icon at the top right, like Open WebUI's chat controls */
-const DropdownAssistant = ({ compact = false }: { compact?: boolean }) => {
+/** The assistant's name at the top left; each entry's gear edits it */
+const DropdownAssistant = () => {
   const {
     assistants,
     currentAssistant,
@@ -38,61 +38,25 @@ const DropdownAssistant = ({ compact = false }: { compact?: boolean }) => {
   return (
     <>
       <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-        {compact ? (
-          <DropdownMenuTrigger asChild>
-            <button
-              className="size-9 cursor-pointer flex items-center justify-center rounded-xl hover:bg-main-view-fg/[0.06] transition-colors relative z-20"
-              aria-label={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
-              title={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
-            >
-              <IconAdjustmentsHorizontal
-                size={20}
-                className="text-main-view-fg/70"
-              />
-            </button>
-          </DropdownMenuTrigger>
-        ) : (
-          <div className="inline-flex items-center justify-between gap-2 border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] py-1 hover:bg-main-view-fg/[0.06] px-2.5 rounded-full transition-colors">
-            <DropdownMenuTrigger asChild>
-              <button className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 max-w-40">
-                <div className="text-main-view-fg/80 flex items-center gap-1">
-                  {selectedAssistant?.avatar && (
-                    <span className="shrink-0 w-4 h-4 relative flex items-center justify-center">
-                      <AvatarEmoji
-                        avatar={selectedAssistant.avatar}
-                        imageClassName="object-cover"
-                        textClassName="text-sm"
-                      />
-                    </span>
-                  )}
-                  <div className="truncate max-w-30">
-                    <span>{selectedAssistant?.name || 'Hi-chat'}</span>
-                  </div>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <div
-              className="size-5 cursor-pointer relative z-10 flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out "
-              onClick={() => {
-                if (selectedAssistant) {
-                  setEditingAssistantId(selectedAssistant.id)
-                  setDialogOpen(true)
-                }
-              }}
-            >
-              <IconSettings
-                size={16}
-                className="text-main-view-fg/50"
-                title="Edit Assistant"
-              />
-            </div>
-          </div>
-        )}
+        <DropdownMenuTrigger asChild>
+          <button
+            className="cursor-pointer flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-main-view-fg/[0.05] transition-colors relative z-20 min-w-0 text-lg"
+            aria-label={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
+          >
+            <span className="truncate text-main-view-fg">
+              {selectedAssistant?.name || 'Hi-chat'}
+            </span>
+            <IconChevronDown
+              size={16}
+              className="shrink-0 text-main-view-fg/60"
+            />
+          </button>
+        </DropdownMenuTrigger>
         <DropdownMenuContent
           className="w-44 max-h-[320px]"
           side="bottom"
           sideOffset={10}
-          align={compact ? 'end' : 'start'}
+          align="start"
         >
           {assistants.map((assistant) => (
             <div
