@@ -969,6 +969,12 @@ local function buildHelper(done)
   end)
 end
 
+-- An update reloads silently: no "ready" pop-up
+local function quietReload()
+  hs.settings.set("janQuietReload", true)
+  hs.reload()
+end
+
 local function checkForUpdate()
   local repo = quoted(repoDir)
   shell("cd " .. repo .. " && remote=$(git ls-remote origin refs/heads/main | cut -f1) && git rev-parse HEAD"
@@ -980,9 +986,9 @@ local function checkForUpdate()
       print("[jan update] updated " .. before:sub(1, 7) .. " -> " .. after:sub(1, 7))
       shell("cd " .. repo .. " && git diff --name-only " .. before .. " " .. after, function(_, files)
         if files:find("JanMirror.swift", 1, true) then
-          buildHelper(function() hs.reload() end)
+          buildHelper(quietReload)
         elseif files:find("scripts/hammerspoon/", 1, true) then
-          hs.reload()
+          quietReload()
         end
       end)
     end)
@@ -995,4 +1001,8 @@ if repoDir and hs.fs and hs.fs.attributes(repoDir .. "/.git", "mode") == "direct
   print("[jan update] watching " .. repoDir .. " for updates")
 end
 
-hs.alert.show("Jan remote ready (Option moves the pointer)")
+if hs.settings.get("janQuietReload") then
+  hs.settings.set("janQuietReload", nil)
+else
+  hs.alert.show("Jan remote ready (Option moves the pointer)")
+end
