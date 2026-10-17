@@ -10,7 +10,7 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { cn, getProviderTitle, getModelDisplayName } from '@/lib/utils'
 import { highlightFzfMatch } from '@/utils/highlight'
 import Capabilities from './Capabilities'
-import { IconSettings, IconX } from '@tabler/icons-react'
+import { IconChevronDown, IconSettings, IconX } from '@tabler/icons-react'
 import { useNavigate } from '@tanstack/react-router'
 import { route } from '@/constants/routes'
 import { useThreads } from '@/hooks/useThreads'
@@ -35,6 +35,8 @@ const WEB_DEFAULT_PROVIDER = 'groq'
 type DropdownModelProviderProps = {
   model?: ThreadModel
   useLastUsedModel?: boolean
+  /** 'header': plain model name with an arrow, as in Open WebUI's top bar */
+  variant?: 'composer' | 'header'
 }
 
 interface SearchableModel {
@@ -60,6 +62,7 @@ const setLastUsedModel = (provider: string, model: string) => {
 const DropdownModelProvider = ({
   model,
   useLastUsedModel = false,
+  variant = 'composer',
 }: DropdownModelProviderProps) => {
   const {
     providers,
@@ -517,25 +520,44 @@ const DropdownModelProvider = ({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <div className="border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] hover:bg-main-view-fg/[0.07] px-2.5 py-1 flex items-center gap-1.5 rounded-full transition-colors">
+      <div
+        className={cn(
+          'flex items-center gap-1.5 transition-colors min-w-0',
+          variant === 'header'
+            ? 'px-2 py-1 rounded-xl hover:bg-main-view-fg/[0.05]'
+            : 'border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] hover:bg-main-view-fg/[0.07] px-2.5 py-1 rounded-full'
+        )}
+      >
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20"
+            className={cn(
+              'cursor-pointer flex items-center gap-1.5 relative z-20 min-w-0',
+              variant === 'header' ? 'text-lg' : 'font-medium'
+            )}
           >
-            {provider && (
+            {provider && variant !== 'header' && (
               <div className="shrink-0">
                 <ProvidersAvatar provider={provider} />
               </div>
             )}
             <span
               className={cn(
-                'text-main-view-fg/80 truncate leading-normal',
+                'truncate leading-normal',
+                variant === 'header'
+                  ? 'text-main-view-fg'
+                  : 'text-main-view-fg/80',
                 !selectedModel?.id && 'text-main-view-fg/50'
               )}
             >
               {displayModel}
             </span>
+            {variant === 'header' && (
+              <IconChevronDown
+                size={16}
+                className="shrink-0 text-main-view-fg/60"
+              />
+            )}
           </button>
         </PopoverTrigger>
         {currentModel?.settings &&
@@ -557,14 +579,22 @@ const DropdownModelProvider = ({
 
       <PopoverContent
         className={cn(
-          'w-60 p-0 backdrop-blur-2xl',
+          variant === 'header'
+            ? 'w-72 p-0 backdrop-blur-2xl'
+            : 'w-60 p-0 backdrop-blur-2xl',
           searchValue.length === 0 && 'h-[320px]'
         )}
         align="start"
         sideOffset={10}
         alignOffset={-8}
-        side={searchValue.length === 0 ? undefined : 'top'}
-        avoidCollisions={searchValue.length === 0 ? true : false}
+        side={
+          variant === 'header'
+            ? 'bottom'
+            : searchValue.length === 0
+              ? undefined
+              : 'top'
+        }
+        avoidCollisions={variant === 'header' || searchValue.length === 0}
       >
         <div className="flex flex-col w-full h-full">
           {/* Search input */}

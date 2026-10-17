@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import {
   IconLayoutSidebar,
   IconDots,
-  IconCirclePlus,
+  IconEdit,
   IconSettings,
   IconStar,
   IconFolderPlus,
@@ -12,6 +12,7 @@ import {
   IconApps,
   IconX,
   IconSearch,
+  IconUser,
   IconFolder,
   IconPencil,
   IconTrash,
@@ -47,7 +48,7 @@ import { DeleteProjectDialog } from '@/containers/dialogs/DeleteProjectDialog'
 const mainMenus = [
   {
     title: 'common:newChat',
-    icon: IconCirclePlus,
+    icon: IconEdit,
     route: route.home,
     isEnabled: true,
   },
@@ -88,7 +89,6 @@ const LeftPanel = () => {
   const isInitialMountRef = useRef(true)
   const panelRef = useRef<HTMLElement>(null)
   const searchContainerRef = useRef<HTMLDivElement>(null)
-  const searchContainerMacRef = useRef<HTMLDivElement>(null)
 
   // Determine if we're in a resizable context (large screen with panel open)
   const isResizableContext = !isSmallScreen && open
@@ -101,11 +101,7 @@ const LeftPanel = () => {
       }
     },
     null,
-    [
-      panelRef.current,
-      searchContainerRef.current,
-      searchContainerMacRef.current,
-    ]
+    [panelRef.current, searchContainerRef.current]
   )
 
   // Auto-collapse panel only when window is resized
@@ -268,36 +264,68 @@ const LeftPanel = () => {
             : 'w-0 absolute -top-100 -left-100 visibility-hidden'
         )}
       >
-        <div className="relative h-11">
-          <button
-            className={cn(
-              'absolute top-1/2 -translate-y-1/2 z-20 right-0',
-              (IS_MACOS && isSmallScreen) || (IS_MACOS && !open)
-                ? 'pl-20 right-auto'
-                : ''
-            )}
-            onClick={() => setLeftPanel(!open)}
+        <div className="flex items-center justify-between h-12 px-1.5">
+          <Link
+            to={route.home}
+            onClick={() => isSmallScreen && setLeftPanel(false)}
+            className="flex items-center gap-2 px-1.5 py-1 rounded-xl hover:bg-left-panel-fg/[0.06] transition-colors"
           >
-            <div className="size-7 cursor-pointer flex items-center justify-center rounded-lg hover:bg-left-panel-fg/[0.08] transition-colors data-[state=open]:bg-left-panel-fg/10">
-              <IconLayoutSidebar size={18} className="text-left-panel-fg/70" />
-            </div>
+            <img
+              src="/images/hi-chat-logo.png"
+              alt=""
+              className="size-6 rounded-full"
+            />
+            <span className="font-medium text-left-panel-fg">Hi-chat</span>
+          </Link>
+          <button
+            className="size-8 cursor-pointer flex items-center justify-center rounded-xl hover:bg-left-panel-fg/[0.08] transition-colors"
+            onClick={() => setLeftPanel(!open)}
+            aria-label="Close sidebar"
+          >
+            <IconLayoutSidebar size={18} className="text-left-panel-fg/70" />
           </button>
-          {!IS_MACOS && (
+        </div>
+
+        <div className="flex flex-col gap-y-1 overflow-hidden mt-0 !h-[calc(100%-48px)]">
+          <div className="space-y-0.5 py-1 px-1">
+            {mainMenus.map((menu) => {
+              if (!menu.isEnabled) {
+                return null
+              }
+
+              // Regular menu items must have route and icon
+              if (!menu.route || !menu.icon) return null
+
+              const isActive = currentPath === menu.route
+              return (
+                <Link
+                  key={menu.title}
+                  to={menu.route}
+                  onClick={() => isSmallScreen && setLeftPanel(false)}
+                  data-test-id={`menu-${menu.title}`}
+                  activeOptions={{ exact: true }}
+                  className={cn(
+                    'flex items-center gap-2.5 cursor-pointer py-2 px-2.5 rounded-xl transition-colors hover:bg-left-panel-fg/[0.06]',
+                    isActive &&
+                      menu.route !== route.home &&
+                      'bg-left-panel-fg/[0.08]'
+                  )}
+                >
+                  <menu.icon size={18} className="text-left-panel-fg/80" />
+                  <span className="text-left-panel-fg/90">{t(menu.title)}</span>
+                </Link>
+              )
+            })}
             <div
               ref={searchContainerRef}
-              className={cn(
-                'relative top-1.5 mb-4 z-50',
-                isResizableContext
-                  ? 'mx-1 w-[calc(100%-40px)]'
-                  : 'mx-1 w-[calc(100%-32px)]'
-              )}
+              className="relative"
               data-ignore-outside-clicks
             >
-              <IconSearch className="absolute size-4 top-1/2 left-2.5 -translate-y-1/2 text-left-panel-fg/45" />
+              <IconSearch className="absolute size-[18px] top-1/2 left-2.5 -translate-y-1/2 text-left-panel-fg/80 pointer-events-none" />
               <input
                 type="text"
                 placeholder={t('common:search')}
-                className="w-full h-8 pl-8 pr-8 bg-left-panel-fg/[0.06] border border-left-panel-fg/[0.06] rounded-lg text-left-panel-fg placeholder:text-left-panel-fg/45 focus:outline-none focus:bg-main-view focus:border-left-panel-fg/15 transition-colors"
+                className="w-full h-9 pl-[38px] pr-8 bg-transparent rounded-xl text-left-panel-fg placeholder:text-left-panel-fg/90 hover:bg-left-panel-fg/[0.06] focus:bg-left-panel-fg/[0.06] focus:placeholder:text-left-panel-fg/40 focus:outline-none transition-colors"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -314,88 +342,6 @@ const LeftPanel = () => {
                 </button>
               )}
             </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-y-1 overflow-hidden mt-0 !h-[calc(100%-46px)]">
-          <div className="space-y-1 py-1">
-            {IS_MACOS && (
-              <div
-                ref={searchContainerMacRef}
-                className={cn('relative mb-2 mt-1 mx-1')}
-                data-ignore-outside-clicks
-              >
-                <IconSearch className="absolute size-4 top-1/2 left-2.5 -translate-y-1/2 text-left-panel-fg/45" />
-                <input
-                  type="text"
-                  placeholder={t('common:search')}
-                  className="w-full h-8 pl-8 pr-8 bg-left-panel-fg/[0.06] border border-left-panel-fg/[0.06] rounded-lg text-left-panel-fg placeholder:text-left-panel-fg/45 focus:outline-none focus:bg-main-view focus:border-left-panel-fg/15 transition-colors"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                  <button
-                    data-ignore-outside-clicks
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-left-panel-fg/70 hover:text-left-panel-fg"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation() // prevent bubbling
-                      setSearchTerm('')
-                    }}
-                  >
-                    <IconX size={14} />
-                  </button>
-                )}
-              </div>
-            )}
-
-            {mainMenus.map((menu) => {
-              if (!menu.isEnabled) {
-                return null
-              }
-
-              // Regular menu items must have route and icon
-              if (!menu.route || !menu.icon) return null
-
-              const isActive = (() => {
-                // Settings routes
-                if (menu.route.includes(route.settings.index)) {
-                  return currentPath.includes(route.settings.index)
-                }
-
-                // Default exact match for other routes
-                return currentPath === menu.route
-              })()
-              return (
-                <Link
-                  key={menu.title}
-                  to={menu.route}
-                  onClick={() => isSmallScreen && setLeftPanel(false)}
-                  data-test-id={`menu-${menu.title}`}
-                  activeOptions={{ exact: true }}
-                  className={cn(
-                    'flex items-center gap-2 cursor-pointer py-1.5 px-2 rounded-lg transition-colors',
-                    menu.route === route.home
-                      ? 'bg-main-view border border-left-panel-fg/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:border-left-panel-fg/15'
-                      : 'hover:bg-left-panel-fg/[0.07]',
-                    isActive &&
-                      menu.route !== route.home &&
-                      'bg-left-panel-fg/[0.08]'
-                  )}
-                >
-                  <menu.icon
-                    size={18}
-                    className={cn(
-                      'text-left-panel-fg/70',
-                      menu.route === route.home && 'text-primary'
-                    )}
-                  />
-                  <span className="font-medium text-left-panel-fg/90">
-                    {t(menu.title)}
-                  </span>
-                </Link>
-              )
-            })}
           </div>
 
           {projectsEnabled &&
@@ -403,7 +349,7 @@ const LeftPanel = () => {
             !(IS_IOS || IS_ANDROID) && (
               <div className="space-y-1 py-1">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="block text-[11px] uppercase tracking-wider text-left-panel-fg/45 px-2 font-semibold">
+                  <span className="block text-xs text-left-panel-fg/50 px-2.5 font-medium">
                     {t('common:projects.title')}
                   </span>
                 </div>
@@ -502,7 +448,7 @@ const LeftPanel = () => {
                 {favoritedThreads.length > 0 && (
                   <>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="block text-[11px] uppercase tracking-wider text-left-panel-fg/45 px-2 font-semibold sticky top-0">
+                      <span className="block text-xs text-left-panel-fg/50 px-2.5 font-medium sticky top-0">
                         {t('common:favorites')}
                       </span>
                       <div className="relative">
@@ -543,7 +489,7 @@ const LeftPanel = () => {
                         isFavoriteSection={true}
                       />
                       {favoritedThreads.length === 0 && (
-                        <p className="text-[11px] uppercase tracking-wider text-left-panel-fg/45 px-2 font-semibold">
+                        <p className="text-xs text-left-panel-fg/50 px-2.5 font-medium">
                           {t('chat.status.empty', { ns: 'chat' })}
                         </p>
                       )}
@@ -553,7 +499,7 @@ const LeftPanel = () => {
 
                 {unFavoritedThreads.length > 0 && (
                   <div className="flex items-center justify-between mb-2">
-                    <span className="block text-[11px] uppercase tracking-wider text-left-panel-fg/45 px-2 font-semibold">
+                    <span className="block text-xs text-left-panel-fg/50 px-2.5 font-medium">
                       {t('common:recents')}
                     </span>
                     <div className="relative flex items-center gap-0.5">
@@ -585,7 +531,7 @@ const LeftPanel = () => {
 
                 {filteredThreads.length === 0 && searchTerm.length > 0 && (
                   <div className="px-1 mt-2">
-                    <span className="block text-[11px] uppercase tracking-wider text-left-panel-fg/45 px-2 font-semibold mb-2">
+                    <span className="block text-xs text-left-panel-fg/50 px-2.5 font-medium mb-2">
                       {t('common:recents')}
                     </span>
 
@@ -631,15 +577,10 @@ const LeftPanel = () => {
               // Regular menu items must have route and icon
               if (!menu.route || !menu.icon) return null
 
-              const isActive = (() => {
-                // Settings routes
-                if (menu.route.includes(route.settings.index)) {
-                  return currentPath.includes(route.settings.index)
-                }
-
-                // Default exact match for other routes
-                return currentPath === menu.route
-              })()
+              const isActive = menu.route.includes(route.settings.index)
+                ? currentPath.includes(route.settings.index)
+                : currentPath === menu.route
+              const isSettings = menu.route === route.settings.general
               return (
                 <Link
                   key={menu.title}
@@ -648,14 +589,18 @@ const LeftPanel = () => {
                   data-test-id={`menu-${menu.title}`}
                   activeOptions={{ exact: true }}
                   className={cn(
-                    'flex items-center gap-2 cursor-pointer hover:bg-left-panel-fg/[0.07] py-1.5 my-0.5 px-2 rounded-lg transition-colors',
+                    'flex items-center gap-2.5 cursor-pointer hover:bg-left-panel-fg/[0.06] py-2 mx-1 my-0.5 px-2 rounded-xl transition-colors',
                     isActive && 'bg-left-panel-fg/[0.08]'
                   )}
                 >
-                  <menu.icon size={18} className="text-left-panel-fg/70" />
-                  <span className="font-medium text-left-panel-fg/90">
-                    {t(menu.title)}
-                  </span>
+                  {isSettings ? (
+                    <span className="size-7 shrink-0 rounded-full bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center">
+                      <IconUser size={16} className="text-white" />
+                    </span>
+                  ) : (
+                    <menu.icon size={18} className="text-left-panel-fg/70" />
+                  )}
+                  <span className="text-left-panel-fg/90">{t(menu.title)}</span>
                 </Link>
               )
             })}

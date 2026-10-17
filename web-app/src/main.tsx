@@ -7,18 +7,21 @@ import { routeTree } from './routeTree.gen'
 
 import './index.css'
 import './i18n'
+import '@/hooks/useAppFont'
 
 // Mobile-specific viewport and styling setup
 const setupMobileViewport = () => {
   // Check if running on mobile platform (iOS/Android via Tauri)
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
-                   window.matchMedia('(max-width: 768px)').matches
+  const isMobile =
+    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
+    window.matchMedia('(max-width: 768px)').matches
 
   if (isMobile) {
     // Update viewport meta tag to disable zoom
     const viewportMeta = document.querySelector('meta[name="viewport"]')
     if (viewportMeta) {
-      viewportMeta.setAttribute('content',
+      viewportMeta.setAttribute(
+        'content',
         'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
       )
     }

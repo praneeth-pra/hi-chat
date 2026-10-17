@@ -8,6 +8,7 @@ import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { ThemeSwitcher } from '@/containers/ThemeSwitcher'
 import { FontSizeSwitcher } from '@/containers/FontSizeSwitcher'
+import { FontFamilySwitcher } from '@/containers/FontFamilySwitcher'
 import { ColorPickerAppPrimaryColor } from '@/containers/ColorPickerAppPrimaryColor'
 import { ColorPickerAppAccentColor } from '@/containers/ColorPickerAppAccentColor'
 import { ColorPickerAppDestructiveColor } from '@/containers/ColorPickerAppDestructiveColor'
@@ -47,6 +48,11 @@ function InterfaceSettings() {
                 title={t('settings:interface.theme')}
                 description={t('settings:interface.themeDesc')}
                 actions={<ThemeSwitcher />}
+              />
+              <CardItem
+                title="Font"
+                description="The typeface for the whole app."
+                actions={<FontFamilySwitcher />}
               />
               <CardItem
                 title={t('settings:interface.fontSize')}

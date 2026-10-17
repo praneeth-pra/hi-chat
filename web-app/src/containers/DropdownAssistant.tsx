@@ -8,11 +8,16 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAssistant } from '@/hooks/useAssistant'
 import AddEditAssistant from './dialogs/AddEditAssistant'
-import { IconCirclePlus, IconSettings } from '@tabler/icons-react'
+import {
+  IconAdjustmentsHorizontal,
+  IconCirclePlus,
+  IconSettings,
+} from '@tabler/icons-react'
 import { useThreads } from '@/hooks/useThreads'
 import { AvatarEmoji } from '@/containers/AvatarEmoji'
 
-const DropdownAssistant = () => {
+/** compact: a settings icon at the top right, like Open WebUI's chat controls */
+const DropdownAssistant = ({ compact = false }: { compact?: boolean }) => {
   const {
     assistants,
     currentAssistant,
@@ -33,46 +38,61 @@ const DropdownAssistant = () => {
   return (
     <>
       <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-        <div className="inline-flex items-center justify-between gap-2 border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] py-1 hover:bg-main-view-fg/[0.06] px-2.5 rounded-full transition-colors">
+        {compact ? (
           <DropdownMenuTrigger asChild>
-            <button className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 max-w-40">
-              <div className="text-main-view-fg/80 flex items-center gap-1">
-                {selectedAssistant?.avatar && (
-                  <span className="shrink-0 w-4 h-4 relative flex items-center justify-center">
-                    <AvatarEmoji
-                      avatar={selectedAssistant.avatar}
-                      imageClassName="object-cover"
-                      textClassName="text-sm"
-                    />
-                  </span>
-                )}
-                <div className="truncate max-w-30">
-                  <span>{selectedAssistant?.name || 'Hi-chat'}</span>
-                </div>
-              </div>
+            <button
+              className="size-9 cursor-pointer flex items-center justify-center rounded-xl hover:bg-main-view-fg/[0.06] transition-colors relative z-20"
+              aria-label={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
+              title={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
+            >
+              <IconAdjustmentsHorizontal
+                size={20}
+                className="text-main-view-fg/70"
+              />
             </button>
           </DropdownMenuTrigger>
-          <div
-            className="size-5 cursor-pointer relative z-10 flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out "
-            onClick={() => {
-              if (selectedAssistant) {
-                setEditingAssistantId(selectedAssistant.id)
-                setDialogOpen(true)
-              }
-            }}
-          >
-            <IconSettings
-              size={16}
-              className="text-main-view-fg/50"
-              title="Edit Assistant"
-            />
+        ) : (
+          <div className="inline-flex items-center justify-between gap-2 border border-main-view-fg/[0.08] bg-main-view-fg/[0.03] py-1 hover:bg-main-view-fg/[0.06] px-2.5 rounded-full transition-colors">
+            <DropdownMenuTrigger asChild>
+              <button className="font-medium cursor-pointer flex items-center gap-1.5 relative z-20 max-w-40">
+                <div className="text-main-view-fg/80 flex items-center gap-1">
+                  {selectedAssistant?.avatar && (
+                    <span className="shrink-0 w-4 h-4 relative flex items-center justify-center">
+                      <AvatarEmoji
+                        avatar={selectedAssistant.avatar}
+                        imageClassName="object-cover"
+                        textClassName="text-sm"
+                      />
+                    </span>
+                  )}
+                  <div className="truncate max-w-30">
+                    <span>{selectedAssistant?.name || 'Hi-chat'}</span>
+                  </div>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <div
+              className="size-5 cursor-pointer relative z-10 flex items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out "
+              onClick={() => {
+                if (selectedAssistant) {
+                  setEditingAssistantId(selectedAssistant.id)
+                  setDialogOpen(true)
+                }
+              }}
+            >
+              <IconSettings
+                size={16}
+                className="text-main-view-fg/50"
+                title="Edit Assistant"
+              />
+            </div>
           </div>
-        </div>
+        )}
         <DropdownMenuContent
           className="w-44 max-h-[320px]"
           side="bottom"
           sideOffset={10}
-          align="start"
+          align={compact ? 'end' : 'start'}
         >
           {assistants.map((assistant) => (
             <div

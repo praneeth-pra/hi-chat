@@ -10,8 +10,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --font-editorialnew: 'PPEditorialNew', serif;
-  --font-sans:
-    'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: var(--app-font);
   --color-surface: var(--app-surface);
   --color-app: var(--app-bg);
   --color-left-panel-fg: var(--app-left-panel-fg);
@@ -41,6 +40,8 @@
 }
 
 :root {
+  --app-font:
+    'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* Button */
   --radius: 0.625rem;
   --font-size-base: 15px;
@@ -85,13 +86,7 @@
 @layer base {
   body {
     @apply overflow-hidden;
-    font-family:
-      'Onest',
-      ui-sans-serif,
-      system-ui,
-      -apple-system,
-      'Segoe UI',
-      sans-serif;
+    font-family: var(--app-font);
     min-height: 100vh;
     min-height: -webkit-fill-available;
     padding-top: env(safe-area-inset-top, 0px);

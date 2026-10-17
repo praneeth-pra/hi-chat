@@ -19,6 +19,7 @@ type SearchParams = {
   'temporary-chat'?: boolean
 }
 import DropdownAssistant from '@/containers/DropdownAssistant'
+import { HeaderModelPicker } from '@/containers/HeaderModelPicker'
 import { useEffect } from 'react'
 import { useThreads } from '@/hooks/useThreads'
 import { useMobileScreen } from '@/hooks/useMediaQuery'
@@ -88,8 +89,9 @@ function Index() {
     <div className="flex h-full flex-col justify-center pb-[calc(env(safe-area-inset-bottom)+env(safe-area-inset-top))]">
       <HeaderPage>
         <div className="flex items-center justify-between w-full pr-2">
+          <HeaderModelPicker model={selectedModel} useLastUsedModel />
           {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-            <DropdownAssistant />
+            <DropdownAssistant compact />
           )}
         </div>
       </HeaderPage>
@@ -114,24 +116,24 @@ function Index() {
           >
             <h1
               className={cn(
-                'font-semibold tracking-tight text-main-view-fg',
-                // Responsive title size
-                isMobile ? 'text-2xl sm:text-3xl' : 'text-[2rem] leading-tight'
+                'flex items-center justify-center gap-3 font-medium tracking-tight text-main-view-fg',
+                isMobile ? 'text-2xl' : 'text-3xl'
               )}
             >
-              {isTemporaryChat ? t('chat:temporaryChat') : t('chat:welcome')}
-            </h1>
-            <p
-              className={cn(
-                'text-main-view-fg/55 mt-2',
-                // Responsive description size
-                isMobile ? 'text-base' : 'text-base'
-              )}
-            >
+              <img
+                src="/images/hi-chat-logo.png"
+                alt=""
+                className={cn('rounded-full', isMobile ? 'size-8' : 'size-10')}
+              />
               {isTemporaryChat
-                ? t('chat:temporaryChatDescription')
+                ? t('chat:temporaryChat')
                 : t('chat:description')}
-            </p>
+            </h1>
+            {isTemporaryChat && (
+              <p className="text-main-view-fg/55 mt-2 text-base">
+                {t('chat:temporaryChatDescription')}
+              </p>
+            )}
           </div>
           <div className="flex-1 shrink-0">
             <ChatInput

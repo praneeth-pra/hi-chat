@@ -71,3 +71,132 @@
   src: url('/fonts/Onest/Onest-600.woff2') format('woff2');
   font-weight: 600 700;
 }
+
+/* Font choices in Settings > Interface (SIL Open Font License 1.1), latin
+   subset; a browser downloads one only when it is picked */
+
+@font-face {
+  font-family: 'Inter';
+  font-display: swap;
+  src: url('/fonts/Inter/Inter-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-display: swap;
+  src: url('/fonts/Inter/Inter-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-display: swap;
+  src: url('/fonts/Inter/Inter-600.woff2') format('woff2');
+  font-weight: 600 700;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-display: swap;
+  src: url('/fonts/Geist/Geist-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-display: swap;
+  src: url('/fonts/Geist/Geist-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-display: swap;
+  src: url('/fonts/Geist/Geist-600.woff2') format('woff2');
+  font-weight: 600 700;
+}
+
+@font-face {
+  font-family: 'Manrope';
+  font-display: swap;
+  src: url('/fonts/Manrope/Manrope-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Manrope';
+  font-display: swap;
+  src: url('/fonts/Manrope/Manrope-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Manrope';
+  font-display: swap;
+  src: url('/fonts/Manrope/Manrope-600.woff2') format('woff2');
+  font-weight: 600 700;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans/IBMPlexSans-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans/IBMPlexSans-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans/IBMPlexSans-600.woff2') format('woff2');
+  font-weight: 600 700;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  font-display: swap;
+  src: url('/fonts/Figtree/Figtree-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  font-display: swap;
+  src: url('/fonts/Figtree/Figtree-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  font-display: swap;
+  src: url('/fonts/Figtree/Figtree-600.woff2') format('woff2');
+  font-weight: 600 700;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans/PlusJakartaSans-400.woff2') format('woff2');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans/PlusJakartaSans-500.woff2') format('woff2');
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans/PlusJakartaSans-600.woff2') format('woff2');
+  font-weight: 600 700;
+}

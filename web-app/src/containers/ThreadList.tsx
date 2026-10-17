@@ -46,8 +46,7 @@ import { useNavigate, useMatches } from '@tanstack/react-router'
 import { RenameThreadDialog, DeleteThreadDialog } from '@/containers/dialogs'
 import { route } from '@/constants/routes'
 import { toast } from 'sonner'
-import { formatRelativeTime, groupThreadsByDate } from '@/lib/chatList'
-import { getMessageCount } from '@/hooks/useThreadHygiene'
+import { groupThreadsByDate } from '@/lib/chatList'
 
 /** Current time, refreshed every minute so relative times stay right. */
 function useNow(intervalMs = 60_000) {
@@ -64,12 +63,10 @@ const SortableItem = memo(
     thread,
     variant,
     currentProjectId,
-    now,
   }: {
     thread: Thread
     variant?: 'default' | 'project'
     currentProjectId?: string
-    now?: number
   }) => {
     const {
       attributes,
@@ -207,12 +204,12 @@ const SortableItem = memo(
         {...attributes}
         {...listeners}
         className={cn(
-          'rounded-lg hover:bg-left-panel-fg/[0.07] flex items-center justify-between gap-2 px-2 group/thread-list transition-colors',
+          'rounded-xl hover:bg-left-panel-fg/[0.06] flex items-center justify-between gap-2 px-2.5 group/thread-list transition-colors',
           variant === 'project'
             ? 'mb-2 rounded-lg px-4 border border-main-view-fg/10 bg-main-view-fg/5'
             : 'mb-0.5',
           isDragging ? 'cursor-move' : 'cursor-pointer',
-          isActive && 'bg-left-panel-fg/[0.09]'
+          isActive && 'bg-left-panel-fg/[0.08]'
         )}
         onClick={(e) => handleClick(e)}
         onContextMenu={(e) => {
@@ -224,15 +221,12 @@ const SortableItem = memo(
         <div
           className={cn(
             'pr-2 truncate flex-1',
-            variant === 'project' ? 'py-2 cursor-pointer' : 'py-1.5'
+            variant === 'project' ? 'py-2 cursor-pointer' : 'py-2'
           )}
         >
-          <span className="text-left-panel-fg/90">
+          <span className="text-sm text-left-panel-fg/90">
             {thread.title || t('common:newThread')}
           </span>
-          {variant !== 'project' && now !== undefined && (
-            <ThreadMeta thread={thread} now={now} />
-          )}
           {variant === 'project' && getLastMessageInfo?.content && (
             <span className="block text-sm text-main-view-fg/60 mt-0.5 truncate">
               {extractThinkingContent(getLastMessageInfo.content)}
@@ -383,19 +377,6 @@ const SortableItem = memo(
   }
 )
 
-/** Muted "3h · 4 messages" line under a chat title. */
-function ThreadMeta({ thread, now }: { thread: Thread; now: number }) {
-  const count = getMessageCount(thread)
-  return (
-    <span className="block text-[11px] leading-tight text-left-panel-fg/45 truncate mt-0.5">
-      {formatRelativeTime(thread.updated, now)}
-      {count !== undefined &&
-        count > 0 &&
-        ` · ${count} ${count === 1 ? 'message' : 'messages'}`}
-    </span>
-  )
-}
-
 type ThreadListProps = {
   threads: Thread[]
   isFavoriteSection?: boolean
@@ -438,7 +419,7 @@ function ThreadList({
         {groupByDate
           ? groupThreadsByDate(sortedThreads, now).map((group) => (
               <div key={group.key} className="mb-2">
-                <span className="block text-[11px] text-left-panel-fg/40 px-2 mb-1 mt-1 font-semibold uppercase tracking-wider">
+                <span className="block text-xs text-left-panel-fg/50 px-2.5 mb-1 mt-2 font-medium">
                   {group.label}
                 </span>
                 {group.threads.map((thread) => (
@@ -447,7 +428,6 @@ function ThreadList({
                     thread={thread}
                     variant={variant}
                     currentProjectId={currentProjectId}
-                    now={now}
                   />
                 ))}
               </div>
@@ -458,7 +438,6 @@ function ThreadList({
                 thread={thread}
                 variant={variant}
                 currentProjectId={currentProjectId}
-                now={variant === 'project' ? undefined : now}
               />
             ))}
       </SortableContext>
