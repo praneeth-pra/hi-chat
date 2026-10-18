@@ -78,7 +78,7 @@ it offers each new version itself (Hi-chat > Check for Updates any time).
 - tap **Left Option**: type into Hi-chat while the app you're in stays active.
 - **fn + Right**: send. **fn + Up / Down**: code block above / below.
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
-- **fn + Z**: pointer to Hi-chat's message box; **fn + X**: back to where it was (Option typing does both).
+- **Z**: pointer to Hi-chat's message box; **X**: back to where it was (Option typing does both). **fn + Z / X** (or Shift) types the letter.
 - **fn + Left**: live mirror window; **fn + Shift + Left** closes it.
 
 The shortcuts need Accessibility, the mirror needs Screen Recording.
