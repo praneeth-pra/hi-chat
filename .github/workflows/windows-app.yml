@@ -1,0 +1,44 @@
+name: Windows app
+
+on:
+  push:
+    branches: [main]
+    paths: ['windows-app/**', '.github/workflows/windows-app.yml']
+  pull_request:
+    branches: [main]
+    paths: ['windows-app/**', '.github/workflows/windows-app.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Hi-chat.exe
+        run: >
+          dotnet publish windows-app/HiChat.csproj -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:Version=1.0.${{ github.run_number }}
+          -o windows-app/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hi-chat-exe
+          path: windows-app/out/Hi-chat.exe
+      # Windows releases are win-1.0.N and never "latest": the Mac app's
+      # updater reads the latest release. The Windows app finds its own.
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "win-1.0.${{ github.run_number }}" windows-app/out/Hi-chat.exe \
+            --title "Hi-chat for Windows 1.0.${{ github.run_number }}" \
+            --notes "Download Hi-chat.exe and open it. It installs itself for your Windows user and adds Hi-chat to the Start menu." \
+            --target "${{ github.sha }}" --latest=false

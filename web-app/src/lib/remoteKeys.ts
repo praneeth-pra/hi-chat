@@ -6,8 +6,9 @@ import {
 } from '@/lib/dictation'
 
 /**
- * Keys the Hi-chat Mac app sends to the page (as calls to
- * window.hiChatRemote) from its global shortcuts.
+ * Keys the Hi-chat Mac and Windows apps send to the page (as calls to
+ * window.hiChatRemote) from their global shortcuts. The comments name the
+ * Mac shortcuts; windows-app/HiChat.cs lists the Windows ones.
  */
 /** Tap Left Control: start dictating, or stop and send. */
 export const DICTATION_TOGGLE_KEY = 'F14'
@@ -121,20 +122,22 @@ export function handleRemoteKey(key: string): boolean {
   return false
 }
 
-type MacAppWindow = Window & {
+type Bridge = { postMessage: (message: unknown) => void }
+type AppWindow = Window & {
   hiChatRemote?: (key: string) => boolean
-  webkit?: {
-    messageHandlers?: { hiChat?: { postMessage: (message: unknown) => void } }
-  }
+  /** The Mac app (WKWebView) */
+  webkit?: { messageHandlers?: { hiChat?: Bridge } }
+  /** The Windows app (WebView2) */
+  chrome?: { webview?: Bridge }
 }
 
 /**
- * Inside the Hi-chat Mac app the keys come as calls instead of key presses,
- * and the app is told when dictation starts and stops (Escape then cancels
- * it). Returns the cleanup; does nothing in a browser.
+ * Inside the Hi-chat Mac or Windows app the keys come as calls instead of
+ * key presses, and the app is told when dictation starts and stops (Escape
+ * then cancels it). Returns the cleanup; does nothing in a browser.
  */
-export function connectMacApp(win: MacAppWindow = window): () => void {
-  const app = win.webkit?.messageHandlers?.hiChat
+export function connectApp(win: AppWindow = window): () => void {
+  const app = win.webkit?.messageHandlers?.hiChat ?? win.chrome?.webview
   if (!app) return () => {}
   win.hiChatRemote = handleRemoteKey
   const post = (status: string) => app.postMessage({ dictation: status })
@@ -149,8 +152,8 @@ export function connectMacApp(win: MacAppWindow = window): () => void {
 }
 
 /**
- * Escape on the page throws a recording away; inside the Mac app the other
- * keys arrive as calls. Returns the cleanup.
+ * Escape on the page throws a recording away; inside the Mac or Windows app
+ * the other keys arrive as calls. Returns the cleanup.
  */
 export function listenForRemoteKeys() {
   const onKey = (e: KeyboardEvent) => {
@@ -158,7 +161,7 @@ export function listenForRemoteKeys() {
       e.preventDefault()
   }
   window.addEventListener('keydown', onKey)
-  const stopApp = connectMacApp()
+  const stopApp = connectApp()
   return () => {
     stopApp()
     window.removeEventListener('keydown', onKey)
