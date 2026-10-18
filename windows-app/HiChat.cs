@@ -10,6 +10,8 @@
 //   Ctrl + Alt + Up / Down        code block above / below
 //   Ctrl + Alt + Shift + Up/Down  scroll the chat by most of a screen
 //   Ctrl + Alt + scroll           scroll Hi-chat from anywhere
+//   Ctrl + Alt + X / Z            pointer to Hi-chat's message box / back to
+//                                 where it was (Right Alt typing does the same)
 //   Ctrl + Alt + Left             live mirror window (Hi-chat, then the
 //                                 screen around the pointer);
 //                                 Ctrl + Alt + Shift + Left closes it
@@ -489,7 +491,11 @@ sealed class ChatWindow : Form
     if (!Visible || WindowState == FormWindowState.Minimized) BringUp();
     Native.ForceForeground(Handle);
     webView.Focus();
-    if (focusBox) Remote("F17"); // the cursor goes to the end of the message box
+    if (focusBox)
+    {
+      Remote("F17"); // the cursor goes to the end of the message box
+      PointerToChat();
+    }
   }
 
   public void StopTyping()
@@ -497,7 +503,46 @@ sealed class ChatWindow : Form
     var back = typingReturnTo;
     Typing = false;
     typingReturnTo = IntPtr.Zero;
+    PointerBack();
     if (back != IntPtr.Zero && Native.IsWindow(back)) Native.ForceForeground(back);
+  }
+
+  /// Where the pointer was before it jumped to Hi-chat.
+  Point? pointerHome;
+
+  /// Moves the pointer into the message box (or the bottom middle of the
+  /// window when the page can't say where it is), remembering where it was.
+  public async void PointerToChat()
+  {
+    if (!Visible || WindowState == FormWindowState.Minimized) return;
+    var now = Cursor.Position;
+    if (!Bounds.Contains(now)) pointerHome = now;
+    var target = webView.PointToScreen(new Point(webView.Width / 2, webView.Height - LogicalToDeviceUnits(60)));
+    try
+    {
+      var json = await webView.ExecuteScriptAsync(
+        "(() => { const b = document.querySelector('[data-testid=\"chat-input\"]'); if (!b) return null; " +
+        "const r = b.getBoundingClientRect(); return [r.left + Math.min(r.width / 2, 200), r.top + r.height / 2] })()");
+      using var doc = JsonDocument.Parse(json);
+      if (doc.RootElement.ValueKind == JsonValueKind.Array)
+      {
+        // CSS pixels to screen pixels
+        var scale = webView.DeviceDpi / 96.0 * webView.ZoomFactor;
+        var x = doc.RootElement[0].GetDouble() * scale;
+        var y = doc.RootElement[1].GetDouble() * scale;
+        target = webView.PointToScreen(new Point((int)x, (int)y));
+      }
+    }
+    catch (Exception e) { Debug.WriteLine($"Hi-chat: message box not found: {e.Message}"); }
+    Cursor.Position = target;
+  }
+
+  /// Puts the pointer back where it was before it jumped to Hi-chat.
+  public void PointerBack()
+  {
+    if (pointerHome is not { } home) return;
+    pointerHome = null;
+    Cursor.Position = home;
   }
 
   public void ToggleMirror() => mirror.Toggle();
@@ -753,6 +798,10 @@ sealed class Shortcuts(ChatWindow app)
       case Native.VK_RIGHT or Native.VK_RETURN:
         if (Shift) return pass;
         return Swallow(vk, repeating ? null : a => a.Remote("F15"));
+      case Native.VK_X or Native.VK_Z:
+        if (Shift) return pass;
+        var toChat = vk == Native.VK_X;
+        return Swallow(vk, repeating ? null : a => { if (toChat) a.PointerToChat(); else a.PointerBack(); });
       case Native.VK_LEFT:
         var shift = Shift;
         return Swallow(vk, repeating ? null : a => { if (shift) a.HideMirror(); else a.ToggleMirror(); });
@@ -1108,7 +1157,7 @@ static class Native
   public const int WM_LBUTTONDOWN = 0x201, WM_RBUTTONDOWN = 0x204, WM_MBUTTONDOWN = 0x207, WM_MOUSEWHEEL = 0x20A;
   public const uint LLKHF_INJECTED = 0x10, LLMHF_INJECTED = 1;
   public const uint VK_RETURN = 0x0D, VK_ESCAPE = 0x1B, VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27,
-    VK_DOWN = 0x28, VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1,
+    VK_DOWN = 0x28, VK_X = 0x58, VK_Z = 0x5A, VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1,
     VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_LMENU = 0xA4, VK_RMENU = 0xA5;
   /// A key no keyboard has; pressing it in between keeps a lone Alt from opening menus.
   public const uint VK_MASK = 0xE8;
