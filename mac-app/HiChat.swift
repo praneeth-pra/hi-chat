@@ -355,7 +355,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   // MARK: Page
 
   func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-    guard let body = message.body as? [String: Any] else { return }
+    // Only Hi-chat's own page may talk to the app
+    guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "https",
+          message.frameInfo.securityOrigin.host == appHost,
+          let body = message.body as? [String: Any] else { return }
     if let status = body["dictation"] as? String {
       keys?.dictating = status == "recording" || status == "starting"
       // Started from the page's own mic button or a shortcut alike
@@ -366,16 +369,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-    decisionHandler(origin.host == appHost ? .grant : .deny)
+    decisionHandler(origin.protocol == "https" && origin.host == appHost ? .grant : .deny)
   }
 
   func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
     if action.shouldPerformDownload { return decisionHandler(.download) }
-    if let url = action.request.url, action.targetFrame?.isMainFrame != false,
-       let scheme = url.scheme, scheme == "https" || scheme == "http" || scheme == "mailto",
-       url.host != appHost, action.navigationType == .linkActivated {
-      NSWorkspace.shared.open(url)
+    guard let url = action.request.url, let scheme = url.scheme?.lowercased() else {
+      return decisionHandler(.cancel)
+    }
+    // Only Hi-chat itself loads in the window. Any other page opens in your
+    // browser, so no other site can look like Hi-chat here, get the
+    // microphone or reach the app's bridge.
+    let ours = scheme == "https" && url.host == appHost
+    if action.targetFrame?.isMainFrame != false && !ours && scheme != "about" && scheme != "blob" {
+      if scheme == "https" || scheme == "http" || scheme == "mailto" { NSWorkspace.shared.open(url) }
       return decisionHandler(.cancel)
     }
     decisionHandler(.allow)
@@ -399,7 +407,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                 suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
     let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-    let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+    // The name only, never a path, so a download can't land outside Downloads
+    let safe = (suggestedFilename as NSString).lastPathComponent
+    let name = safe.isEmpty || safe.hasPrefix(".") ? "download" : safe
     var url = folder.appendingPathComponent(name)
     let base = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
     var n = 2
@@ -504,7 +514,11 @@ final class Updater {
     let dmg = (release["assets"] as? [[String: Any]] ?? [])
       .compactMap { $0["browser_download_url"] as? String }
       .first { $0.hasSuffix(".dmg") }
-    guard Updater.isNewer(version, than: current), let dmg, let url = URL(string: dmg) else {
+    // Updates come only from this repository's own releases
+    guard Updater.isNewer(version, than: current), let dmg, let url = URL(string: dmg),
+          url.scheme == "https", url.host == "github.com",
+          url.path.hasPrefix("/praneeth-pra/hi-chat/releases/download/")
+    else {
       if asked { tell("Hi-chat \(current) is the newest version.") }
       return
     }
