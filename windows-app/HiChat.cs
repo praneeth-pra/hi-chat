@@ -594,20 +594,25 @@ sealed class Updater(ChatWindow app)
     Uri? exe = null;
     try
     {
-      // The Mac app's releases are the repository's "latest"; Windows ones are win-*.
+      // The Mac app's releases are the repository's "latest"; Windows ones are
+      // win-*. GitHub doesn't list them in version order, so take the highest.
       using var doc = JsonDocument.Parse(await http.GetStringAsync(
-        $"https://api.github.com/repos/{App.Repo}/releases?per_page=30"));
+        $"https://api.github.com/repos/{App.Repo}/releases?per_page=50"));
       foreach (var release in doc.RootElement.EnumerateArray())
       {
         var tag = release.GetProperty("tag_name").GetString() ?? "";
         if (!tag.StartsWith("win-") || release.GetProperty("draft").GetBoolean()) continue;
-        version = tag["win-".Length..];
+        var candidate = tag["win-".Length..];
+        if (version != null && !IsNewer(candidate, version)) continue;
+        Uri? candidateExe = null;
         foreach (var asset in release.GetProperty("assets").EnumerateArray())
         {
           if (asset.GetProperty("name").GetString() == "Hi-chat.exe")
-            Uri.TryCreate(asset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out exe);
+            Uri.TryCreate(asset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out candidateExe);
         }
-        break;
+        if (candidateExe == null) continue;
+        version = candidate;
+        exe = candidateExe;
       }
     }
     catch (Exception e)
