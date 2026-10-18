@@ -249,8 +249,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   /// Runs one of the page's remote keys (see web-app/src/lib/remoteKeys.ts).
   func remote(_ key: String) {
+    // Dictating or sending is asking a question: bring the window up to show it.
+    if key == "F14" || key == "F15" { bringUp() }
     let quoted = "\"" + key + "\""
     webView.evaluateJavaScript("window.hiChatRemote && window.hiChatRemote(\(quoted))")
+  }
+
+  /// Puts Hi-chat in front of other windows without taking the keyboard or
+  /// activating it, so the app you're in stays active.
+  func bringUp() {
+    if panel.isMiniaturized { panel.deminiaturize(nil) }
+    panel.orderFrontRegardless()
   }
 
   func scrollChat(by fraction: Double) {
@@ -349,6 +358,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     guard let body = message.body as? [String: Any] else { return }
     if let status = body["dictation"] as? String {
       keys?.dictating = status == "recording" || status == "starting"
+      // Started from the page's own mic button or a shortcut alike
+      if status == "starting" || status == "recording" || status == "transcribing" { bringUp() }
     }
   }
 
