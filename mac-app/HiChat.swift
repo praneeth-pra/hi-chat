@@ -10,6 +10,8 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
+//   fn + X / fn + Z         pointer to Hi-chat's message box / back to where
+//                           it was (Option typing does the same on and off)
 //   fn + Left               live mirror window (Hi-chat, then the screen around
 //                           the pointer; needs Screen Recording);
 //                           fn + Shift + Left closes it
@@ -47,6 +49,8 @@ enum Key {
   static let home: Int64 = 115
   static let pageUp: Int64 = 116
   static let pageDown: Int64 = 121
+  static let z: Int64 = 6
+  static let x: Int64 = 7
 }
 
 /// A window that takes the keyboard without activating Hi-chat.
@@ -327,12 +331,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.makeKeyAndOrderFront(nil)
     typing = true
     remote("F17") // the cursor goes to the end of the message box
+    pointerToChat()
   }
 
   func stopTyping() {
     let back = typingReturnTo
     typing = false
     typingReturnTo = nil
+    pointerBack()
     guard panel.isKeyWindow else { return }
     // Giving up the keyboard without hiding: the unseen window takes it, then
     // drops it while Hi-chat's window refuses it, so it goes back to the app
@@ -347,6 +353,52 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   func windowDidResignKey(_ notification: Notification) {
     typing = false
     typingReturnTo = nil
+  }
+
+  // MARK: Pointer
+
+  /// Where the pointer was before it jumped to Hi-chat (screen coordinates,
+  /// origin at the top left, as CGEvent uses).
+  var pointerHome: CGPoint?
+
+  func pointerNow() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
+
+  func warpPointer(_ to: CGPoint) {
+    CGWarpMouseCursorPosition(to)
+    // Without this the pointer ignores the mouse for a moment after a jump
+    CGAssociateMouseAndMouseCursorPosition(1)
+  }
+
+  /// Moves the pointer into the message box (or the bottom middle of the
+  /// window when the page can't say where it is), remembering where it was.
+  func pointerToChat() {
+    guard panel.isVisible, !panel.isMiniaturized else { return }
+    let now = pointerNow()
+    let top = NSScreen.screens.first?.frame.maxY ?? panel.frame.maxY
+    let frame = panel.frame
+    let onChat = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+    if !onChat.contains(now) { pointerHome = now }
+    let script = """
+      (() => { const b = document.querySelector('[data-testid="chat-input"]');
+        if (!b) return null; const r = b.getBoundingClientRect();
+        return [r.left + Math.min(r.width / 2, 200), r.top + r.height / 2] })()
+      """
+    webView.evaluateJavaScript(script) { [weak self] result, _ in
+      guard let self else { return }
+      var point = NSPoint(x: frame.width / 2, y: 80) // window coordinates, from the bottom
+      if let xy = result as? [Double], xy.count == 2 {
+        point = self.webView.convert(NSPoint(x: xy[0], y: xy[1]), to: nil)
+      }
+      let screen = self.panel.convertPoint(toScreen: point)
+      self.warpPointer(CGPoint(x: screen.x, y: top - screen.y))
+    }
+  }
+
+  /// Puts the pointer back where it was before it jumped to Hi-chat.
+  func pointerBack() {
+    guard let home = pointerHome else { return }
+    pointerHome = nil
+    warpPointer(home)
   }
 
   // MARK: Mirror
@@ -764,6 +816,11 @@ final class Keys {
     case Key.end, Key.right:
       guard fnDown, !shift else { return pass }
       if !repeating { swallow(key) { $0.remote("F15") } }
+      heldKey = key
+      return nil
+    case Key.x, Key.z:
+      guard fnDown, !shift else { return pass }
+      if !repeating { swallow(key) { key == Key.x ? $0.pointerToChat() : $0.pointerBack() } }
       heldKey = key
       return nil
     case Key.home, Key.left:
