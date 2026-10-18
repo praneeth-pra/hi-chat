@@ -13,6 +13,7 @@ import {
 import { useAppState } from '@/hooks/useAppState'
 import { cn } from '@/lib/utils'
 import { useMessages } from '@/hooks/useMessages'
+import ThinkingBlock from '@/containers/ThinkingBlock'
 import ToolCallBlock from '@/containers/ToolCallBlock'
 import { useChat } from '@/hooks/useChat'
 import {
@@ -143,7 +144,7 @@ export const ThreadContent = memo(
       }, new Map<string, string>())
     }, [item.metadata])
 
-    const { textSegment } = useMemo(() => {
+    const { reasoningSegment, textSegment } = useMemo(() => {
       // Check for thinking formats
       const hasThinkTag = text.includes('<think>') && !text.includes('</think>')
       const hasAnalysisChannel =
@@ -253,6 +254,7 @@ export const ThreadContent = memo(
       'tool_calls' in item.metadata &&
       Array.isArray(item.metadata.tool_calls) &&
       item.metadata.tool_calls.length
+
 
     return (
       <Fragment>
@@ -411,17 +413,30 @@ export const ThreadContent = memo(
         )}
         {item.content?.[0]?.text && item.role !== 'user' && (
           <div className="group/assistant">
-            {/* The model's reasoning is not shown: the dot below covers that wait */}
-            {!!item.streamingThread && !textSegment.trim() && !isToolCalls && (
-              <span
-                data-test-id="answer-pending"
-                aria-label="Answer on its way"
-                className="relative flex size-5 items-center justify-center text-main-view-fg/70"
-              >
-                <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
-                <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
-              </span>
+            {reasoningSegment && (
+              <ThinkingBlock
+                id={
+                  item.isLastMessage
+                    ? `${item.thread_id}-last-${reasoningSegment.slice(0, 50).replace(/\s/g, '').slice(-10)}`
+                    : `${item.thread_id}-${item.index ?? item.id}`
+                }
+                text={reasoningSegment}
+              />
             )}
+
+            {!!item.streamingThread &&
+              !reasoningSegment &&
+              !textSegment.trim() &&
+              !isToolCalls && (
+                <span
+                  data-test-id="answer-pending"
+                  aria-label="Answer on its way"
+                  className="relative flex size-5 items-center justify-center text-main-view-fg/70"
+                >
+                  <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
+                  <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
+                </span>
+              )}
 
             <RenderMarkdown
               content={textSegment.replace('</think>', '')}
