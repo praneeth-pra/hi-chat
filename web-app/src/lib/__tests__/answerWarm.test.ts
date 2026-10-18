@@ -11,7 +11,7 @@ vi.mock('@/hooks/useModelProvider', () => ({
 const okFetch = () =>
   vi.fn(async (_url: string, _init?: RequestInit) => new Response(null))
 const urls = (f: ReturnType<typeof okFetch>) => f.mock.calls.map(([u]) => u)
-// The model services only, without the search warm-up every mode does
+// The model services only, without Accuracy's search warm-up
 const modelCalls = (f: ReturnType<typeof okFetch>) =>
   f.mock.calls.filter(([u]) => u !== '/api/search')
 
@@ -51,10 +51,9 @@ describe('warmAnswer', () => {
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
     expect(urls(fetcher)).toEqual([
-      '/api/search',
       'https://api.groq.com/openai/v1/chat/completions',
     ])
-    const init = fetcher.mock.calls[1][1]!
+    const init = fetcher.mock.calls[0][1]!
     expect(init.body).toBe('{}')
     expect(init.headers).toMatchObject({
       'authorization': 'Bearer gsk',
@@ -67,11 +66,8 @@ describe('warmAnswer', () => {
     const warmAnswer = await load(false, 'speed')
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
-    expect(urls(fetcher)).toEqual([
-      '/api/search',
-      'https://api.anthropic.com/v1/messages',
-    ])
-    expect(fetcher.mock.calls[1][1]!.headers).toMatchObject({
+    expect(urls(fetcher)).toEqual(['https://api.anthropic.com/v1/messages'])
+    expect(fetcher.mock.calls[0][1]!.headers).toMatchObject({
       'x-api-key': 'sk-ant',
       'anthropic-dangerous-direct-browser-access': 'true',
     })
@@ -82,7 +78,7 @@ describe('warmAnswer', () => {
     const warmAnswer = await load(false, 'speed')
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
-    expect(urls(fetcher)).toEqual(['/api/search'])
+    expect(urls(fetcher)).toEqual([])
   })
 
   it('Auto · Speed warms Cerebras and Groq once each', async () => {
