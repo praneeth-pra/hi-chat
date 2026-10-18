@@ -60,8 +60,28 @@ local typingTarget = nil
 -- Jan when typing turns on, and back when it turns off
 local typingPointerOn, typingPointerOff
 
--- The Jan/Safari window that is not on the laptop's built-in screen
-local function chatWindow()
+-- The Jan/Safari window that is not on the laptop's built-in screen.
+-- Listing Safari's windows takes several Accessibility questions per window,
+-- and every key and click on the Mac waits while Safari answers them, so the
+-- window found is kept for FIND_EVERY seconds. A caller that asks the window
+-- something anyway (its frame) passes checked; others get one quick check.
+local FIND_EVERY = 10
+local foundWin, foundAt = nil, -math.huge
+local findChatWindow
+local function chatWindow(checked)
+  local now = hs.timer.secondsSinceEpoch()
+  if foundWin and now - foundAt <= FIND_EVERY then
+    if checked then return foundWin end
+    local ok, visible = pcall(function() return foundWin:isVisible() end)
+    if ok and visible then return foundWin end
+  elseif not foundWin and now - foundAt < 2 then
+    return nil -- looked a moment ago and found nothing
+  end
+  foundWin, foundAt = findChatWindow(), now
+  return foundWin
+end
+
+findChatWindow = function()
   local fallback
   for _, name in ipairs(APPS) do
     local app = hs.application.get(name)
@@ -91,7 +111,7 @@ local function chatFrame(maxAge)
   if now - frameAt > (maxAge or 2) then
     frameAt = now
     local ok, frame = pcall(function()
-      local win = chatWindow()
+      local win = chatWindow(true)
       return win and win:frame()
     end)
     frameCache = ok and frame or nil
