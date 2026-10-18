@@ -83,6 +83,24 @@ it offers each new version itself (Hi-chat > Check for Updates any time).
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
 
+## Windows app
+
+Hi-chat for Windows (`windows-app/`) is the same app in C# with WebView2,
+published as one `Hi-chat.exe` in the `win-1.0.N` releases. The first run
+installs it for your Windows user (Start menu entry, no admin). After that it
+offers each new version itself, and Check for updates is on the tray icon's menu.
+Windows keyboards have no usable fn key, so fn becomes **Ctrl + Alt**:
+
+- tap **Ctrl**: dictate; tap again to send. **Escape** throws it away.
+- tap **Right Alt**: type into Hi-chat; tap again (or Escape) to go back.
+- **Ctrl + Alt + Right** (or Enter): send. **Ctrl + Alt + Up / Down**: code block above / below.
+- **Ctrl + Alt + Shift + Up / Down**: scroll the chat. **Ctrl + Alt** + scroll: scroll Hi-chat.
+- **Ctrl + Alt + Left**: live mirror window; **Ctrl + Alt + Shift + Left** closes it.
+
+Closing the window keeps Hi-chat running in the tray so the shortcuts keep
+working; Quit is on the tray icon's menu. GitHub Actions
+(`.github/workflows/windows-app.yml`) builds it on every change.
+
 See [Question input alternatives and answer latency](docs/question-input-alternatives.md)
 for the assessed replacement options; no replacement listener is enabled.
 

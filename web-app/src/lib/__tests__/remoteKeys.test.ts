@@ -139,16 +139,16 @@ describe('remote keys', () => {
   })
 })
 
-describe('Mac app bridge', () => {
+describe('app bridge', () => {
   it('does nothing in a browser', async () => {
-    const { connectMacApp } = await import('../remoteKeys')
+    const { connectApp } = await import('../remoteKeys')
     const win = {} as Window & { hiChatRemote?: unknown }
-    connectMacApp(win)()
+    connectApp(win)()
     expect(win.hiChatRemote).toBeUndefined()
   })
 
   it('exposes the keys and reports dictation status to the app', async () => {
-    const { connectMacApp, handleRemoteKey } = await import('../remoteKeys')
+    const { connectApp, handleRemoteKey } = await import('../remoteKeys')
     const sent: unknown[] = []
     const win = {
       webkit: {
@@ -157,7 +157,7 @@ describe('Mac app bridge', () => {
         },
       },
     } as unknown as Window & { hiChatRemote?: unknown }
-    const stop = connectMacApp(win)
+    const stop = connectApp(win)
     expect(win.hiChatRemote).toBe(handleRemoteKey)
     expect(sent).toEqual([{ dictation: 'idle' }])
     setDictationStatus('recording')
@@ -168,5 +168,17 @@ describe('Mac app bridge', () => {
     expect(sent).toHaveLength(3)
     setDictationStatus('idle')
     expect(win.hiChatRemote).toBeUndefined()
+  })
+
+  it('talks to the Windows app through WebView2', async () => {
+    const { connectApp, handleRemoteKey } = await import('../remoteKeys')
+    const sent: unknown[] = []
+    const win = {
+      chrome: { webview: { postMessage: (m: unknown) => sent.push(m) } },
+    } as unknown as Window & { hiChatRemote?: unknown }
+    const stop = connectApp(win)
+    expect(win.hiChatRemote).toBe(handleRemoteKey)
+    expect(sent).toEqual([{ dictation: 'idle' }])
+    stop()
   })
 })
