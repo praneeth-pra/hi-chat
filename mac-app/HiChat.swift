@@ -24,7 +24,7 @@
 // active app, so a click or typing in it never greys out the app you're in.
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
-// Hi-chat sits in the menu bar at the top (H icon); its Dock icon is off
+// Hi-chat sits in the menu bar at the top (its H logo); its Dock icon is off
 // unless "Show in Dock" is ticked in that menu.
 //
 // New versions: Hi-chat asks once when one is out (Check for Updates is in
@@ -236,9 +236,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   /// app is in front, and the way in when the Dock icon is off.
   func buildStatusItem() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    let image = NSImage(systemSymbolName: "h.square", accessibilityDescription: "Hi-chat")
-    image?.isTemplate = true
-    item.button?.image = image
+    item.button?.image = AppController.menuBarLogo()
     let menu = NSMenu()
     menu.addItem(withTitle: "Show Hi-chat", action: #selector(showChat(_:)), keyEquivalent: "").target = self
     menu.addItem(withTitle: "Reload", action: #selector(reloadPage(_:)), keyEquivalent: "").target = self
@@ -256,6 +254,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     item.menu = menu
     statusItem = item
     showLoginState()
+  }
+
+  /// Hi-chat's slanted H with its orange crossbar, drawn at menu bar size.
+  /// The strokes take the menu bar's text colour, so they show on a light
+  /// or dark menu bar alike.
+  static func menuBarLogo() -> NSImage {
+    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+      let bar = NSBezierPath()
+      bar.move(to: NSPoint(x: 4.6, y: 12.2)); bar.line(to: NSPoint(x: 12.9, y: 7.5))
+      bar.lineWidth = 2.5
+      NSColor(red: 224 / 255, green: 131 / 255, blue: 80 / 255, alpha: 1).setStroke()
+      bar.stroke()
+      let sides = NSBezierPath()
+      sides.move(to: NSPoint(x: 5.3, y: 2.4)); sides.line(to: NSPoint(x: 2.4, y: 15.4))
+      sides.move(to: NSPoint(x: 15.8, y: 2.4)); sides.line(to: NSPoint(x: 12.9, y: 15.4))
+      sides.lineWidth = 3
+      sides.lineCapStyle = .round
+      NSColor.labelColor.setStroke()
+      sides.stroke()
+      return true
+    }
+    image.accessibilityDescription = "Hi-chat"
+    return image
   }
 
   /// Off (the default): no Dock icon; Hi-chat lives in the menu bar.
