@@ -13,6 +13,8 @@ export type CandidateProfile = {
   candidate: string
   role: string
   company: string
+  /** The role in a few words, for the assistant's name. */
+  title?: string
   summary: string
   focus: string[]
 }
@@ -24,6 +26,7 @@ export const PROFILE_PROMPT = `You read a candidate's resume and, if given, the 
 "candidate": the candidate's full name from the resume, or "" if it is not there.
 "role": the job title they are interviewing for (from the job description, else the role the resume targets, e.g. "Data Analyst").
 "company": the hiring company from the job description, or "".
+"title": the role in at most 3 words, abbreviated where common, e.g. "ML Engineer" for "Senior Software Engineer, Machine Learning Infrastructure".
 "summary": one short line describing the candidate for this role, e.g. "Data analyst, 4 years in SQL, Power BI and Python".
 "focus": up to 8 short phrases naming what the job description stresses most (skills, tools, responsibilities); if there is no job description, the candidate's strongest areas from the resume.`
 
@@ -91,6 +94,7 @@ export function parseProfile(raw: string): CandidateProfile {
     candidate: text(data.candidate, 60),
     role: text(data.role, 80),
     company: text(data.company, 80),
+    title: text(data.title, 40),
     summary: text(data.summary, 200),
     focus: Array.isArray(data.focus)
       ? data.focus
@@ -101,11 +105,25 @@ export function parseProfile(raw: string): CandidateProfile {
   }
 }
 
-/** "Priya · Data Analyst", or just the role when the name is unknown. */
+/** Longest name shown, so it fits the assistant picker. */
+const MAX_NAME_CHARS = 28
+
+/** Cuts at a word boundary and drops a trailing separator. */
+function clip(value: string, max: number) {
+  if (value.length <= max) return value
+  const space = value.lastIndexOf(' ', max)
+  return (space > 0 ? value.slice(0, space) : value.slice(0, max)).replace(
+    /[\s,·:\-–—&]+$/,
+    ''
+  )
+}
+
+/** "Acme · Data Analyst", or just the short role when the company is unknown. */
 export function assistantName(profile: CandidateProfile): string {
-  const first = profile.candidate.split(' ')[0]
-  const role = profile.role || 'Interview'
-  return first ? `${first} · ${role}` : role
+  const role = clip(profile.title || profile.role || 'Interview', MAX_NAME_CHARS)
+  const company = profile.company.split(/[,(]/)[0].trim()
+  const name = company ? `${company} · ${role}` : role
+  return name.length <= MAX_NAME_CHARS ? name : role
 }
 
 /** The free-text notes saved next to the resume and job description. */
