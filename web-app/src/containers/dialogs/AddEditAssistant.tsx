@@ -7,6 +7,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { IconFileText, IconUpload, IconX } from '@tabler/icons-react'
 import { useModelProvider } from '@/hooks/useModelProvider'
@@ -31,9 +32,9 @@ interface AddEditAssistantProps {
 
 /**
  * An assistant is just a resume, an optional job description and optional
- * notes the resume doesn't cover. The name,
- * instructions, documents and key terms are worked out from them when the
- * user saves (lib/assistantSetup.ts), so none of that is shown here.
+ * notes the resume doesn't cover. The instructions, documents and key terms
+ * are worked out from them when the user saves (lib/assistantSetup.ts). The
+ * name is too unless the user types one.
  */
 export default function AddEditAssistant({
   open,
@@ -56,6 +57,7 @@ export default function AddEditAssistant({
   const [jdFile, setJdFile] = useState<File | null>(null)
   const [jdRemoved, setJdRemoved] = useState(false)
   const [contextText, setContextText] = useState('')
+  const [name, setName] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const resumeInputRef = useRef<HTMLInputElement>(null)
@@ -67,6 +69,7 @@ export default function AddEditAssistant({
     setJdFile(null)
     setJdRemoved(false)
     setContextText(savedContext)
+    setName(editing ? (initialData?.name ?? '') : '')
     setStatus(null)
     setBusy(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,11 +77,15 @@ export default function AddEditAssistant({
 
   const resumeName = resumeFile?.name ?? savedResume?.name
   const jdName = jdFile?.name ?? (jdRemoved ? undefined : savedJd?.name)
-  const changed =
+  const savedName = editing ? (initialData?.name ?? '') : ''
+  const nameChanged = name.trim() !== savedName.trim()
+  // Anything but the name means working the assistant out again
+  const filesChanged =
     !!resumeFile ||
     !!jdFile ||
     (jdRemoved && !!savedJd) ||
     contextText.trim() !== savedContext.trim()
+  const changed = filesChanged || nameChanged
   const canSave = !busy && !!resumeName && (!editing || changed)
 
   const readFile = async (file: File): Promise<SetupFile> => {
@@ -91,6 +98,11 @@ export default function AddEditAssistant({
   }
 
   const handleSave = async () => {
+    if (editing && initialData && !filesChanged) {
+      onSave({ ...initialData, name: name.trim() || initialData.name })
+      onOpenChange(false)
+      return
+    }
     setBusy(true)
     try {
       setStatus('Reading the files…')
@@ -116,7 +128,7 @@ export default function AddEditAssistant({
         fetch,
         contextText
       )
-      onSave(assistant)
+      onSave(name.trim() ? { ...assistant, name: name.trim() } : assistant)
       onOpenChange(false)
     } catch (error) {
       setStatus(
@@ -170,6 +182,21 @@ export default function AddEditAssistant({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
+          <div className="space-y-1">
+            <div className="text-sm font-medium">Name</div>
+            <Input
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setStatus(null)
+              }}
+              placeholder="Made from your resume and job description"
+              aria-label="Assistant name"
+              maxLength={60}
+              className="text-sm"
+              disabled={busy}
+            />
+          </div>
           {fileRow('Resume', resumeName, () => resumeInputRef.current?.click())}
           {fileRow(
             'Job description (optional)',
