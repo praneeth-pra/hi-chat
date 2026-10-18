@@ -10,7 +10,7 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
-//   fn + X / fn + Z         pointer to Hi-chat's message box / back to where
+//   fn + Z / fn + X         pointer to Hi-chat's message box / back to where
 //                           it was (Option typing does the same on and off)
 //   fn + Left               live mirror window (Hi-chat, then the screen around
 //                           the pointer; needs Screen Recording);
@@ -820,7 +820,7 @@ final class Keys {
       return nil
     case Key.x, Key.z:
       guard fnDown, !shift else { return pass }
-      if !repeating { swallow(key) { key == Key.x ? $0.pointerToChat() : $0.pointerBack() } }
+      if !repeating { swallow(key) { key == Key.z ? $0.pointerToChat() : $0.pointerBack() } }
       heldKey = key
       return nil
     case Key.home, Key.left:

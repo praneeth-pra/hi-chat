@@ -10,7 +10,7 @@
 //   Ctrl + Alt + Up / Down        code block above / below
 //   Ctrl + Alt + Shift + Up/Down  scroll the chat by most of a screen
 //   Ctrl + Alt + scroll           scroll Hi-chat from anywhere
-//   Ctrl + Alt + X / Z            pointer to Hi-chat's message box / back to
+//   Ctrl + Alt + Z / X            pointer to Hi-chat's message box / back to
 //                                 where it was (Right Alt typing does the same)
 //   Ctrl + Alt + Left             live mirror window (Hi-chat, then the
 //                                 screen around the pointer);
@@ -800,7 +800,7 @@ sealed class Shortcuts(ChatWindow app)
         return Swallow(vk, repeating ? null : a => a.Remote("F15"));
       case Native.VK_X or Native.VK_Z:
         if (Shift) return pass;
-        var toChat = vk == Native.VK_X;
+        var toChat = vk == Native.VK_Z;
         return Swallow(vk, repeating ? null : a => { if (toChat) a.PointerToChat(); else a.PointerBack(); });
       case Native.VK_LEFT:
         var shift = Shift;
