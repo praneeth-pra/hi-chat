@@ -29,7 +29,7 @@ function BreathingDot({ level }: { level?: number }) {
   const voice = level === undefined ? undefined : Math.min(1, level * 1.6)
   return (
     <span
-      className="relative flex size-5 items-center justify-center shrink-0"
+      className="relative flex size-5 items-center justify-center shrink-0 [contain:strict]"
       aria-hidden
     >
       <span

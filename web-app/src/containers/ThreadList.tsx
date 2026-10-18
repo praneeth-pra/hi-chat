@@ -1,18 +1,4 @@
 import {
-  DndContext,
-  closestCenter,
-  useSensor,
-  useSensors,
-  PointerSensor,
-  KeyboardSensor,
-} from '@dnd-kit/core'
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import {
   IconDots,
   IconStarFilled,
   IconStar,
@@ -21,7 +7,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react'
 import { useThreads } from '@/hooks/useThreads'
-import { useThreadManagement } from '@/hooks/useThreadManagement'
+import { useThreadManagementStore } from '@/hooks/useThreadManagement'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
 import { useMessages } from '@/hooks/useMessages'
 import { useAppState } from '@/hooks/useAppState'
@@ -58,52 +44,34 @@ function useNow(intervalMs = 60_000) {
   return now
 }
 
-const SortableItem = memo(
+// Each chat row only redraws when its own chat or active state changes: the
+// list can hold hundreds of chats, and redrawing them all on every
+// navigation, minute tick and streamed answer made clicks feel stuck.
+const ThreadItem = memo(
   ({
     thread,
     variant,
     currentProjectId,
+    isActive,
   }: {
     thread: Thread
     variant?: 'default' | 'project'
     currentProjectId?: string
+    isActive: boolean
   }) => {
-    const {
-      attributes,
-      listeners,
-      setNodeRef,
-      transform,
-      transition,
-      isDragging,
-    } = useSortable({ id: thread.id, disabled: true })
-
     const isSmallScreen = useSmallScreen()
     const setLeftPanel = useLeftPanel((state) => state.setLeftPanel)
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-      opacity: isDragging ? 0.5 : 1,
-    }
     const toggleFavorite = useThreads((state) => state.toggleFavorite)
     const deleteThread = useThreads((state) => state.deleteThread)
     const renameThread = useThreads((state) => state.renameThread)
     const updateThread = useThreads((state) => state.updateThread)
-    const getFolderById = useThreadManagement().getFolderById
-    const { folders } = useThreadManagement()
+    const getFolderById = useThreadManagementStore((s) => s.getFolderById)
+    const folders = useThreadManagementStore((s) => s.folders)
     const getMessages = useMessages((state) => state.getMessages)
     const { t } = useTranslation()
     const [openDropdown, setOpenDropdown] = useState(false)
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
     const navigate = useNavigate()
-    // Check if current route matches this thread's detail page
-    const matches = useMatches()
-    const isActive = matches.some(
-      (match) =>
-        match.routeId === '/threads/$threadId' &&
-        'threadId' in match.params &&
-        match.params.threadId === thread.id
-    )
     const projectsEnabled = PlatformFeatures[PlatformFeature.PROJECTS]
 
     const handleDelete = () => {
@@ -127,12 +95,10 @@ const SortableItem = memo(
         e.preventDefault()
         return
       }
-      if (!isDragging) {
-        // Only close panel and navigate if the thread is not already active
-        if (!isActive) {
-          if (isSmallScreen) setLeftPanel(false)
-          navigate({ to: route.threadsDetail, params: { threadId: thread.id } })
-        }
+      // Only close panel and navigate if the thread is not already active
+      if (!isActive) {
+        if (isSmallScreen) setLeftPanel(false)
+        navigate({ to: route.threadsDetail, params: { threadId: thread.id } })
       }
     }
 
@@ -199,16 +165,12 @@ const SortableItem = memo(
 
     return (
       <div
-        ref={setNodeRef}
-        style={style}
-        {...attributes}
-        {...listeners}
         className={cn(
           'rounded-xl hover:bg-left-panel-fg/[0.06] flex items-center justify-between gap-2 px-2.5 group/thread-list transition-colors',
           variant === 'project'
             ? 'mb-2 rounded-lg px-4 border border-main-view-fg/10 bg-main-view-fg/5'
             : 'mb-0.5',
-          isDragging ? 'cursor-move' : 'cursor-pointer',
+          'cursor-pointer',
           isActive && 'bg-left-panel-fg/[0.08]'
         )}
         onClick={(e) => handleClick(e)}
@@ -394,55 +356,43 @@ function ThreadList({
   groupByDate = false,
 }: ThreadListProps) {
   const now = useNow()
+  const activeMatch = useMatches().find(
+    (m) => m.routeId === '/threads/$threadId'
+  )
+  const activeId =
+    activeMatch && 'threadId' in activeMatch.params
+      ? activeMatch.params.threadId
+      : undefined
   const sortedThreads = useMemo(() => {
     return threads.sort((a, b) => {
       return (b.updated || 0) - (a.updated || 0)
     })
   }, [threads])
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        delay: 200,
-        tolerance: 5,
-      },
-    }),
-    useSensor(KeyboardSensor)
+  const groups = useMemo(
+    () => (groupByDate ? groupThreadsByDate(sortedThreads, now) : null),
+    [groupByDate, sortedThreads, now]
   )
 
-  return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter}>
-      <SortableContext
-        items={sortedThreads.map((t) => t.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        {groupByDate
-          ? groupThreadsByDate(sortedThreads, now).map((group) => (
-              <div key={group.key} className="mb-2">
-                <span className="block text-xs text-left-panel-fg/50 px-2.5 mb-1 mt-2 font-medium">
-                  {group.label}
-                </span>
-                {group.threads.map((thread) => (
-                  <SortableItem
-                    key={thread.id}
-                    thread={thread}
-                    variant={variant}
-                    currentProjectId={currentProjectId}
-                  />
-                ))}
-              </div>
-            ))
-          : sortedThreads.map((thread) => (
-              <SortableItem
-                key={thread.id}
-                thread={thread}
-                variant={variant}
-                currentProjectId={currentProjectId}
-              />
-            ))}
-      </SortableContext>
-    </DndContext>
+  const item = (thread: Thread) => (
+    <ThreadItem
+      key={thread.id}
+      thread={thread}
+      variant={variant}
+      currentProjectId={currentProjectId}
+      isActive={thread.id === activeId}
+    />
   )
+
+  return groups
+    ? groups.map((group) => (
+        <div key={group.key} className="mb-2">
+          <span className="block text-xs text-left-panel-fg/50 px-2.5 mb-1 mt-2 font-medium">
+            {group.label}
+          </span>
+          {group.threads.map(item)}
+        </div>
+      ))
+    : sortedThreads.map(item)
 }
 
 export default memo(ThreadList)

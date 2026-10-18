@@ -15,85 +15,87 @@ type ThreadManagementState = {
   getProjectById: (id: string) => Promise<ThreadFolder | undefined>
 }
 
-const useThreadManagementStore = create<ThreadManagementState>()((set, get) => ({
-  folders: [],
+export const useThreadManagementStore = create<ThreadManagementState>()(
+  (set, get) => ({
+    folders: [],
 
-  setFolders: (folders) => {
-    set({ folders })
-  },
+    setFolders: (folders) => {
+      set({ folders })
+    },
 
-  addFolder: async (name) => {
-    const projectsService = getServiceHub().projects()
-    const newFolder = await projectsService.addProject(name)
-    const updatedProjects = await projectsService.getProjects()
-    set({ folders: updatedProjects })
-    return newFolder
-  },
+    addFolder: async (name) => {
+      const projectsService = getServiceHub().projects()
+      const newFolder = await projectsService.addProject(name)
+      const updatedProjects = await projectsService.getProjects()
+      set({ folders: updatedProjects })
+      return newFolder
+    },
 
-  updateFolder: async (id, name) => {
-    const projectsService = getServiceHub().projects()
-    await projectsService.updateProject(id, name)
-    const updatedProjects = await projectsService.getProjects()
-    set({ folders: updatedProjects })
-  },
+    updateFolder: async (id, name) => {
+      const projectsService = getServiceHub().projects()
+      await projectsService.updateProject(id, name)
+      const updatedProjects = await projectsService.getProjects()
+      set({ folders: updatedProjects })
+    },
 
-  deleteFolder: async (id) => {
-    // Remove project metadata from all threads that belong to this project
-    const threadsState = useThreads.getState()
-    const threadsToUpdate = Object.values(threadsState.threads).filter(
-      (thread) => thread.metadata?.project?.id === id
-    )
+    deleteFolder: async (id) => {
+      // Remove project metadata from all threads that belong to this project
+      const threadsState = useThreads.getState()
+      const threadsToUpdate = Object.values(threadsState.threads).filter(
+        (thread) => thread.metadata?.project?.id === id
+      )
 
-    threadsToUpdate.forEach((thread) => {
-      threadsState.updateThread(thread.id, {
-        metadata: {
-          ...thread.metadata,
-          project: undefined,
-        },
+      threadsToUpdate.forEach((thread) => {
+        threadsState.updateThread(thread.id, {
+          metadata: {
+            ...thread.metadata,
+            project: undefined,
+          },
+        })
       })
-    })
 
-    const projectsService = getServiceHub().projects()
-    await projectsService.deleteProject(id)
-    const updatedProjects = await projectsService.getProjects()
-    set({ folders: updatedProjects })
-  },
+      const projectsService = getServiceHub().projects()
+      await projectsService.deleteProject(id)
+      const updatedProjects = await projectsService.getProjects()
+      set({ folders: updatedProjects })
+    },
 
-  deleteFolderWithThreads: async (id) => {
-    // Get all threads that belong to this project
-    const threadsState = useThreads.getState()
-    const projectThreads = Object.values(threadsState.threads).filter(
-      (thread) => thread.metadata?.project?.id === id
-    )
+    deleteFolderWithThreads: async (id) => {
+      // Get all threads that belong to this project
+      const threadsState = useThreads.getState()
+      const projectThreads = Object.values(threadsState.threads).filter(
+        (thread) => thread.metadata?.project?.id === id
+      )
 
-    // Delete threads from backend first
-    const serviceHub = getServiceHub()
-    for (const thread of projectThreads) {
-      await serviceHub.threads().deleteThread(thread.id)
-    }
+      // Delete threads from backend first
+      const serviceHub = getServiceHub()
+      for (const thread of projectThreads) {
+        await serviceHub.threads().deleteThread(thread.id)
+      }
 
-    // Delete threads from frontend state
-    for (const thread of projectThreads) {
-      threadsState.deleteThread(thread.id)
-    }
+      // Delete threads from frontend state
+      for (const thread of projectThreads) {
+        threadsState.deleteThread(thread.id)
+      }
 
-    // Delete the project from storage
-    const projectsService = serviceHub.projects()
-    await projectsService.deleteProject(id)
+      // Delete the project from storage
+      const projectsService = serviceHub.projects()
+      await projectsService.deleteProject(id)
 
-    const updatedProjects = await projectsService.getProjects()
-    set({ folders: updatedProjects })
-  },
+      const updatedProjects = await projectsService.getProjects()
+      set({ folders: updatedProjects })
+    },
 
-  getFolderById: (id) => {
-    return get().folders.find((folder) => folder.id === id)
-  },
+    getFolderById: (id) => {
+      return get().folders.find((folder) => folder.id === id)
+    },
 
-  getProjectById: async (id) => {
-    const projectsService = getServiceHub().projects()
-    return await projectsService.getProjectById(id)
-  },
-}))
+    getProjectById: async (id) => {
+      const projectsService = getServiceHub().projects()
+      return await projectsService.getProjectById(id)
+    },
+  })
+)
 
 export const useThreadManagement = () => {
   const store = useThreadManagementStore()

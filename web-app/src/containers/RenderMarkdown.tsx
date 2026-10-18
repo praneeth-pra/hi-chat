@@ -102,6 +102,44 @@ const normalizeLatex = (input: string): string => {
   return result
 }
 
+function codeIdFor(code: string, language: string) {
+  let hash = 0
+  for (let i = 0; i < code.length; i++) {
+    const char = code.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash = hash & hash // Convert to 32-bit integer
+  }
+  return `code-${Math.abs(hash)}-${language}`
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CodeProps = Record<string, any>
+
+/**
+ * react-markdown hands every block a new `node` on each streamed update, so
+ * a plain memo redrew (and re-highlighted) every code block in the answer on
+ * every update. A block only redraws when what it shows changes; the copy
+ * state only matters to the block that was copied.
+ */
+export function sameCode(prev: CodeProps, next: CodeProps): boolean {
+  const keys = [
+    'className',
+    'isUser',
+    'codeBlockStyle',
+    'showLineNumbers',
+    'isWrapping',
+    'isStreaming',
+    'onCopy',
+  ]
+  if (keys.some((k) => prev[k] !== next[k])) return false
+  const code = String(next.children)
+  if (String(prev.children) !== code) return false
+  if (prev.copiedId === next.copiedId) return true
+  const language = /language-([^\s]+)/.exec(next.className || '')?.[1] ?? ''
+  const id = codeIdFor(code.replace(/\n$/, ''), language)
+  return prev.copiedId !== id && next.copiedId !== id
+}
+
 // Memoized code component to prevent unnecessary re-renders
 const CodeComponent = memo(
   ({
@@ -131,15 +169,7 @@ const CodeComponent = memo(
     const highlight = !largeCode || highlightedCode === code
 
     // Generate a stable ID based on content hash instead of position
-    const codeId = useMemo(() => {
-      let hash = 0
-      for (let i = 0; i < code.length; i++) {
-        const char = code.charCodeAt(i)
-        hash = (hash << 5) - hash + char
-        hash = hash & hash // Convert to 32-bit integer
-      }
-      return `code-${Math.abs(hash)}-${language}`
-    }, [code, language])
+    const codeId = useMemo(() => codeIdFor(code, language), [code, language])
 
     const handleCopyClick = useCallback(
       (e: React.MouseEvent) => {
@@ -252,7 +282,8 @@ const CodeComponent = memo(
         )}
       </div>
     )
-  }
+  },
+  sameCode
 )
 
 CodeComponent.displayName = 'CodeComponent'
