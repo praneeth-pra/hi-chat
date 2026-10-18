@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { create } from 'zustand'
 import {
   cancelDictation as discardRecording,
   toggleDictation,
@@ -122,9 +123,19 @@ export function handleRemoteKey(key: string): boolean {
   return false
 }
 
+/**
+ * Inside the app: whether typing into Hi-chat is on (tap Option on a Mac,
+ * Right Alt on Windows), so the message box can show it.
+ */
+export const useAppTyping = create<{ inApp: boolean; typing: boolean }>(() => ({
+  inApp: false,
+  typing: false,
+}))
+
 type Bridge = { postMessage: (message: unknown) => void }
 type AppWindow = Window & {
   hiChatRemote?: (key: string) => boolean
+  hiChatTyping?: (on: boolean) => void
   /** The Mac app (WKWebView) */
   webkit?: { messageHandlers?: { hiChat?: Bridge } }
   /** The Windows app (WebView2) */
@@ -140,6 +151,8 @@ export function connectApp(win: AppWindow = window): () => void {
   const app = win.webkit?.messageHandlers?.hiChat ?? win.chrome?.webview
   if (!app) return () => {}
   win.hiChatRemote = handleRemoteKey
+  win.hiChatTyping = (on) => useAppTyping.setState({ typing: on })
+  useAppTyping.setState({ inApp: true })
   const post = (status: string) => app.postMessage({ dictation: status })
   post(useDictation.getState().status)
   const stop = useDictation.subscribe((state, prev) => {
@@ -148,6 +161,8 @@ export function connectApp(win: AppWindow = window): () => void {
   return () => {
     stop()
     delete win.hiChatRemote
+    delete win.hiChatTyping
+    useAppTyping.setState({ inApp: false, typing: false })
   }
 }
 

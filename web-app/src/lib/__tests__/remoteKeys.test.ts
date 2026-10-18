@@ -170,6 +170,19 @@ describe('app bridge', () => {
     expect(win.hiChatRemote).toBeUndefined()
   })
 
+  it('lets the app say when typing into Hi-chat is on', async () => {
+    const { connectApp, useAppTyping } = await import('../remoteKeys')
+    const win = {
+      chrome: { webview: { postMessage: () => {} } },
+    } as unknown as Window & { hiChatTyping?: (on: boolean) => void }
+    const stop = connectApp(win)
+    expect(useAppTyping.getState()).toEqual({ inApp: true, typing: false })
+    win.hiChatTyping!(true)
+    expect(useAppTyping.getState().typing).toBe(true)
+    stop()
+    expect(useAppTyping.getState()).toEqual({ inApp: false, typing: false })
+  })
+
   it('talks to the Windows app through WebView2', async () => {
     const { connectApp, handleRemoteKey } = await import('../remoteKeys')
     const sent: unknown[] = []

@@ -181,8 +181,22 @@ sealed class ChatWindow : Form
   Shortcuts? keys;
   bool quitting;
   /// On while Hi-chat has the keyboard from Right Alt or a click in a box,
-  /// until it goes back or another window takes it.
-  public volatile bool Typing;
+  /// until it goes back or another window takes it. The page shows it by
+  /// the message box. Set on the window's thread only.
+  public bool Typing
+  {
+    get => typing;
+    set
+    {
+      if (typing == value) return;
+      typing = value;
+      TellPageTyping();
+    }
+  }
+  volatile bool typing;
+
+  void TellPageTyping() => _ = webView.CoreWebView2?.ExecuteScriptAsync(
+    $"window.hiChatTyping && window.hiChatTyping({(typing ? "true" : "false")})");
   IntPtr typingReturnTo;
 
   public bool Dictating => keys?.Dictating == true;
@@ -397,6 +411,8 @@ sealed class ChatWindow : Form
       if (e.ProcessFailedKind != CoreWebView2ProcessFailedKind.BrowserProcessExited)
         BeginInvoke(() => webView.CoreWebView2?.Reload());
     };
+    // A reload starts the page afresh: tell it again whether typing is on
+    core.NavigationCompleted += (_, _) => { if (typing) TellPageTyping(); };
     core.Navigate(App.HomeUrl.AbsoluteUri);
   }
 
