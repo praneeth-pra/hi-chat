@@ -79,6 +79,7 @@ local block = 'local APPS,TAP_SECONDS,types,RETURN,PAD_ENTER = ...\n'
   .. 'local typingTarget = nil\n'
   .. 'local function chatWindow() error("Must use the pinned typing window") end\n'
   .. 'local function cancelDictationOnEscape() return false end -- not dictating\n'
+  .. 'local function breaksTap() return true end\n'
   .. source:sub(toggleStart, toggleEnd - 1)
   .. source:sub(start, finish - 1)
   .. '\nlocal Z,X=6,7\nlocal props=hs.eventtap.event.properties\n'
@@ -151,6 +152,7 @@ tapOption()
 assert(callback(event(types.keyDown, keymap.tab, { cmd = true }, "")) == false and not state())
 tapOption()
 title = "Unrelated Safari tab"
+now = now + 2 -- past the short trust after the last check
 assert(callback(event(types.keyDown, 0, {}, "a")) == true and not state())
 local count = #posted
 toggle()
@@ -168,7 +170,22 @@ assert(state())
 secureInput = true
 assert(callback(event(types.keyDown, 0, {}, "a")) == true and not state())
 secureInput = false
+-- Safari too busy to answer: typing stays on for a while, then stops
+toggle()
+assert(state())
 available = false
+now = now + 5
+assert(callback(event(types.keyDown, 0, {}, "a")) == true and state())
+now = now + 6
+assert(callback(event(types.keyDown, 0, {}, "a")) == true and not state())
+-- Turning on retries while Safari doesn't answer, and succeeds once it does
+local tries = 0
+hs.timer.doAfter = function(_, fn) tries = tries + 1 if tries == 2 then available = true end fn() end
+toggle()
+assert(state() and tries == 2)
 toggle()
 assert(not state())
+available = false
+toggle()
+assert(not state() and tries == 5)
 print('Background typing passed: Option toggle, target pinning, no activation, edits, keyups, escape and shortcuts.')
