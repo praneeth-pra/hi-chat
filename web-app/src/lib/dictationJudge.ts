@@ -1,4 +1,4 @@
-import { groqFetch, viaGroqProxy } from '@/lib/groqProxy'
+import { groqFetch, viaBackupRoute } from '@/lib/groqProxy'
 import { useModelProvider } from '@/hooks/useModelProvider'
 
 /**
@@ -50,7 +50,7 @@ export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
-export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless another one makes more sense in context or matches a key term. Soniox and Cartesia are given the speaker's own dictionary, so trust their spelling of names and technical words. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
+export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless a version only some of them heard matches a key term. Every engine was given the key terms. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
   grok: 'Grok',
@@ -142,8 +142,7 @@ function judgeTargets(direct = false) {
         (judge.provider === 'cerebras'
           ? 'https://api.cerebras.ai/v1'
           : 'https://api.groq.com/openai/v1')
-      const base =
-        judge.provider === 'cerebras' || direct ? own : viaGroqProxy(own)
+      const base = direct ? own : viaBackupRoute(own)!
       return [
         {
           base,
@@ -186,6 +185,9 @@ export function warmJudges(fetcher: typeof fetch = fetch, now = Date.now()) {
  * `accept` takes. Groq used to wait 0.6 s for Cerebras, but on 14 Oct
  * Cerebras's judging took 0.72 s on a typical clip and up to 1.13 s.
  */
+/** Which judge model wrote the last reply used, and how long it took. */
+export let lastJudge: { model: string; ms: number } | undefined
+
 async function askJudge(
   system: string,
   user: string,
@@ -194,7 +196,9 @@ async function askJudge(
   accept: (text: string) => boolean = (text) => !!text
 ): Promise<string | undefined> {
   const targets = judgeTargets()
+  lastJudge = undefined
   if (!targets.length) return undefined
+  const askedAt = Date.now()
   const controller = new AbortController()
   const timers: ReturnType<typeof setTimeout>[] = []
   try {
@@ -229,7 +233,10 @@ async function askJudge(
             choices?: { message?: { content?: string } }[]
           }
           const text = (data.choices?.[0]?.message?.content ?? '').trim()
-          if (accept(text)) return resolve(text)
+          if (accept(text)) {
+            lastJudge ??= { model: target.model, ms: Date.now() - askedAt }
+            return resolve(text)
+          }
           throw new Error('reply not usable')
         } catch (err) {
           if (!controller.signal.aborted)
@@ -250,21 +257,104 @@ async function askJudge(
   }
 }
 
+/** Lower-case letters and digits only, so "S3", "s 3" and "S-3" compare. */
+const squash = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+
+/** One letter added, dropped or changed at most. */
+function nearlySame(a: string, b: string): boolean {
+  if (a === b) return true
+  if (Math.abs(a.length - b.length) > 1) return false
+  let i = 0
+  while (i < a.length && a[i] === b[i]) i++
+  const [x, y] = [a.slice(i), b.slice(i)]
+  return x.slice(1) === y.slice(1) || x.slice(1) === y || x === y.slice(1)
+}
+
+/** Each word of a text, and each pair of neighbours run together ("s 3"). */
+function wordsAndPairs(text: string): string[] {
+  const w = words(text).map(squash).filter(Boolean)
+  return [...w, ...w.slice(1).map((x, i) => w[i] + x)]
+}
+
+/** Each key term run together, and each of its words. */
+function termForms(keyterms: string[]): string[] {
+  return keyterms.flatMap((t) => [squash(t), ...words(t).map(squash)])
+}
+
+/**
+ * True when the engines differ on a word that is, or is a letter off, one of
+ * the speaker's key terms ("Lambda" against "Learn"): a vote could pick the
+ * wrong one, so the judge decides.
+ */
+function differOnKeyTerm(heard: EngineText[], keyterms: string[]): boolean {
+  // Whole terms may be a letter off; single words of a longer term must
+  // match exactly, so "time" in "time complexity" doesn't catch "tame"
+  const whole = keyterms.map(squash).filter((t) => t.length > 1)
+  const parts = keyterms
+    .flatMap((t) => words(t).map(squash))
+    .filter((w) => w.length > 2 || /\d/.test(w))
+  if (!whole.length) return false
+  const forms = heard.map((r) => new Set(wordsAndPairs(r.text)))
+  const differing = new Set(
+    forms.flatMap((f) => [...f]).filter((w) => !forms.every((f) => f.has(w)))
+  )
+  return [...differing].some(
+    (w) =>
+      parts.includes(w) ||
+      whole.some((t) => w === t || (t.length >= 4 && nearlySame(w, t)))
+  )
+}
+
 /**
  * Nothing to judge when two engines (nearly) agree and a third can outvote a
  * word one of them misheard. With only two texts, any word they differ on
- * goes to the judge: there is no third to break the tie.
+ * goes to the judge: there is no third to break the tie. Nor when they
+ * differ on a key term.
  */
-export function enginesAgree(results: EngineText[]): boolean {
+export function enginesAgree(
+  results: EngineText[],
+  keyterms: string[] = []
+): boolean {
   const heard = results.filter((r) => r.text)
+  if (heard.length < 2) return true
+  if (differOnKeyTerm(heard, keyterms)) return false
   const enough = heard.length > 2 ? SKIP_AGREEMENT : 1
-  return (
-    heard.length < 2 ||
-    heard.some((a, i) =>
-      heard.slice(i + 1).some((b) => textAgreement(a.text, b.text) >= enough)
-    )
+  return heard.some((a, i) =>
+    heard.slice(i + 1).some((b) => textAgreement(a.text, b.text) >= enough)
   )
 }
+
+/**
+ * Every word of the judge's reply was heard by an engine or is in a key term
+ * (two words may run together or split apart: "cloud formation" and
+ * "CloudFormation"), so the judge chose between the engines and did not
+ * reword them.
+ */
+export function onlyHeardWords(
+  reply: string,
+  results: EngineText[],
+  keyterms: string[] = []
+): boolean {
+  const known = new Set([
+    ...results.flatMap((r) => wordsAndPairs(r.text)),
+    ...termForms(keyterms),
+  ])
+  const w = words(reply).map(squash).filter(Boolean)
+  return w.every(
+    (x, i) =>
+      known.has(x) ||
+      (i > 0 && known.has(w[i - 1] + x)) ||
+      (i + 1 < w.length && known.has(x + w[i + 1]))
+  )
+}
+
+/**
+ * The judge waits for whole replies (no streaming), so a hedge would send a
+ * second request on most clips: the backup route is only for a failed one.
+ */
+const JUDGE_HEDGE_MS = 2000
+const judgeFetch: typeof fetch = (input, init) =>
+  groqFetch(input, init, fetch, JUDGE_HEDGE_MS)
 
 const keytermLine = (keyterms: string[]) =>
   keyterms.length
@@ -279,10 +369,11 @@ export async function judgeDictation(
   results: EngineText[],
   vote: string,
   keyterms: string[] = [],
-  fetcher: typeof fetch = groqFetch,
+  fetcher: typeof fetch = judgeFetch,
   timeoutMs = JUDGE_TIMEOUT_MS
 ): Promise<string | undefined> {
-  if (enginesAgree(results)) return undefined
+  lastJudge = undefined
+  if (enginesAgree(results, keyterms)) return undefined
   const user = `${keytermLine(keyterms)}${results
     .filter((r) => r.text)
     .map((r) => `${ENGINE_NAMES[r.engine] ?? r.engine}: "${r.text}"`)
@@ -294,7 +385,9 @@ export async function judgeDictation(
     fetcher,
     timeoutMs,
     (reply) =>
-      !!clean(reply) && textAgreement(clean(reply), vote) >= MIN_AGREEMENT
+      !!clean(reply) &&
+      textAgreement(clean(reply), vote) >= MIN_AGREEMENT &&
+      onlyHeardWords(clean(reply), results, keyterms)
   )
   return reply === undefined ? undefined : clean(reply)
 }

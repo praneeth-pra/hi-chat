@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  enginesAgree,
   getDictationJudges,
   judgeDictation,
+  lastJudge,
+  onlyHeardWords,
   setDictationJudges,
   warmJudges,
 } from '../dictationJudge'
@@ -133,6 +136,81 @@ describe('judgeDictation', () => {
       await judgeDictation(results, 'v', [], fetcher as unknown as typeof fetch)
     ).toBeUndefined()
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks the judge when the engines differ on a key term', () => {
+    const lambda = [
+      { engine: 'cartesia', text: 'What is AWS Lambda?' },
+      { engine: 'soniox', text: 'What is AWS Learn?' },
+      { engine: 'elevenlabs', text: 'What is AWS Lambda?' },
+    ]
+    expect(enginesAgree(lambda)).toBe(true)
+    expect(enginesAgree(lambda, ['AWS Lambda'])).toBe(false)
+    // A letter off a key term counts too, and "S 3" is "S3"
+    expect(
+      enginesAgree(
+        [
+          { engine: 'cartesia', text: 'Use Terraform for this' },
+          { engine: 'soniox', text: 'Use Teraform for this' },
+          { engine: 'elevenlabs', text: 'Use Terraform for this' },
+        ],
+        ['Terraform']
+      )
+    ).toBe(false)
+    // Key terms all engines heard alike change nothing
+    expect(
+      enginesAgree(
+        [
+          { engine: 'cartesia', text: 'Uh, what is Lambda' },
+          { engine: 'soniox', text: 'What is Lambda?' },
+          { engine: 'elevenlabs', text: 'what is lambda' },
+        ],
+        ['Lambda', 'time complexity']
+      )
+    ).toBe(true)
+  })
+
+  it('takes a judge reply only when every word was heard or is a key term', () => {
+    const heard = [
+      {
+        engine: 'cartesia',
+        text: 'difference between cloud formation and Terraform',
+      },
+      {
+        engine: 'soniox',
+        text: 'difference between CloudFormation and Teraform',
+      },
+    ]
+    expect(
+      onlyHeardWords('Difference between CloudFormation and Terraform.', heard)
+    ).toBe(true)
+    expect(
+      onlyHeardWords('Difference between Cloud Formation and Terraform.', heard)
+    ).toBe(true)
+    // A key term may decide a word; anything else new is a rewording
+    expect(
+      onlyHeardWords('Difference between CloudFormation and Pulumi', heard, [
+        'Pulumi',
+      ])
+    ).toBe(true)
+    expect(
+      onlyHeardWords('The difference between CloudFormation and Pulumi', heard)
+    ).toBe(false)
+    expect(onlyHeardWords('Compare CloudFormation and Terraform', heard)).toBe(
+      false
+    )
+  })
+
+  it('records which judge model answered', async () => {
+    providers.cerebras = { api_key: 'csk' }
+    const fetcher = reply('Run kubectl get pods.')
+    await judgeDictation(
+      results,
+      'Run kube cuddle get pods',
+      ['kubectl'],
+      fetcher as unknown as typeof fetch
+    )
+    expect(lastJudge?.model).toBe('gpt-oss-120b')
   })
 
   it('skips the judge when two of three engines agree', async () => {

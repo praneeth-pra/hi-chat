@@ -27,9 +27,11 @@ import { deliverDictation } from './dictationDelivery'
 import {
   SKIP_AGREEMENT,
   judgeDictation,
+  lastJudge,
   textAgreement,
   warmJudges,
 } from '@/lib/dictationJudge'
+import { withCodingTerms } from '@/lib/keyTerms'
 
 /**
  * Dictation: speech heard by your selected microphone, streamed to live
@@ -145,6 +147,13 @@ const AUTO_SHORT_GRACE_MS = 500
 export const AUTO_DEADLINE_MS = 1200
 /** Less judge time than this left before the deadline: send the vote. */
 const MIN_JUDGE_MS = 150
+/**
+ * When the engines disagree the judge gets at least this long, even past
+ * the deadline (Groq answers in 0.15-0.3 s), but the text still goes out
+ * by JUDGE_DEADLINE_MS after you stop. When they agree there is no wait.
+ */
+const JUDGE_FLOOR_MS = 800
+const JUDGE_DEADLINE_MS = 1600
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'transcribing'
 
@@ -800,13 +809,17 @@ export async function stopDictation() {
       }))
       const best = pickBest(results)
       const judgeStart = Date.now()
-      const judgeMs = AUTO_DEADLINE_MS - (judgeStart - stoppedAt)
+      const elapsed = judgeStart - stoppedAt
+      const judgeMs = Math.min(
+        Math.max(AUTO_DEADLINE_MS - elapsed, JUDGE_FLOOR_MS),
+        JUDGE_DEADLINE_MS - elapsed
+      )
       const judged =
         best && judgeMs >= MIN_JUDGE_MS
           ? await judgeDictation(
               results,
               best.text,
-              keyTerms(),
+              withCodingTerms(keyTerms()),
               undefined,
               judgeMs
             )
@@ -815,7 +828,9 @@ export async function stopDictation() {
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
       void reportAuto(jobs, took, {
-        sent: judged ? 'judge' : (best?.engine ?? 'none'),
+        sent: judged
+          ? `judge(${lastJudge?.model ?? '?'} ${lastJudge?.ms ?? '?'}ms)`
+          : (best?.engine ?? 'none'),
         totalMs: Date.now() - stoppedAt,
         judgeMs: best ? Date.now() - judgeStart : undefined,
         judged,

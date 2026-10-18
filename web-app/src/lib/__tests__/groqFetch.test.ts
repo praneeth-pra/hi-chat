@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GROQ_PROXY_PATH, groqFetch, groqRoute } from '../groqProxy'
+import {
+  CEREBRAS_PROXY_PATH,
+  GROQ_PROXY_PATH,
+  groqFetch,
+  groqRoute,
+} from '../groqProxy'
 
 const proxied = `${window.location.origin}${GROQ_PROXY_PATH}/openai/v1/chat/completions`
 const direct = 'https://api.groq.com/openai/v1/chat/completions'
@@ -56,6 +61,20 @@ describe('groqFetch', () => {
     const res = await groqFetch(proxied, {}, base)
     expect(res.ok).toBe(true)
     expect(await res.text()).toBe('answer')
+    expect(groqRoute(res)).toBe('server')
+  })
+  it('sends Cerebras direct first and through the server when that fails', async () => {
+    const cerebras = `${window.location.origin}${CEREBRAS_PROXY_PATH}/v1/chat/completions`
+    const base = vi.fn(async (url) =>
+      String(url) === 'https://api.cerebras.ai/v1/chat/completions'
+        ? new Response('upstream failed', { status: 503 })
+        : new Response('answer')
+    )
+    const res = await groqFetch(cerebras, {}, base)
+    expect(base.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.cerebras.ai/v1/chat/completions',
+      cerebras,
+    ])
     expect(groqRoute(res)).toBe('server')
   })
   it('preserves a provider HTTP error when neither route succeeds', async () => {

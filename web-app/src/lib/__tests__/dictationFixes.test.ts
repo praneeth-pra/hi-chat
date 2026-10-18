@@ -17,6 +17,16 @@ describe('applyFixes', () => {
     )
   })
 
+  it('writes CI/CD and S3 however the engines spell them', () => {
+    expect(applyFixes('Have you used CSCD or CI CD or CACD?')).toBe(
+      'Have you used CI/CD or CI/CD or CI/CD?'
+    )
+    expect(applyFixes('a CICD pipeline with an S three bucket')).toBe(
+      'a CI/CD pipeline with an S3 bucket'
+    )
+    expect(applyFixes('CI/CD stays')).toBe('CI/CD stays')
+  })
+
   it('leaves other words alone', () => {
     expect(applyFixes('the S3 bucket and a tire shop')).toBe(
       'the S3 bucket and a tire shop'

@@ -47,7 +47,7 @@ import { injectFilesIntoPrompt } from './fileMetadata'
 import { Attachment } from '@/types/attachment'
 import { ModelCapabilities } from '@/types/models'
 import { trackFetch, type FetchAttempt } from '@/lib/replyTiming'
-import { viaGroqProxy, withGroqHedge } from '@/lib/groqProxy'
+import { viaBackupRoute, withGroqHedge } from '@/lib/groqProxy'
 import { chatThinkingParams } from '@/lib/chatThinking'
 
 export type ChatCompletionResponse =
@@ -238,9 +238,9 @@ export const sendCompletion = async (
     apiKey:
       provider.api_key ?? (await getServiceHub().core().getAppToken()) ?? '',
     // TODO: Retrieve from extension settings
-    baseURL: viaGroqProxy(provider.base_url),
+    baseURL: viaBackupRoute(provider.base_url),
     // Use Tauri's fetch to avoid CORS issues only for openai-compatible provider
-    // Groq goes direct first, through this site's server if that is slow
+    // Groq and Cerebras go direct first, through this site's server if that is slow
     fetch: tracked(
       withGroqHedge(IS_DEV ? fetch : getServiceHub().providers().fetch())
     ),
@@ -639,7 +639,9 @@ export const postMessageProcessing = async (
         (isRagTool
           ? true
           : allowAllMCPPermissions ||
-            approvedTools[message.thread_id]?.includes(toolCall.function.name) ||
+            approvedTools[message.thread_id]?.includes(
+              toolCall.function.name
+            ) ||
             (showModal
               ? await showModal(
                   toolCall.function.name,
