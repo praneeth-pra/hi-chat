@@ -139,6 +139,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     webView.uiDelegate = self
     webView.navigationDelegate = self
     webView.allowsBackForwardNavigationGestures = false
+    // Until the page paints, show the window's own colour instead of
+    // WebKit's white, so opening Hi-chat never flashes a white screen.
+    webView.setValue(false, forKey: "drawsBackground")
     if #available(macOS 13.3, *) { webView.isInspectable = true }
 
     panel = ChatPanel(
