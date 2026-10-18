@@ -256,25 +256,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     showLoginState()
   }
 
-  /// Hi-chat's slanted H with its orange crossbar, drawn at menu bar size.
-  /// The strokes take the menu bar's text colour, so they show on a light
-  /// or dark menu bar alike.
+  /// Hi-chat's slanted H, drawn at menu bar size in one colour like the
+  /// other menu bar icons (a template image: macOS colours it to suit).
   static func menuBarLogo() -> NSImage {
     let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+      NSColor.black.setStroke()
       let bar = NSBezierPath()
       bar.move(to: NSPoint(x: 4.6, y: 12.2)); bar.line(to: NSPoint(x: 12.9, y: 7.5))
       bar.lineWidth = 2.5
-      NSColor(red: 224 / 255, green: 131 / 255, blue: 80 / 255, alpha: 1).setStroke()
       bar.stroke()
       let sides = NSBezierPath()
       sides.move(to: NSPoint(x: 5.3, y: 2.4)); sides.line(to: NSPoint(x: 2.4, y: 15.4))
       sides.move(to: NSPoint(x: 15.8, y: 2.4)); sides.line(to: NSPoint(x: 12.9, y: 15.4))
       sides.lineWidth = 3
       sides.lineCapStyle = .round
-      NSColor.labelColor.setStroke()
       sides.stroke()
       return true
     }
+    image.isTemplate = true
     image.accessibilityDescription = "Hi-chat"
     return image
   }
@@ -527,8 +526,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     guard panel.isVisible, !panel.isMiniaturized, !cursorOn else { return }
     cursorOn = true
     cursorHome = pointerNow()
-    // The mouse still sends its movement, but the pointer doesn't follow it
-    CGAssociateMouseAndMouseCursorPosition(0)
     messageBoxPoint { [weak self] point in
       guard let self, self.cursorOn else { return }
       self.cursorAt = self.webView.convert(point, from: nil)
@@ -544,8 +541,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     cursorOn = false
     cursorDragging = false
     chatCursor.isHidden = true
-    if pointerNow() != cursorHome { CGWarpMouseCursorPosition(cursorHome) }
-    CGAssociateMouseAndMouseCursorPosition(1)
+    if pointerNow() != cursorHome { warpPointer(cursorHome) }
   }
 
   /// The mouse moved by (dx, dy) points: so does Hi-chat's cursor, kept
@@ -556,11 +552,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     cursorAt.x = min(max(cursorAt.x + dx, 0), size.width - 1)
     cursorAt.y = min(max(cursorAt.y + dy, 0), size.height - 1)
     placeCursor()
-    // In case macOS let the pointer follow the mouse after all
-    if pointerNow() != cursorHome {
-      CGWarpMouseCursorPosition(cursorHome)
-      CGAssociateMouseAndMouseCursorPosition(0)
-    }
     askPage()
   }
 
@@ -974,10 +965,16 @@ final class Keys {
       }
       return pass
     case .mouseMoved, .leftMouseDragged:
-      // While Option typing is on the mouse moves Hi-chat's cursor only
-      guard MainActor.assumeIsolated({ app.cursorOn }) else { return pass }
+      // While Option typing is on the mouse moves Hi-chat's cursor only. The
+      // real pointer is put straight back, here in the tap, before the next
+      // movement: macOS lets only the app in front hold the pointer still.
+      guard let home = MainActor.assumeIsolated({ app.cursorOn ? app.cursorHome : nil })
+      else { return pass }
       let dx = event.getDoubleValueField(.mouseEventDeltaX)
       let dy = event.getDoubleValueField(.mouseEventDeltaY)
+      CGWarpMouseCursorPosition(home)
+      // Without this the mouse goes quiet for a moment after a warp
+      CGAssociateMouseAndMouseCursorPosition(1)
       later { $0.cursorMove(dx: dx, dy: dy) }
       return nil
     case .scrollWheel:
