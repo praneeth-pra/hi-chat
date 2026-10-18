@@ -289,8 +289,10 @@ function ThreadDetail() {
                 messages.map((item, index) => {
                   // Only pass isLastMessage to the last message in the array
                   const isLastMessage = index === messages.length - 1
-                  // Off-screen messages skip layout and paint until
-                  // scrolled to, so long chats open and stream lightly
+                  // Older off-screen messages skip layout and paint until
+                  // scrolled to, so long chats open and stream lightly. The
+                  // last few stay laid out, so a new question's jump to the
+                  // top lands where it was aimed.
                   return (
                     <div
                       key={item.id}
@@ -298,7 +300,7 @@ function ThreadDetail() {
                       data-message-author-role={item.role}
                       className={cn(
                         'mb-4',
-                        !isLastMessage &&
+                        index < messages.length - 4 &&
                           '[content-visibility:auto] [contain-intrinsic-size:auto_480px]'
                       )}
                     >

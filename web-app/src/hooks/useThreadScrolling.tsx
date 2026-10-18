@@ -9,6 +9,7 @@ const MAX_DOM_RETRY_ATTEMPTS = 5 // Maximum attempts to find DOM elements before
 const DOM_RETRY_DELAY = 100 // Delay in ms between DOM element retry attempts
 const USER_MESSAGE_TOP_GAP = 16 // Space kept above the question once it is scrolled to the top
 const MAX_PADDING_WAIT_FRAMES = 30 // Frames to wait for the padding to reach the DOM before scrolling anyway
+const HOLD_QUESTION_FRAMES = 60 // Frames (about a second) the question is kept at the top while layout settles
 
 export const useThreadScrolling = (
   threadId: string,
@@ -25,7 +26,9 @@ export const useThreadScrolling = (
   const lastAssistantMessageRef = useRef<HTMLElement | null>(null)
   const userForcedUnfollowRef = useRef(false)
   const stickyStreamingActiveRef = useRef(false)
-  const stickyReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stickyReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
   const wasAtBottomRef = useRef(true)
   const threadScrollBehavior = useInterfaceSettings(
     (state) => state.threadScrollBehavior
@@ -34,7 +37,9 @@ export const useThreadScrolling = (
   const isStickyScroll = threadScrollBehavior === THREAD_SCROLL_BEHAVIOR.STICKY
   const [isStickyScrollFollowing, setIsStickyScrollFollowing] = useState(true)
 
-  const messageCount = useMessages((state) => state.messages[threadId]?.length ?? 0)
+  const messageCount = useMessages(
+    (state) => state.messages[threadId]?.length ?? 0
+  )
   const lastMessageRole = useMessages((state) => {
     const msgs = state.messages[threadId]
     return msgs && msgs.length > 0 ? msgs[msgs.length - 1].role : null
@@ -48,15 +53,20 @@ export const useThreadScrolling = (
     const scrollContainer = scrollContainerRef.current
     if (!scrollContainer) return null
 
-    const userMessages = scrollContainer.querySelectorAll('[data-message-author-role="user"]')
-    const assistantMessages = scrollContainer.querySelectorAll('[data-message-author-role="assistant"]')
+    const userMessages = scrollContainer.querySelectorAll(
+      '[data-message-author-role="user"]'
+    )
+    const assistantMessages = scrollContainer.querySelectorAll(
+      '[data-message-author-role="assistant"]'
+    )
     return {
       scrollContainer,
       lastUserMessage: userMessages[userMessages.length - 1] as HTMLElement,
-      lastAssistantMessage: assistantMessages[assistantMessages.length - 1] as HTMLElement,
+      lastAssistantMessage: assistantMessages[
+        assistantMessages.length - 1
+      ] as HTMLElement,
     }
   }, [scrollContainerRef])
-
 
   const showScrollToBottomBtn =
     !isAtBottom && hasScrollbar && (!isStickyScroll || !isStickyScrollFollowing)
@@ -85,7 +95,6 @@ export const useThreadScrolling = (
     },
     [clearStickyReleaseTimeout, isStickyScroll, scrollContainerRef]
   )
-
 
   const handleScroll = useCallback(
     (e: Event) => {
@@ -149,8 +158,7 @@ export const useThreadScrolling = (
     const scrollContainer = scrollContainerRef.current
     if (scrollContainer) {
       scrollContainer.addEventListener('scroll', handleScroll)
-      return () =>
-        scrollContainer.removeEventListener('scroll', handleScroll)
+      return () => scrollContainer.removeEventListener('scroll', handleScroll)
     }
   }, [handleScroll, scrollContainerRef])
 
@@ -194,7 +202,10 @@ export const useThreadScrolling = (
 
         const viewableHeight = elements.scrollContainer.clientHeight
         const userMessageHeight = elements.lastUserMessage.offsetHeight
-        const calculatedPadding = Math.max(0, viewableHeight - VIEWPORT_PADDING - userMessageHeight)
+        const calculatedPadding = Math.max(
+          0,
+          viewableHeight - VIEWPORT_PADDING - userMessageHeight
+        )
 
         setPaddingHeight(calculatedPadding)
         originalPaddingRef.current = calculatedPadding
@@ -203,17 +214,33 @@ export const useThreadScrolling = (
         // React state, so it may not be in the DOM by the next frame; until
         // it is there is no room to scroll that far, so wait for it. Aiming
         // at the question itself (not scrollHeight) keeps a late padding
-        // commit from leaving the question at the bottom.
+        // commit from leaving the question at the bottom. The jump is
+        // instant: a smooth scroll can be cut short when the answer starts
+        // streaming in (WebKit stops it on layout changes).
         const { scrollContainer, lastUserMessage } = elements
         let frameCount = 0
-        const scrollQuestionToTop = () => {
-          if (!lastUserMessage.isConnected) return
+        let userScrolled = false
+        const stopFollowing = () => {
+          userScrolled = true
+        }
+        const userInput = ['wheel', 'touchstart', 'pointerdown', 'keydown']
+        userInput.forEach((name) =>
+          scrollContainer.addEventListener(name, stopFollowing, {
+            passive: true,
+          })
+        )
+        const questionTarget = () => {
           const questionTop =
             scrollContainer.scrollTop +
             lastUserMessage.getBoundingClientRect().top -
             scrollContainer.getBoundingClientRect().top
           const maxTop =
             scrollContainer.scrollHeight - scrollContainer.clientHeight
+          return { questionTop, maxTop }
+        }
+        const scrollQuestionToTop = () => {
+          if (!lastUserMessage.isConnected || userScrolled) return finish()
+          const { questionTop, maxTop } = questionTarget()
           // With the padding in place the question can always get within
           // VIEWPORT_PADDING of the top
           if (
@@ -229,8 +256,31 @@ export const useThreadScrolling = (
               0,
               Math.min(questionTop - USER_MESSAGE_TOP_GAP, maxTop)
             ),
-            behavior: 'smooth',
+            behavior: 'auto',
           })
+          frameCount = 0
+          requestAnimationFrame(holdQuestionAtTop)
+        }
+        // Layout can still shift for a moment (the answer appearing, older
+        // messages sizing themselves); keep the question there until the
+        // person scrolls themselves.
+        const holdQuestionAtTop = () => {
+          if (!lastUserMessage.isConnected || userScrolled) return finish()
+          if (frameCount++ >= HOLD_QUESTION_FRAMES) return finish()
+          const { questionTop, maxTop } = questionTarget()
+          const target = Math.max(
+            0,
+            Math.min(questionTop - USER_MESSAGE_TOP_GAP, maxTop)
+          )
+          if (Math.abs(scrollContainer.scrollTop - target) > 4) {
+            scrollContainer.scrollTo({ top: target, behavior: 'auto' })
+          }
+          requestAnimationFrame(holdQuestionAtTop)
+        }
+        const finish = () => {
+          userInput.forEach((name) =>
+            scrollContainer.removeEventListener(name, stopFollowing)
+          )
         }
         requestAnimationFrame(scrollQuestionToTop)
       }
@@ -250,11 +300,18 @@ export const useThreadScrolling = (
     }
 
     prevCountRef.current = messageCount
-  }, [isFlowScroll, lastMessageRole, messageCount, getDOMElements, setPaddingHeight])
+  }, [
+    isFlowScroll,
+    lastMessageRole,
+    messageCount,
+    getDOMElements,
+    setPaddingHeight,
+  ])
 
   useEffect(() => {
     const previouslyStreaming = wasStreamingRef.current
-    const currentlyStreaming = !!streamingContent && streamingContent.thread_id === threadId
+    const currentlyStreaming =
+      !!streamingContent && streamingContent.thread_id === threadId
 
     if (!isFlowScroll) {
       wasStreamingRef.current = currentlyStreaming
@@ -279,15 +336,20 @@ export const useThreadScrolling = (
         const currentAssistantMessage = elements?.lastAssistantMessage
 
         // Check if a new assistant message has appeared (different from the one before streaming)
-        const hasNewAssistantMessage = currentAssistantMessage &&
+        const hasNewAssistantMessage =
+          currentAssistantMessage &&
           currentAssistantMessage !== lastAssistantMessageRef.current
 
         if (hasNewAssistantMessage && elements?.lastUserMessage) {
           const userRect = elements.lastUserMessage.getBoundingClientRect()
           const assistantRect = currentAssistantMessage.getBoundingClientRect()
           const actualSpacing = assistantRect.top - userRect.bottom
-          const totalAssistantHeight = currentAssistantMessage.offsetHeight + actualSpacing
-          const newPadding = Math.max(0, originalPaddingRef.current - totalAssistantHeight)
+          const totalAssistantHeight =
+            currentAssistantMessage.offsetHeight + actualSpacing
+          const newPadding = Math.max(
+            0,
+            originalPaddingRef.current - totalAssistantHeight
+          )
 
           setPaddingHeight(newPadding)
           originalPaddingRef.current = newPadding
@@ -306,7 +368,13 @@ export const useThreadScrolling = (
     }
 
     wasStreamingRef.current = currentlyStreaming
-  }, [getDOMElements, isFlowScroll, streamingContent, threadId, setPaddingHeight])
+  }, [
+    getDOMElements,
+    isFlowScroll,
+    streamingContent,
+    threadId,
+    setPaddingHeight,
+  ])
 
   useEffect(() => {
     if (isFlowScroll) return
@@ -374,7 +442,13 @@ export const useThreadScrolling = (
     if (!isStickyScrollFollowing) return
     if (streamingContent?.thread_id !== threadId) return
     scrollToBottom(false)
-  }, [isStickyScroll, isStickyScrollFollowing, scrollToBottom, streamingContent, threadId])
+  }, [
+    isStickyScroll,
+    isStickyScrollFollowing,
+    scrollToBottom,
+    streamingContent,
+    threadId,
+  ])
 
   useEffect(() => {
     userIntendedPositionRef.current = null
