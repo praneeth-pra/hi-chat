@@ -13,7 +13,8 @@ local sent, callback = {}, nil
 hs = {
   keycodes = { map = { ctrl = 59, escape = 53 } },
   timer = { secondsSinceEpoch = function() return 1 end, doAfter = function(_, fn) fn() end },
-  eventtap = { event = { types = { flagsChanged = 1, keyDown = 2, leftMouseDown = 3, rightMouseDown = 4, scrollWheel = 5 } } },
+  eventtap = { event = { types = { flagsChanged = 1, keyDown = 2, leftMouseDown = 3, rightMouseDown = 4, scrollWheel = 5 },
+    properties = { scrollWheelEventScrollPhase = 'phase', scrollWheelEventMomentumPhase = 'momentum' } } },
 }
 hs.eventtap.new = function(_, fn) callback = fn; return { start = function() end } end
 local function toggle(key, mods) sent[#sent + 1] = (mods and mods[1] and (mods[1] .. '+') or '') .. key end
@@ -51,4 +52,13 @@ assert(callback(event(2, 53, false)) == false)
 callback(event(1, 59, true)); callback(event(1, 59, false))
 assert(callback(event(2, 53, false, { cmd = true })) == false)
 assert(callback(event(2, 53, false)) == true and sent[#sent] == 'shift+f13')
+-- A scroll's glide after the fingers lift does not cancel a tap; scrolling by hand does
+local function scroll(phase, momentum)
+  return { getType = function() return 5 end, getProperty = function(_, p) return p == 'phase' and phase or momentum end }
+end
+local count = #sent
+callback(event(1, 59, true)); callback(scroll(0, 2)); callback(scroll(4, 0)); callback(event(1, 59, false))
+assert(#sent == count + 1 and sent[#sent] == 'f14')
+callback(event(1, 59, true)); callback(scroll(2, 0)); callback(event(1, 59, false))
+assert(#sent == count + 1)
 print('Dictation shortcuts passed; obsolete Speaker bindings are absent.')

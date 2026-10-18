@@ -163,13 +163,20 @@ bind({ "shift" }, "pageup", 1, FAST_SPEED, FAST_TAP)
 -- Keys for Jan, sent straight to its window without focusing it:
 -- Shift + F16 / F17 (code block above / below) and so on, keys a
 -- Mac laptop doesn't have.
+-- Finding the window asks Safari, which may not answer in time while it is
+-- busy; the key then still goes to the app that showed Hi-chat last.
+local lastChatApp
 local function toggle(key, mods)
   local win = typingTarget and typingTarget.win or chatWindow()
-  if not win then
+  local app = win and win:application()
+  if app then lastChatApp = app
+  elseif lastChatApp and lastChatApp:isRunning() then app = lastChatApp
+  else app = hs.application.get("Jan") or hs.application.get("Safari") end
+  if not app then
     print("[jan remote] Jan window not found")
     return
   end
-  hs.eventtap.keyStroke(mods or {}, key, 20000, win:application())
+  hs.eventtap.keyStroke(mods or {}, key, 20000, app)
 end
 
 -- fn + Up / Down: the code block above / below
@@ -207,11 +214,22 @@ sendTap:start()
 -- isn't swallowed, so Control + a key or a click still works everywhere.
 local LEFT_CTRL = hs.keycodes.map["ctrl"]
 local ESCAPE = hs.keycodes.map["escape"]
-local TAP_SECONDS = 0.35
+local TAP_SECONDS = 0.5 -- a relaxed tap can take 0.4 s
 local DICTATION_MAX_SECONDS = 600 -- Jan stops a recording after 9.5 minutes
 local ctrlDownAt = nil
 local dictatingSince = nil -- when a Control tap started dictation
 local types = hs.eventtap.event.types
+
+-- Whether an event during a modifier tap makes it a chord instead. A scroll's
+-- glide keeps arriving for a second or so after the fingers lift; that, and
+-- the scroll's end, must not swallow a tap made meanwhile.
+local function breaksTap(e)
+  if e:getType() ~= types.scrollWheel then return true end
+  local p = hs.eventtap.event.properties
+  local phase = e:getProperty(p.scrollWheelEventScrollPhase)
+  return e:getProperty(p.scrollWheelEventMomentumPhase) == 0
+    and (phase == 0 or phase == 1 or phase == 2)
+end
 
 local function dictating()
   return dictatingSince ~= nil
@@ -231,7 +249,7 @@ end
 
 dictateTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.leftMouseDown, types.rightMouseDown, types.scrollWheel }, function(e)
   if e:getType() ~= types.flagsChanged then
-    ctrlDownAt = nil -- used with another key or the mouse: not a tap
+    if breaksTap(e) then ctrlDownAt = nil end -- used with another key or the mouse: not a tap
     return e:getType() == types.keyDown and cancelDictationOnEscape(e)
   end
   local flags = e:getFlags()
@@ -297,8 +315,9 @@ end
 
 -- Checking the window asks Safari through Accessibility, which stalls every
 -- key on the Mac while Safari is busy, so a key re-checks at most this often
--- (the watchdog below also checks every 2 s)
-local VALID_FOR = 1.5
+-- (the watchdog below also checks every 2 s). Safari not answering in time
+-- is not a reason to stop typing, unless it stays silent for UNSURE_FOR.
+local VALID_FOR, UNSURE_FOR = 1.5, 10
 local validAt, validTarget = -math.huge, nil
 local function typingValid(target, recent)
   if hs.eventtap.isSecureInputEnabled and hs.eventtap.isSecureInputEnabled() then return false end
@@ -306,13 +325,17 @@ local function typingValid(target, recent)
   if recent and validTarget == target and now - validAt < VALID_FOR then return true end
   local ok, valid = pcall(function()
     local win = target.app:focusedWindow() or target.app:mainWindow()
-    local title = win and (win:title() or ""):lower() or ""
-    return win and win:id() == target.id and win:isVisible()
-      and not title:find("sign in", 1, true)
-      and (target.app:name() == "Jan" or title:find("hi-chat", 1, true))
+    local title = win and win:title()
+    local jan = target.app:name() == "Jan"
+    if not win or ((title or "") == "" and not jan) then return nil end -- no answer in time
+    title = title:lower()
+    return (win:id() == target.id and not title:find("sign in", 1, true)
+      and (jan or title:find("hi-chat", 1, true))) and true or false
   end)
-  if ok and valid then validAt, validTarget = now, target else validTarget = nil end
-  return ok and valid
+  if not ok then valid = nil end
+  if valid then validAt, validTarget = now, target return true end
+  if valid == false then validTarget = nil return false end
+  return validTarget == target and now - validAt < UNSURE_FOR
 end
 
 local function typingSignal(target, key, mods)
@@ -331,10 +354,12 @@ local function stopTyping(message)
   if message and message ~= "Jan typing OFF" then print("[jan typing]", message) end
 end
 
-local function toggleTyping()
-  if typingTarget then stopTyping("Jan typing OFF") return end
+local function startTyping(tries)
+  if typingTarget then return end
   local target = typingWindow()
   if not target then
+    -- Safari may only be too busy to answer in time: try again shortly
+    if tries < 3 then hs.timer.doAfter(0.2, function() startTyping(tries + 1) end) return end
     print("[jan typing] Select Hi-chat in Safari once, return to your main app, then tap Option")
     return
   end
@@ -344,10 +369,15 @@ local function toggleTyping()
   end)
   if not ok then print("[jan typing] Could not enable Jan typing") return end
   typingTarget = target
+  validAt, validTarget = hs.timer.secondsSinceEpoch(), target -- just checked
   if typingPointerOn then
     local ok, err = pcall(typingPointerOn, target)
     if not ok then print("[jan typing] could not move the pointer:", err) end
   end
+end
+
+local function toggleTyping()
+  if typingTarget then stopTyping("Jan typing OFF") else startTyping(0) end
 end
 
 -- Global so macOS cannot garbage-collect the tap. Copied events are tagged
@@ -366,7 +396,7 @@ typingTap = hs.eventtap.new({ types.flagsChanged, types.keyDown, types.keyUp,
     else optionDownAt = nil end
     return false
   end
-  optionDownAt = nil -- a chord, click or scroll is not an Option tap
+  if breaksTap(e) then optionDownAt = nil end -- a chord, click or scroll is not an Option tap
   if kind ~= types.keyDown and kind ~= types.keyUp then return false end
   local held = heldTypingKeys[key]
   if kind == types.keyUp then
