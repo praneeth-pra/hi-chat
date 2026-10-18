@@ -21,9 +21,11 @@
 // active app, so a click or typing in it never greys out the app you're in.
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
+// Hi-chat sits in the menu bar at the top (H icon); its Dock icon is off
+// unless "Show in Dock" is ticked in that menu.
+//
 // New versions: Hi-chat asks once when one is out (Check for Updates is in
-// the Hi-chat menu and on the Dock icon's right-click menu), then installs
-// it and restarts.
+// the menu bar menu), then installs it and restarts.
 //
 // Build: mac-app/build.sh (GitHub Actions builds the DMG on every change).
 
@@ -93,12 +95,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var keys: Keys?
   lazy var updater = Updater(app: self)
   var mirrorTask: Process?
-  var loginItem: NSMenuItem!
+  var loginItems: [NSMenuItem] = []
+  var statusItem: NSStatusItem?
+  var dockItem: NSMenuItem!
+  static let showInDockKey = "showInDock"
   /// The app that was in front when Option typing started.
   var typingReturnTo: NSRunningApplication?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     buildMenu()
+    buildStatusItem()
     buildWindow()
     webView.load(URLRequest(url: homeURL))
     startKeys(prompt: true)
@@ -170,9 +176,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     let appMenu = NSMenu()
     appMenu.addItem(withTitle: "About Hi-chat", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
     appMenu.addItem(.separator())
-    loginItem = appMenu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
-    loginItem.target = self
-    loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    let login = appMenu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
+    login.target = self
+    loginItems.append(login)
     let access = appMenu.addItem(withTitle: "Keyboard Shortcuts Permission…", action: #selector(openAccessibility(_:)), keyEquivalent: "")
     access.target = self
     let update = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
@@ -215,6 +221,47 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     NSApp.mainMenu = main
   }
 
+  /// Hi-chat's icon in the menu bar at the top: there even while another
+  /// app is in front, and the way in when the Dock icon is off.
+  func buildStatusItem() {
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let image = NSImage(systemSymbolName: "h.square", accessibilityDescription: "Hi-chat")
+    image?.isTemplate = true
+    item.button?.image = image
+    let menu = NSMenu()
+    menu.addItem(withTitle: "Show Hi-chat", action: #selector(showChat(_:)), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Reload", action: #selector(reloadPage(_:)), keyEquivalent: "").target = self
+    menu.addItem(.separator())
+    dockItem = menu.addItem(withTitle: "Show in Dock", action: #selector(toggleDock(_:)), keyEquivalent: "")
+    dockItem.target = self
+    dockItem.state = UserDefaults.standard.bool(forKey: AppController.showInDockKey) ? .on : .off
+    let login = menu.addItem(withTitle: "Open at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
+    login.target = self
+    loginItems.append(login)
+    menu.addItem(withTitle: "Keyboard Shortcuts Permission…", action: #selector(openAccessibility(_:)), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
+    menu.addItem(.separator())
+    menu.addItem(withTitle: "Quit Hi-chat", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+    item.menu = menu
+    statusItem = item
+    showLoginState()
+  }
+
+  /// Off (the default): no Dock icon; Hi-chat lives in the menu bar.
+  @objc func toggleDock(_ sender: Any?) {
+    let show = !UserDefaults.standard.bool(forKey: AppController.showInDockKey)
+    UserDefaults.standard.set(show, forKey: AppController.showInDockKey)
+    dockItem.state = show ? .on : .off
+    NSApp.setActivationPolicy(show ? .regular : .accessory)
+    // Changing it can send the window behind; bring it back without taking focus
+    DispatchQueue.main.async { [weak self] in self?.panel.orderFrontRegardless() }
+  }
+
+  func showLoginState() {
+    let on = SMAppService.mainApp.status == .enabled
+    for item in loginItems { item.state = on ? .on : .off }
+  }
+
   // Right-click on the Dock icon: there even while another app's menu bar shows.
   func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
     let menu = NSMenu()
@@ -232,7 +279,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     } catch {
       NSLog("Hi-chat: Open at Login failed: \(error)")
     }
-    loginItem.state = service.status == .enabled ? .on : .off
+    showLoginState()
   }
 
   @objc func checkForUpdates(_ sender: Any?) {
@@ -891,7 +938,8 @@ struct HiChatMain {
     let app = NSApplication.shared
     let controller = AppController()
     app.delegate = controller
-    app.setActivationPolicy(.regular)
+    let dock = UserDefaults.standard.bool(forKey: AppController.showInDockKey)
+    app.setActivationPolicy(dock ? .regular : .accessory)
     app.run()
   }
 }
