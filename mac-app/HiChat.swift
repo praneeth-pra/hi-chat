@@ -119,8 +119,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     panel = ChatPanel(
       contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView,
-                  .nonactivatingPanel],
+      styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel],
       backing: .buffered, defer: false)
     panel.title = "Hi-chat"
     panel.titleVisibility = .hidden
@@ -131,7 +130,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.becomesKeyOnlyIfNeeded = false
     panel.isReleasedWhenClosed = false
     panel.collectionBehavior = [.managed, .fullScreenPrimary]
-    panel.backgroundColor = NSColor(red: 23 / 255, green: 23 / 255, blue: 23 / 255, alpha: 1)
+    // The page starts below the window buttons, on a strip the colour of
+    // Hi-chat's sidebar, so the buttons never sit on the logo.
+    panel.backgroundColor = NSColor(name: nil) { look in
+      look.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(red: 13 / 255, green: 13 / 255, blue: 13 / 255, alpha: 1)
+        : NSColor(red: 249 / 255, green: 249 / 255, blue: 249 / 255, alpha: 1)
+    }
     panel.minSize = NSSize(width: 420, height: 360)
     panel.contentView = webView
     panel.delegate = self
