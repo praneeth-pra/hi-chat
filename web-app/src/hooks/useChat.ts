@@ -1316,8 +1316,9 @@ export const useChat = () => {
               : [])
           )
 
-          if (autoState.auto && autoState.mode === 'speed')
-            reportSpeech(speedLogLine(timings))
+          // Every reply outside Accuracy (which logs its own line): Auto ·
+          // Speed and hand-picked models alike, so slow replies can be traced.
+          if (!accuracyRequested) reportSpeech(speedLogLine(timings))
 
           // Create a final content object for adding to the thread
           let finalContent = newAssistantThreadContent(

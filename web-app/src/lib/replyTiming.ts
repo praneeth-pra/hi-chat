@@ -135,7 +135,7 @@ export function describeTiming(
 }
 
 /**
- * One Railway log line per Auto · Speed reply, with timings only (no question
+ * One Railway log line per reply outside Accuracy, with timings only (no question
  * or answer text): `speed: model=… total=…ms first_byte=…ms first_words=…ms
  * answer=…ms tokens=N route=direct|server|none hidden=yes|no`.
  */
