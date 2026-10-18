@@ -42,8 +42,7 @@
 :root {
   --font-code:
     'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --app-font:
-    'Onest', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --app-font: 'Literata', Georgia, 'Times New Roman', serif;
   /* Button */
   --radius: 0.625rem;
   --font-size-base: 15px;

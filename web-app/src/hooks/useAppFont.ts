@@ -5,25 +5,26 @@ const FALLBACK = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-seri
 
 /** Fonts offered in Settings > Interface; each is self-hosted except San Francisco */
 export const APP_FONTS = [
-  { id: 'onest', label: 'Onest', stack: `'Onest', ${FALLBACK}` },
+  {
+    id: 'literata',
+    label: 'Literata',
+    stack: `'Literata', Georgia, 'Times New Roman', serif`,
+  },
+  {
+    id: 'atkinson-hyperlegible-next',
+    label: 'Atkinson Hyperlegible Next',
+    stack: `'Atkinson Hyperlegible Next', ${FALLBACK}`,
+  },
+  {
+    id: 'merriweather',
+    label: 'Merriweather',
+    stack: `'Merriweather', Georgia, 'Times New Roman', serif`,
+  },
+  { id: 'lexend', label: 'Lexend', stack: `'Lexend', ${FALLBACK}` },
   {
     id: 'sf',
     label: 'San Francisco',
     stack: `-apple-system, BlinkMacSystemFont, 'SF Pro Text', ${FALLBACK}`,
-  },
-  { id: 'inter', label: 'Inter', stack: `'Inter', ${FALLBACK}` },
-  { id: 'geist', label: 'Geist', stack: `'Geist', ${FALLBACK}` },
-  { id: 'manrope', label: 'Manrope', stack: `'Manrope', ${FALLBACK}` },
-  {
-    id: 'ibm-plex-sans',
-    label: 'IBM Plex Sans',
-    stack: `'IBM Plex Sans', ${FALLBACK}`,
-  },
-  { id: 'figtree', label: 'Figtree', stack: `'Figtree', ${FALLBACK}` },
-  {
-    id: 'plus-jakarta-sans',
-    label: 'Plus Jakarta Sans',
-    stack: `'Plus Jakarta Sans', ${FALLBACK}`,
   },
 ] as const
 
@@ -45,7 +46,7 @@ type AppFontState = {
 export const useAppFont = create<AppFontState>()(
   persist(
     (set) => ({
-      font: 'onest',
+      font: 'literata',
       setFont: (font) => {
         apply(font)
         set({ font })
