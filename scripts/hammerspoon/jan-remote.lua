@@ -753,6 +753,9 @@ pointerWatch = hs.timer.doEvery(0.2, function()
   -- On the laptop's own screen it is off Jan, with no need to ask Safari
   local screen = hs.mouse.getCurrentScreen()
   local onLaptop = screen and (screen:name() or ""):find("Built%-in")
+  -- Off the laptop, it asks Safari where Jan is only while there is a stand-in
+  -- cursor to put away or Option typing is on; otherwise it asks nothing
+  if not onLaptop and not dummy and not typingTarget then return end
   local frame = not onLaptop and chatFrame(2)
   if not (frame and inside(here, frame)) then
     lastOnLaptop = here
