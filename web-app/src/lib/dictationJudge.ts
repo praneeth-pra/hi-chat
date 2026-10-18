@@ -41,10 +41,10 @@ export function textAgreement(a: string, b: string): number {
 /** Past this the vote is sent instead. */
 export const JUDGE_TIMEOUT_MS = 1500
 /**
- * Texts this alike skip the judge and the vote is sent. On P's questions,
- * "Okay, so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket"
- * vs "Extra bucket" 0.95 (the first engine right both times); a real mix-up
- * scored 0.89.
+ * With three or more engines, texts this alike skip the judge and the vote
+ * (the text the others agree with most) is sent. On P's questions, "Okay,
+ * so ... issue like" vs "So ... issue," scored 0.97 and "S3 bucket" vs
+ * "Extra bucket" 0.95; a real mix-up scored 0.89.
  */
 export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
@@ -250,15 +250,18 @@ async function askJudge(
   }
 }
 
-/** Nothing to judge when two engines (nearly) agree: they outvote the rest. */
+/**
+ * Nothing to judge when two engines (nearly) agree and a third can outvote a
+ * word one of them misheard. With only two texts, any word they differ on
+ * goes to the judge: there is no third to break the tie.
+ */
 export function enginesAgree(results: EngineText[]): boolean {
   const heard = results.filter((r) => r.text)
+  const enough = heard.length > 2 ? SKIP_AGREEMENT : 1
   return (
     heard.length < 2 ||
     heard.some((a, i) =>
-      heard
-        .slice(i + 1)
-        .some((b) => textAgreement(a.text, b.text) >= SKIP_AGREEMENT)
+      heard.slice(i + 1).some((b) => textAgreement(a.text, b.text) >= enough)
     )
   )
 }

@@ -341,6 +341,23 @@ describe('dictation', () => {
         { engine: 'elevenlabs', text: 'What is kubectl.' },
       ])?.engine
     ).toBe('grok')
+    // One misheard word is outvoted by the other two (18 Oct)
+    expect(
+      pickBest([
+        {
+          engine: 'cartesia',
+          text: 'Uh, coming to uh AWS RDS, so how would you ensure that uh multi region availability? So how would you configure in such a way that it survives a one reason downtime?',
+        },
+        {
+          engine: 'soniox',
+          text: 'Uh, coming to, uh, AWS RDS—so how would you ensure that a multi-region availability—so how would you configure in such a way that it survives a one-region downtime?',
+        },
+        {
+          engine: 'elevenlabs',
+          text: 'Coming to AWS RDS, so how would you ensure that multi-region availability? So how would you configure in such a way that it survives one region downtime?',
+        },
+      ])?.text
+    ).toContain('region downtime')
     // Two answers (or a tie): the first
     expect(
       pickBest([
@@ -396,6 +413,28 @@ describe('dictation', () => {
         { engine: 'soniox', text: 'What is an S3 bucket?' },
         { engine: 'elevenlabs', text: 'what is an S3 bucket' },
       ])
+      // Two that differ on a word: the third still gets a short grace
+      let eleven!: (t: string) => void
+      const close = gatherAuto([
+        {
+          engine: 'cartesia',
+          text: Promise.resolve(
+            'So how would you configure the database in such a way that it survives a one reason downtime'
+          ),
+        },
+        {
+          engine: 'soniox',
+          text: Promise.resolve(
+            'So how would you configure the database in such a way that it survives a one region downtime'
+          ),
+        },
+        { engine: 'elevenlabs', text: new Promise((r) => (eleven = r)) },
+      ])
+      await vi.advanceTimersByTimeAsync(100)
+      eleven(
+        'So how would you configure the database in such a way that it survives a one region downtime'
+      )
+      await expect(close).resolves.toHaveLength(3)
       await expect(
         gatherAuto([
           { engine: 'cartesia', text: Promise.reject(new Error('no key')) },

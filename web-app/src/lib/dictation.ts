@@ -641,8 +641,11 @@ export function pickBest(results: EngineText[]): EngineText | undefined {
 
 /**
  * Waits for every engine, but only AUTO_GRACE_MS once the first has text,
- * not at all once two engines agree (the judge would skip anyway), and not
- * past `deadlineMs` once any engine has text.
+ * not at all once two engines hear the same words, only AUTO_SHORT_GRACE_MS
+ * more once two nearly agree (a third can outvote a word one of them
+ * misheard: Cartesia's "one reason downtime" against "one region" from
+ * Soniox and ElevenLabs on 18 Oct), and not past `deadlineMs` once any
+ * engine has text.
  */
 export function gatherAuto(
   jobs: { engine: DictationEngine; text: Promise<string> }[],
@@ -673,14 +676,15 @@ export function gatherAuto(
       text
         .then((t) => {
           const text = t.trim()
-          const agreed =
-            text &&
-            done.some(
-              (d) => d.text && textAgreement(d.text, text) >= SKIP_AGREEMENT
-            )
+          const scores = text
+            ? done.filter((d) => d.text).map((d) => textAgreement(d.text, text))
+            : []
           done.push({ engine, text })
-          if (agreed || (late && text)) finish()
-          else if (text && !grace)
+          if (scores.some((s) => s === 1) || (late && text)) finish()
+          else if (scores.some((s) => s >= SKIP_AGREEMENT)) {
+            clearTimeout(grace)
+            grace = setTimeout(finish, AUTO_SHORT_GRACE_MS)
+          } else if (text && !grace)
             grace = setTimeout(
               finish,
               errors.length || done.some((d) => !d.text)
