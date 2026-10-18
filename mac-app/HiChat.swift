@@ -449,7 +449,6 @@ final class Updater {
   static let latest = URL(string: "https://api.github.com/repos/praneeth-pra/hi-chat/releases/latest")!
   static let skippedKey = "skippedVersion"
   unowned let app: AppController
-  var timer: Timer?
   var busy = false
 
   init(app: AppController) { self.app = app }
@@ -470,9 +469,11 @@ final class Updater {
   }
 
   func start() {
-    Task { await check(asked: false) }
-    timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
-      Task { @MainActor in await self?.check(asked: false) }
+    Task {
+      while true {
+        await check(asked: false)
+        try? await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000)
+      }
     }
   }
 
@@ -500,8 +501,9 @@ final class Updater {
       if UserDefaults.standard.string(forKey: Updater.skippedKey) == version { return }
       // Never in the middle of dictating or typing; look again in a few minutes.
       if app.keys?.dictating == true || app.typing {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self] in
-          Task { await self?.check(asked: false) }
+        Task {
+          try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
+          await check(asked: false)
         }
         return
       }
@@ -511,14 +513,10 @@ final class Updater {
     alert.informativeText = "Update Now installs it and restarts Hi-chat, which takes a few seconds. You have \(current)."
     alert.addButton(withTitle: "Update Now")
     alert.addButton(withTitle: "Later")
-    alert.beginSheetModal(for: app.panel) { [weak self] answer in
-      Task { @MainActor in
-        if answer == .alertFirstButtonReturn {
-          await self?.install(from: url)
-        } else {
-          UserDefaults.standard.set(version, forKey: Updater.skippedKey)
-        }
-      }
+    if await alert.beginSheetModal(for: app.panel) == .alertFirstButtonReturn {
+      await install(from: url)
+    } else {
+      UserDefaults.standard.set(version, forKey: Updater.skippedKey)
     }
   }
 
