@@ -91,8 +91,10 @@ describe('judgeDictation', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it('skips the judge for one misheard word, sending the vote', async () => {
-    const fetcher = reply('x')
+  it('asks the judge about one misheard word when only two engines heard it', async () => {
+    const fetcher = reply(
+      "S3 bucket. And if it's a cross-account, then you also have to mention inside the bucket policies that this is"
+    )
     const close = [
       {
         engine: 'cartesia',
@@ -110,8 +112,8 @@ describe('judgeDictation', () => {
         [],
         fetcher as unknown as typeof fetch
       )
-    ).toBeUndefined()
-    expect(fetcher).not.toHaveBeenCalled()
+    ).toContain('S3 bucket')
+    expect(fetcher).toHaveBeenCalled()
   })
 
   it('falls back to Groq, and to the vote with no key', async () => {
