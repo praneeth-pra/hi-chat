@@ -3,6 +3,31 @@ import { isPlatformTauri } from '@/lib/platform/utils'
 const GROQ_ORIGIN = 'https://api.groq.com'
 /** nginx forwards this path to api.groq.com (see nginx.conf). */
 export const GROQ_PROXY_PATH = '/api/groq'
+const CEREBRAS_ORIGIN = 'https://api.cerebras.ai'
+/** nginx forwards this path to api.cerebras.ai, the same way. */
+export const CEREBRAS_PROXY_PATH = '/api/cerebras'
+const PROXIES = [
+  { origin: GROQ_ORIGIN, path: GROQ_PROXY_PATH },
+  { origin: CEREBRAS_ORIGIN, path: CEREBRAS_PROXY_PATH },
+]
+
+function viaProxy(
+  url: string | undefined,
+  enabled: boolean,
+  proxies: typeof PROXIES
+): string | undefined {
+  if (!enabled || !url) return url
+  try {
+    const parsed = new URL(url)
+    const proxy = proxies.find((p) => p.origin === parsed.origin)
+    if (!proxy || parsed.username || parsed.password) return url
+    return `${window.location.origin}${proxy.path}${parsed.pathname}${parsed.search}`
+  } catch {
+    return url
+  }
+}
+
+const inWebApp = () => !isPlatformTauri() && typeof window !== 'undefined'
 
 /**
  * In the web app, Groq URLs point at this site's own server, which forwards
@@ -14,21 +39,25 @@ export const GROQ_PROXY_PATH = '/api/groq'
  */
 export function viaGroqProxy(
   url: string | undefined,
-  enabled = !isPlatformTauri() && typeof window !== 'undefined'
+  enabled = inWebApp()
 ): string | undefined {
-  if (!enabled || !url) return url
-  try {
-    const parsed = new URL(url)
-    if (parsed.origin !== GROQ_ORIGIN || parsed.username || parsed.password)
-      return url
-    return `${window.location.origin}${GROQ_PROXY_PATH}${parsed.pathname}${parsed.search}`
-  } catch {
-    return url
-  }
+  return viaProxy(url, enabled, PROXIES.slice(0, 1))
+}
+
+/**
+ * Groq or Cerebras URLs pointed at this site's server, for requests sent
+ * with groqFetch: they still go direct first, and the server is the backup
+ * route when the direct one is slow or fails.
+ */
+export function viaBackupRoute(
+  url: string | undefined,
+  enabled = inWebApp()
+): string | undefined {
+  return viaProxy(url, enabled, PROXIES)
 }
 
 /** How long the direct route gets to start replying before the server joins. */
-export const GROQ_HEDGE_MS = 1000
+export const GROQ_HEDGE_MS = 400
 
 type GroqRoute = 'direct' | 'server'
 const routes = new WeakMap<Response, GroqRoute>()
@@ -37,11 +66,11 @@ const routes = new WeakMap<Response, GroqRoute>()
 export const groqRoute = (res: Response) => routes.get(res)
 
 /**
- * Sends a Groq request straight to api.groq.com first, which skips the trip
+ * Sends a Groq (or Cerebras) request straight to the provider first, which skips the trip
  * through this site's server. If Groq hasn't started replying within
  * GROQ_HEDGE_MS, or the direct request fails, the same request also goes
  * through the server (the Safari stall above); the first to reply is used
- * and the other is cancelled. Anything that isn't a proxied Groq URL is
+ * and the other is cancelled. Anything that isn't a proxied URL is
  * fetched as usual.
  */
 export function groqFetch(
@@ -50,19 +79,22 @@ export function groqFetch(
   base: typeof fetch = fetch,
   hedgeMs = GROQ_HEDGE_MS
 ): Promise<Response> {
-  const prefix =
-    typeof window !== 'undefined'
-      ? `${window.location.origin}${GROQ_PROXY_PATH}/`
-      : undefined
   const url =
     typeof input === 'string'
       ? input
       : input instanceof URL
         ? input.href
         : undefined
-  if (!prefix || !url?.startsWith(prefix)) return base(input, init)
+  const proxy =
+    typeof window !== 'undefined' && url
+      ? PROXIES.find((p) =>
+          url.startsWith(`${window.location.origin}${p.path}/`)
+        )
+      : undefined
+  if (!proxy || !url) return base(input, init)
+  const prefix = `${window.location.origin}${proxy.path}/`
   const routeUrls: Record<GroqRoute, string> = {
-    direct: `${GROQ_ORIGIN}/${url.slice(prefix.length)}`,
+    direct: `${proxy.origin}/${url.slice(prefix.length)}`,
     server: url,
   }
 

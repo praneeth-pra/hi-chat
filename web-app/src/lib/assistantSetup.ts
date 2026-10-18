@@ -120,7 +120,10 @@ function clip(value: string, max: number) {
 
 /** "Acme · Data Analyst", or just the short role when the company is unknown. */
 export function assistantName(profile: CandidateProfile): string {
-  const role = clip(profile.title || profile.role || 'Interview', MAX_NAME_CHARS)
+  const role = clip(
+    profile.title || profile.role || 'Interview',
+    MAX_NAME_CHARS
+  )
   const company = profile.company.split(/[,(]/)[0].trim()
   const name = company ? `${company} · ${role}` : role
   return name.length <= MAX_NAME_CHARS ? name : role
@@ -142,7 +145,7 @@ export function buildInstructions(
     '',
     '- Your background is the resume in your documents. Use its real employers, projects, tools, numbers and dates.',
     '- Never invent experience, projects, results, skills or numbers (metrics, timings, percentages) that are not in the resume. When a question goes beyond it, answer from the closest related experience or explain how you would approach it, without claiming you have done it.',
-    '- For technical questions, explain the concept clearly. Bring in your own projects only when the question asks about your experience.',
+    '- For technical questions, explain the concept clearly. When the resume shows you used it, end with one short line on how you used it there; when it does not, leave that line out.',
     '- For behavioural questions, use a real situation from the resume: the situation, what you did, and the result.',
   ]
   if (hasJobDescription)

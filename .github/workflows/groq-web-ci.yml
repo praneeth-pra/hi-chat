@@ -39,6 +39,7 @@ jobs:
           curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8080/ | grep -q '^302 .*/login$'
           curl -sf http://localhost:8080/login | grep -q 'Sign in to Hi-chat'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/groq/openai/v1/models)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/cerebras/v1/models)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/transcribe)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/code)" = 503
           # With LOGIN_EMAIL: a signed cookie (as /auth/verify sets it) opens everything
@@ -73,6 +74,8 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: http://localhost:8081' --data '{"line":"dictation grok: 10 ms after stop, 6 chars"}' http://localhost:8081/api/speech-log)" = 204
           # Groq pass-through reaches api.groq.com (no key, so Groq itself answers 401)
           curl -s -b "$C" http://localhost:8081/api/groq/openai/v1/models | grep -qi 'api key'
+          # Cerebras pass-through reaches api.cerebras.ai, which refuses the missing key
+          curl -s -o /dev/null -w '%{http_code}' -b "$C" http://localhost:8081/api/cerebras/v1/models | grep -Eq '^40[013]$'
           # Search stays behind login, and an unset Exa key is explicitly reported.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/search)" = 401
           curl -sf -b "$C" -H 'Content-Type: application/json' --data '{"query":"What is AWS ECS?"}' http://localhost:8081/api/search | grep -q '"status":"unconfigured"'
