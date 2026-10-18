@@ -38,7 +38,9 @@ const ThinkingBlock = ({ id, text }: Props) => {
     text.includes('<|channel|>analysis<|message|>') &&
     !text.includes('<|start|>assistant<|channel|>final<|message|>')
   const loading = (hasThinkTag || hasAnalysisChannel) && isStreaming
-  const isExpanded = thinkingState[id] ?? (loading ? true : false)
+  // Stays one line unless tapped: opening while it thinks and snapping shut
+  // when the answer starts made the page jump.
+  const isExpanded = thinkingState[id] ?? false
   const handleClick = () => {
     const newExpandedState = !isExpanded
     setThinkingState(id, newExpandedState)
