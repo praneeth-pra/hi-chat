@@ -22,6 +22,12 @@ import {
 } from '@tabler/icons-react'
 // import { windowKey } from '@/constants/windows'
 import { toast } from 'sonner'
+import {
+  dataFileName,
+  exportData,
+  importData,
+  parseDataFile,
+} from '@/lib/dataTransfer'
 import { isDev } from '@/lib/utils'
 import { SystemEvent } from '@/types/events'
 import { Input } from '@/components/ui/input'
@@ -797,6 +803,78 @@ function General() {
                     placeholder={'Kubernetes\nNAT gateway\nTerraform'}
                     className="min-h-24 max-h-60 w-full"
                   />
+                }
+              />
+            </Card>
+
+            {/* Data */}
+            <Card title="Your data">
+              <CardItem
+                title="Move your chats and settings"
+                description="Saves every chat, API key and setting in this browser to a file. Import it in another browser or the Hi-chat Mac app; chats there with the same id are replaced."
+                actions={
+                  <div className="flex gap-2">
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0"
+                      onClick={() => {
+                        exportData()
+                          .then((data) => {
+                            const url = URL.createObjectURL(
+                              new Blob([JSON.stringify(data)], {
+                                type: 'application/json',
+                              })
+                            )
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = dataFileName()
+                            a.click()
+                            setTimeout(() => URL.revokeObjectURL(url), 60_000)
+                          })
+                          .catch((e) =>
+                            toast.error(`Export failed: ${String(e)}`)
+                          )
+                      }}
+                    >
+                      <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
+                        Export
+                      </div>
+                    </Button>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0"
+                      onClick={() => {
+                        const input = document.createElement('input')
+                        input.type = 'file'
+                        input.accept = 'application/json,.json'
+                        input.onchange = () => {
+                          const picked = input.files?.[0]
+                          if (!picked) return
+                          picked
+                            .text()
+                            .then((text) => importData(parseDataFile(text)))
+                            .then(({ chats }) => {
+                              toast.success(
+                                `Imported ${chats} chats. Reloading...`
+                              )
+                              setTimeout(() => window.location.reload(), 1200)
+                            })
+                            .catch((e) =>
+                              toast.error(
+                                e instanceof Error ? e.message : String(e)
+                              )
+                            )
+                        }
+                        input.click()
+                      }}
+                    >
+                      <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
+                        Import
+                      </div>
+                    </Button>
+                  </div>
                 }
               />
             </Card>

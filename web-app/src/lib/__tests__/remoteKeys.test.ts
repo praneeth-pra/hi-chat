@@ -13,11 +13,24 @@ const toggleDictation = vi.fn()
 const stopDictation = vi.fn()
 const discardRecording = vi.fn()
 const dictationState = { status: 'idle' }
+type Listener = (s: typeof dictationState, p: typeof dictationState) => void
+const dictationListeners = new Set<Listener>()
+const setDictationStatus = (status: string) => {
+  const prev = { ...dictationState }
+  dictationState.status = status
+  dictationListeners.forEach((l) => l(dictationState, prev))
+}
 vi.mock('@/lib/dictation', () => ({
   toggleDictation: () => toggleDictation(),
   stopDictation: () => stopDictation(),
   cancelDictation: () => discardRecording(),
-  useDictation: { getState: () => dictationState },
+  useDictation: {
+    getState: () => dictationState,
+    subscribe: (l: Listener) => {
+      dictationListeners.add(l)
+      return () => dictationListeners.delete(l)
+    },
+  },
 }))
 describe('remote keys without Speaker', () => {
   beforeEach(() => {
@@ -361,5 +374,37 @@ describe('remote keys without Speaker', () => {
     stop()
     text.remove()
     Object.assign(document, { caretRangeFromPoint: undefined })
+  })
+})
+
+describe('Mac app bridge', () => {
+  it('does nothing in a browser', async () => {
+    const { connectMacApp } = await import('../remoteKeys')
+    const win = {} as Window & { hiChatRemote?: unknown }
+    connectMacApp(win)()
+    expect(win.hiChatRemote).toBeUndefined()
+  })
+
+  it('exposes the keys and reports dictation status to the app', async () => {
+    const { connectMacApp, handleRemoteKey } = await import('../remoteKeys')
+    const sent: unknown[] = []
+    const win = {
+      webkit: {
+        messageHandlers: {
+          hiChat: { postMessage: (m: unknown) => sent.push(m) },
+        },
+      },
+    } as unknown as Window & { hiChatRemote?: unknown }
+    const stop = connectMacApp(win)
+    expect(win.hiChatRemote).toBe(handleRemoteKey)
+    expect(sent).toEqual([{ dictation: 'idle' }])
+    setDictationStatus('recording')
+    expect(sent.at(-1)).toEqual({ dictation: 'recording' })
+    setDictationStatus('idle')
+    stop()
+    setDictationStatus('recording')
+    expect(sent).toHaveLength(3)
+    setDictationStatus('idle')
+    expect(win.hiChatRemote).toBeUndefined()
   })
 })

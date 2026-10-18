@@ -307,6 +307,33 @@ export function handleRemoteKey(key: string): boolean {
   return false
 }
 
+type MacAppWindow = Window & {
+  hiChatRemote?: (key: string) => boolean
+  webkit?: {
+    messageHandlers?: { hiChat?: { postMessage: (message: unknown) => void } }
+  }
+}
+
+/**
+ * Inside the Hi-chat Mac app the keys come as calls instead of key presses,
+ * and the app is told when dictation starts and stops (Escape then cancels
+ * it). Returns the cleanup; does nothing in a browser.
+ */
+export function connectMacApp(win: MacAppWindow = window): () => void {
+  const app = win.webkit?.messageHandlers?.hiChat
+  if (!app) return () => {}
+  win.hiChatRemote = handleRemoteKey
+  const post = (status: string) => app.postMessage({ dictation: status })
+  post(useDictation.getState().status)
+  const stop = useDictation.subscribe((state, prev) => {
+    if (state.status !== prev.status) post(state.status)
+  })
+  return () => {
+    stop()
+    delete win.hiChatRemote
+  }
+}
+
 /** Listens for the keys on the whole page; returns the cleanup. */
 export function listenForRemoteKeys() {
   const onKey = (e: KeyboardEvent) => {
@@ -324,7 +351,9 @@ export function listenForRemoteKeys() {
   window.addEventListener('keydown', onKey)
   window.addEventListener('pointermove', onMove, { passive: true })
   document.documentElement.addEventListener('pointerleave', onLeave)
+  const stopApp = connectMacApp()
   return () => {
+    stopApp()
     window.removeEventListener('keydown', onKey)
     window.removeEventListener('pointermove', onMove)
     document.documentElement.removeEventListener('pointerleave', onLeave)

@@ -40,6 +40,23 @@
 -- arrows remain available to the app in front; fn + Left (Home) is the mirror key.
 -- Option held with another key retains its normal modifier behavior.
 --
+-- The Hi-chat Mac app (mac-app/) has all of these built in. While it runs,
+-- this script does nothing, and it comes back when the app quits.
+local MAC_APP = "dev.hitechie.hichat"
+-- Global so it isn't garbage-collected
+hiChatAppWatcher = hs.application.watcher.new(function(_, event, app)
+  local watched = hs.application.watcher
+  if (event == watched.launched or event == watched.terminated)
+      and app and app:bundleID() == MAC_APP then
+    hs.timer.doAfter(0.5, hs.reload)
+  end
+end)
+hiChatAppWatcher:start()
+if hs.application.get(MAC_APP) then
+  print("[jan] the Hi-chat app is running; its shortcuts are in use instead")
+  return
+end
+
 -- Settings you may want to change:
 local SPEED = 700        -- pixels per second while held
 local TAP = 120          -- pixels a quick tap scrolls
