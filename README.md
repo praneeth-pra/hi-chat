@@ -72,10 +72,10 @@ trash button opens confirmation.
 Hi-chat for Mac (`mac-app/`) is a small Swift app around the site, with the
 shortcuts built in. Download it from
 [the latest release](https://github.com/praneeth-pra/hi-chat/releases/latest/download/Hi-chat.dmg);
-it offers each new version itself. It lives in the menu bar at the top (H icon: Check for Updates, Show in Dock, Quit); the Dock icon is off unless "Show in Dock" is ticked.
+it offers each new version itself. It lives in the menu bar at the top (its H logo: Check for Updates, Show in Dock, Quit); the Dock icon is off unless "Show in Dock" is ticked.
 
 - tap **Left Control**: dictate; tap again to send. **Escape** throws it away.
-- tap **Left Option**: type into Hi-chat while the app you're in stays active.
+- tap **Left Option**: type into Hi-chat while the app you're in stays active. Meanwhile the mouse moves Hi-chat's own blue cursor and your pointer stays where it is: click and drag to highlight text in Hi-chat, double click for a word.
 - **fn + Right**: send. **fn + Up / Down**: code block above / below.
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
 - **Z**: clicks into Hi-chat's message box (pointer there, Option typing on); **X**: pointer and keyboard back to where they were. **fn + Z / X** (or Shift) types the letter.
