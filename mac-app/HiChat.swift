@@ -18,6 +18,9 @@
 // active app, so a click or typing in it never greys out the app you're in.
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
+// New versions: Hi-chat asks once when one is out (Hi-chat > Check for
+// Updates any time), then installs it and restarts.
+//
 // Build: mac-app/build.sh (GitHub Actions builds the DMG on every change).
 
 import AppKit
@@ -80,6 +83,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var panel: ChatPanel!
   var webView: WKWebView!
   var keys: Keys?
+  lazy var updater = Updater(app: self)
   var mirrorTask: Process?
   var loginItem: NSMenuItem!
   /// The app that was in front when Option typing started.
@@ -90,6 +94,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     buildWindow()
     webView.load(URLRequest(url: homeURL))
     startKeys(prompt: true)
+    updater.start()
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -162,6 +167,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     let access = appMenu.addItem(withTitle: "Keyboard Shortcuts Permission…", action: #selector(openAccessibility(_:)), keyEquivalent: "")
     access.target = self
+    let update = appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+    update.target = self
     appMenu.addItem(.separator())
     appMenu.addItem(withTitle: "Hide Hi-chat", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
     appMenu.addItem(withTitle: "Quit Hi-chat", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -208,6 +215,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
       NSLog("Hi-chat: Open at Login failed: \(error)")
     }
     loginItem.state = service.status == .enabled ? .on : .off
+  }
+
+  @objc func checkForUpdates(_ sender: Any?) {
+    Task { await updater.check(asked: true) }
   }
 
   @objc func openAccessibility(_ sender: Any?) {
@@ -427,6 +438,144 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
     webView.reload()
+  }
+}
+
+/// Updates: looks at the newest release on GitHub when Hi-chat opens and
+/// every 6 hours. A new version is offered once, in one dialog; Update Now
+/// downloads it, quits, swaps the app in place and opens it again.
+@MainActor
+final class Updater {
+  static let latest = URL(string: "https://api.github.com/repos/praneeth-pra/hi-chat/releases/latest")!
+  static let skippedKey = "skippedVersion"
+  unowned let app: AppController
+  var busy = false
+
+  init(app: AppController) { self.app = app }
+
+  var current: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+  }
+
+  /// "1.0.10" is newer than "1.0.9".
+  nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
+    let x = a.split(separator: ".").map { Int($0) ?? 0 }
+    let y = b.split(separator: ".").map { Int($0) ?? 0 }
+    for i in 0..<max(x.count, y.count) {
+      let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
+      if p != q { return p > q }
+    }
+    return false
+  }
+
+  func start() {
+    Task {
+      while true {
+        await check(asked: false)
+        try? await Task.sleep(nanoseconds: 6 * 3600 * 1_000_000_000)
+      }
+    }
+  }
+
+  /// asked: from the menu, so it always answers, even "up to date".
+  func check(asked: Bool) async {
+    if busy { return }
+    var request = URLRequest(url: Updater.latest)
+    request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+    guard let fetched = try? await URLSession.shared.data(for: request),
+          let release = (try? JSONSerialization.jsonObject(with: fetched.0)) as? [String: Any],
+          let tag = release["tag_name"] as? String
+    else {
+      if asked { tell("Couldn't reach GitHub to check for updates.") }
+      return
+    }
+    let version = tag.replacingOccurrences(of: "mac-", with: "")
+    let dmg = (release["assets"] as? [[String: Any]] ?? [])
+      .compactMap { $0["browser_download_url"] as? String }
+      .first { $0.hasSuffix(".dmg") }
+    guard Updater.isNewer(version, than: current), let dmg, let url = URL(string: dmg) else {
+      if asked { tell("Hi-chat \(current) is the newest version.") }
+      return
+    }
+    if !asked {
+      if UserDefaults.standard.string(forKey: Updater.skippedKey) == version { return }
+      // Never in the middle of dictating or typing; look again in a few minutes.
+      if app.keys?.dictating == true || app.typing {
+        Task {
+          try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
+          await check(asked: false)
+        }
+        return
+      }
+    }
+    let alert = NSAlert()
+    alert.messageText = "Hi-chat \(version) is ready"
+    alert.informativeText = "Update Now installs it and restarts Hi-chat, which takes a few seconds. You have \(current)."
+    alert.addButton(withTitle: "Update Now")
+    alert.addButton(withTitle: "Later")
+    busy = true // one dialog at a time
+    let answer = await alert.beginSheetModal(for: app.panel)
+    busy = false
+    if answer == .alertFirstButtonReturn {
+      await install(from: url)
+    } else {
+      UserDefaults.standard.set(version, forKey: Updater.skippedKey)
+    }
+  }
+
+  func install(from url: URL) async {
+    busy = true
+    defer { busy = false }
+    let target = Bundle.main.bundleURL
+    guard FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path) else {
+      tell("Hi-chat can't replace itself where it is. Move it to Applications, or download the new version from GitHub.")
+      return
+    }
+    guard let downloaded = try? await URLSession.shared.download(from: url),
+          (downloaded.1 as? HTTPURLResponse)?.statusCode == 200
+    else {
+      tell("The download didn't finish. Try again with Hi-chat > Check for Updates.")
+      return
+    }
+    let work = FileManager.default.temporaryDirectory
+      .appendingPathComponent("hi-chat-update-\(UUID().uuidString)")
+    let dmg = work.appendingPathComponent("Hi-chat.dmg")
+    do {
+      try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+      try FileManager.default.moveItem(at: downloaded.0, to: dmg)
+    } catch {
+      tell("The update couldn't be saved: \(error.localizedDescription)")
+      return
+    }
+    // Runs on after Hi-chat quits: unpack, check the signature, swap the app
+    // (the old one comes back if anything fails) and open it again.
+    let script = """
+      pid=$1; dmg=$2; target=$3; work=$4; mnt="$work/mnt"
+      hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" -quiet \\
+        && ditto "$mnt/Hi-chat.app" "$work/Hi-chat.app"
+      hdiutil detach "$mnt" -quiet
+      while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+      if [ -d "$work/Hi-chat.app" ] && codesign --verify "$work/Hi-chat.app"; then
+        mv "$target" "$work/old.app" && { ditto "$work/Hi-chat.app" "$target" || { rm -rf "$target"; mv "$work/old.app" "$target"; }; }
+      fi
+      open "$target"
+      rm -rf "$work"
+      """
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/sh")
+    task.arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier),
+                      dmg.path, target.path, work.path]
+    do { try task.run() } catch {
+      tell("The update couldn't start: \(error.localizedDescription)")
+      return
+    }
+    NSApp.terminate(nil)
+  }
+
+  func tell(_ message: String) {
+    let alert = NSAlert()
+    alert.messageText = message
+    alert.beginSheetModal(for: app.panel, completionHandler: nil)
   }
 }
 
