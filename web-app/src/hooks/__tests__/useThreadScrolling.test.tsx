@@ -167,7 +167,7 @@ describe('useThreadScrolling (flow)', () => {
     expect(questionTop - scrollTop).toBeLessThanOrEqual(40)
     expect(layout.scrollTo).toHaveBeenLastCalledWith({
       top: scrollTop,
-      behavior: 'smooth',
+      behavior: 'auto',
     })
   })
 
