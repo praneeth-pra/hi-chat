@@ -11,7 +11,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { IconFileText, IconUpload, IconX } from '@tabler/icons-react'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useTranslation } from '@/i18n/react-i18next-compat'
-import { setupAssistant, type SetupFile } from '@/lib/assistantSetup'
+import {
+  OTHER_CONTEXT_NAME,
+  setupAssistant,
+  type SetupFile,
+} from '@/lib/assistantSetup'
 import {
   ACCEPTED_DOCUMENT_TYPES,
   extractDocumentText,
@@ -26,7 +30,8 @@ interface AddEditAssistantProps {
 }
 
 /**
- * An assistant is just a resume and an optional job description. The name,
+ * An assistant is just a resume, an optional job description and optional
+ * notes the resume doesn't cover. The name,
  * instructions, documents and key terms are worked out from them when the
  * user saves (lib/assistantSetup.ts), so none of that is shown here.
  */
@@ -39,14 +44,18 @@ export default function AddEditAssistant({
 }: AddEditAssistantProps) {
   const { t } = useTranslation()
   const editing = !!(editingKey && initialData)
-  // When editing, the first document is the resume and the second the JD
+  // When editing, the first document is the resume; after it come the JD
+  // and the other-context notes, told apart by name
   const savedResume = editing ? initialData?.documents?.[0] : undefined
-  const savedJd = editing ? initialData?.documents?.[1] : undefined
+  const savedRest = editing ? (initialData?.documents?.slice(1) ?? []) : []
+  const savedJd = savedRest.find((d) => d.name !== OTHER_CONTEXT_NAME)
+  const savedContext =
+    savedRest.find((d) => d.name === OTHER_CONTEXT_NAME)?.text ?? ''
 
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [jdFile, setJdFile] = useState<File | null>(null)
   const [jdRemoved, setJdRemoved] = useState(false)
-  const [jdText, setJdText] = useState('')
+  const [contextText, setContextText] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const resumeInputRef = useRef<HTMLInputElement>(null)
@@ -57,18 +66,19 @@ export default function AddEditAssistant({
     setResumeFile(null)
     setJdFile(null)
     setJdRemoved(false)
-    setJdText('')
+    setContextText(savedContext)
     setStatus(null)
     setBusy(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingKey])
 
   const resumeName = resumeFile?.name ?? savedResume?.name
-  const pastedJd = jdText.trim()
-  const jdName =
-    jdFile?.name ??
-    (pastedJd ? 'Pasted below' : jdRemoved ? undefined : savedJd?.name)
+  const jdName = jdFile?.name ?? (jdRemoved ? undefined : savedJd?.name)
   const changed =
-    !!resumeFile || !!jdFile || !!pastedJd || (jdRemoved && !!savedJd)
+    !!resumeFile ||
+    !!jdFile ||
+    (jdRemoved && !!savedJd) ||
+    contextText.trim() !== savedContext.trim()
   const canSave = !busy && !!resumeName && (!editing || changed)
 
   const readFile = async (file: File): Promise<SetupFile> => {
@@ -88,11 +98,9 @@ export default function AddEditAssistant({
       if (!resume) throw new Error('Upload a resume first')
       const jd = jdFile
         ? await readFile(jdFile)
-        : pastedJd
-          ? { name: 'Job description', text: pastedJd }
-          : jdRemoved
-            ? undefined
-            : savedJd
+        : jdRemoved
+          ? undefined
+          : savedJd
       setStatus('Setting up the assistant…')
       const { getProviderByName } = useModelProvider.getState()
       const groq = getProviderByName('groq')
@@ -104,7 +112,9 @@ export default function AddEditAssistant({
           groq: { apiKey: groq?.api_key, baseUrl: groq?.base_url },
           cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
         },
-        editing ? initialData : undefined
+        editing ? initialData : undefined,
+        fetch,
+        contextText
       )
       onSave(assistant)
       onOpenChange(false)
@@ -167,23 +177,23 @@ export default function AddEditAssistant({
             () => jdInputRef.current?.click(),
             () => {
               setJdFile(null)
-              setJdText('')
               setJdRemoved(true)
             }
           )}
-          {!jdFile && (
+          <div className="space-y-1 pt-1">
+            <div className="text-sm font-medium">Other context (optional)</div>
             <Textarea
-              value={jdText}
+              value={contextText}
               onChange={(e) => {
-                setJdText(e.target.value)
+                setContextText(e.target.value)
                 setStatus(null)
               }}
-              placeholder="Or paste the job description here"
-              aria-label="Paste job description"
+              placeholder="Anything the resume doesn't say: why you're moving on, notice period, expected salary, location, projects not listed…"
+              aria-label="Other context"
               className="min-h-20 max-h-40 resize-none text-sm"
               disabled={busy}
             />
-          )}
+          </div>
           <input
             ref={resumeInputRef}
             type="file"
@@ -205,10 +215,7 @@ export default function AddEditAssistant({
             onChange={(e) => {
               const file = e.target.files?.[0] ?? null
               setJdFile(file)
-              if (file) {
-                setJdRemoved(false)
-                setJdText('')
-              }
+              if (file) setJdRemoved(false)
               setStatus(null)
               e.target.value = ''
             }}

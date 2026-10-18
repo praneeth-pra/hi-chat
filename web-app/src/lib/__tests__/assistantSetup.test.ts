@@ -161,4 +161,29 @@ describe('setupAssistant', () => {
     expect(out.documents).toHaveLength(1)
     expect(out.avatar).toBe('🧑‍💼')
   })
+
+  it('saves other context as its own document and points the instructions at it', async () => {
+    const { setupAssistant, OTHER_CONTEXT_NAME } = await import(
+      '../assistantSetup'
+    )
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      return body.response_format
+        ? reply(JSON.stringify(profile))
+        : reply('SQL')
+    })
+    const out = await setupAssistant(
+      { name: 'resume.pdf', text: 'Priya resume' },
+      undefined,
+      { groq: { apiKey: 'g' } },
+      undefined,
+      fetchImpl as unknown as typeof fetch,
+      '  Notice period: 30 days  '
+    )
+    expect(out.documents).toEqual([
+      { name: 'resume.pdf', text: 'Priya resume' },
+      { name: OTHER_CONTEXT_NAME, text: 'Notice period: 30 days' },
+    ])
+    expect(out.instructions).toContain(`"${OTHER_CONTEXT_NAME}"`)
+  })
 })

@@ -108,9 +108,13 @@ export function assistantName(profile: CandidateProfile): string {
   return first ? `${first} · ${role}` : role
 }
 
+/** The free-text notes saved next to the resume and job description. */
+export const OTHER_CONTEXT_NAME = 'Other context'
+
 export function buildInstructions(
   profile: CandidateProfile,
-  hasJobDescription: boolean
+  hasJobDescription: boolean,
+  hasOtherContext = false
 ): string {
   const who = profile.candidate || 'the candidate in the resume'
   const role = profile.role ? `the ${profile.role} role` : 'this role'
@@ -129,6 +133,10 @@ export function buildInstructions(
     )
   else if (profile.focus.length)
     lines.push(`- Your strongest areas: ${profile.focus.join(', ')}.`)
+  if (hasOtherContext)
+    lines.push(
+      `- "${OTHER_CONTEXT_NAME}" in your documents is what you added beyond the resume, such as why you are moving on, notice period, salary expectations or location. Treat it as true about you and use it when a question touches it.`
+    )
   return lines.join('\n')
 }
 
@@ -140,18 +148,23 @@ export type SetupKeys = {
 }
 
 /**
- * Builds the whole assistant from the resume and optional job description.
- * Editing keeps the assistant's id, emoji, creation time and settings.
+ * Builds the whole assistant from the resume, optional job description and
+ * optional notes the resume doesn't cover. Editing keeps the assistant's id,
+ * emoji, creation time and settings.
  */
 export async function setupAssistant(
   resume: SetupFile,
   jobDescription: SetupFile | undefined,
   keys: SetupKeys,
   base?: Assistant,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  otherContext = ''
 ): Promise<Assistant> {
   const jd = jobDescription?.text.trim() ? jobDescription : undefined
-  const documents = [resume, ...(jd ? [jd] : [])]
+  const notes = otherContext.trim()
+    ? { name: OTHER_CONTEXT_NAME, text: otherContext.trim() }
+    : undefined
+  const documents = [resume, ...(jd ? [jd] : []), ...(notes ? [notes] : [])]
   const [profile, terms] = await Promise.all([
     extractProfile(
       resume.text,
@@ -174,7 +187,8 @@ export async function setupAssistant(
     // They only help dictation, so a failure doesn't stop setup
     extractKeyTerms(
       `Resume:\n${resume.text.slice(0, MAX_SOURCE_CHARS)}` +
-        (jd ? `\n\nJob description:\n${jd.text}` : ''),
+        (jd ? `\n\nJob description:\n${jd.text}` : '') +
+        (notes ? `\n\n${OTHER_CONTEXT_NAME}:\n${notes.text}` : ''),
       keys.groq ?? {},
       dictionaryTerms(),
       fetchImpl
@@ -186,7 +200,7 @@ export async function setupAssistant(
     created_at: base?.created_at ?? Date.now(),
     name: assistantName(profile),
     description: profile.summary,
-    instructions: buildInstructions(profile, !!jd),
+    instructions: buildInstructions(profile, !!jd, !!notes),
     documents,
     ...(terms.length ? { keyterms: terms } : {}),
     parameters: base?.parameters ?? {},

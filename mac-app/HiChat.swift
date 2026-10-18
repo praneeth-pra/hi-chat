@@ -139,6 +139,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     webView.uiDelegate = self
     webView.navigationDelegate = self
     webView.allowsBackForwardNavigationGestures = false
+    // Until the page paints, show the window's own colour instead of
+    // WebKit's white, so opening Hi-chat never flashes a white screen.
+    webView.setValue(false, forKey: "drawsBackground")
     if #available(macOS 13.3, *) { webView.isInspectable = true }
 
     panel = ChatPanel(
@@ -402,12 +405,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   /// Option typing: Hi-chat takes the keyboard, the app in front stays active,
   /// and the mouse drives Hi-chat's own cursor.
   func toggleTyping() {
-    if typing { stopTyping() } else { startTyping(jump: false) }
+    if typing { stopTyping() } else { startTyping() }
   }
 
-  /// jump: the real pointer goes to the message box (Z); otherwise it stays
-  /// where it is and Hi-chat's cursor shows up there instead (Option).
-  func startTyping(jump: Bool) {
+  /// The real pointer stays where it is; Hi-chat's cursor shows up in the
+  /// message box instead (Option and Z alike).
+  func startTyping() {
     let front = NSWorkspace.shared.frontmostApplication
     if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
       typingReturnTo = front
@@ -416,14 +419,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.makeKeyAndOrderFront(nil)
     typing = true
     remote("F17") // the cursor goes to the end of the message box
-    if jump { pointerToChat() } else { cursorStart() }
+    cursorStart()
   }
 
   func stopTyping() {
     let back = typingReturnTo
     typing = false
     typingReturnTo = nil
-    pointerBack()
     guard panel.isKeyWindow else { return }
     // Giving up the keyboard without hiding: the unseen window takes it, then
     // drops it while Hi-chat's window refuses it, so it goes back to the app
@@ -442,32 +444,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   // MARK: Pointer
 
-  /// Where the pointer was before it jumped to Hi-chat (screen coordinates,
-  /// origin at the top left, as CGEvent uses).
-  var pointerHome: CGPoint?
-
   func pointerNow() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
 
   func warpPointer(_ to: CGPoint) {
     CGWarpMouseCursorPosition(to)
     // Without this the pointer ignores the mouse for a moment after a jump
     CGAssociateMouseAndMouseCursorPosition(1)
-  }
-
-  /// Moves the pointer into the message box (or the bottom middle of the
-  /// window when the page can't say where it is), remembering where it was.
-  func pointerToChat() {
-    guard panel.isVisible, !panel.isMiniaturized else { return }
-    let now = pointerNow()
-    let top = NSScreen.screens.first?.frame.maxY ?? panel.frame.maxY
-    let frame = panel.frame
-    let onChat = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
-    if !onChat.contains(now) { pointerHome = now }
-    messageBoxPoint { [weak self] point in
-      guard let self else { return }
-      let screen = self.panel.convertPoint(toScreen: point)
-      self.warpPointer(CGPoint(x: screen.x, y: top - screen.y))
-    }
   }
 
   /// The middle of the message box (or the bottom middle of the window when
@@ -489,22 +471,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
   }
 
-  /// Z: the pointer goes to the message box and the box takes the keyboard,
-  /// as if clicked (Option typing on).
+  /// Z: Option typing on with Hi-chat's cursor in the message box, as if
+  /// clicked there; the real pointer never moves. Pressed again, the cursor
+  /// goes back to the box.
   func clickChat() {
-    if typing { cursorStop(); pointerToChat() } else { startTyping(jump: true) }
+    if !typing { startTyping() } else if cursorOn { cursorToBox() } else { cursorStart() }
   }
 
-  /// X: back to where the pointer was, handing the keyboard back too.
+  /// X: hands the keyboard back to the app in front.
   func leaveChat() {
-    if typing { stopTyping() } else { pointerBack() }
-  }
-
-  /// Puts the pointer back where it was before it jumped to Hi-chat.
-  func pointerBack() {
-    guard let home = pointerHome else { return }
-    pointerHome = nil
-    warpPointer(home)
+    if typing { stopTyping() }
   }
 
   // MARK: Hi-chat's cursor
@@ -526,6 +502,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     guard panel.isVisible, !panel.isMiniaturized, !cursorOn else { return }
     cursorOn = true
     cursorHome = pointerNow()
+    cursorToBox()
+  }
+
+  /// Puts Hi-chat's cursor in the message box.
+  func cursorToBox() {
     messageBoxPoint { [weak self] point in
       guard let self, self.cursorOn else { return }
       self.cursorAt = self.webView.convert(point, from: nil)
@@ -1042,7 +1023,7 @@ final class Keys {
       heldKey = key
       return nil
     case Key.x, Key.z:
-      // Plain Z / X jump the pointer; fn + Z / X (and Shift) type the letter
+      // Plain Z / X go into Hi-chat and back; fn + Z / X (and Shift) type the letter
       if shift { return pass }
       if fnDown || flags.contains(.maskSecondaryFn) {
         event.flags.remove(.maskSecondaryFn)
