@@ -18,8 +18,9 @@
 // active app, so a click or typing in it never greys out the app you're in.
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
-// New versions: Hi-chat asks once when one is out (Hi-chat > Check for
-// Updates any time), then installs it and restarts.
+// New versions: Hi-chat asks once when one is out (Check for Updates is in
+// the Hi-chat menu and on the Dock icon's right-click menu), then installs
+// it and restarts.
 //
 // Build: mac-app/build.sh (GitHub Actions builds the DMG on every change).
 
@@ -205,6 +206,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     main.addItem(windowItem)
     NSApp.windowsMenu = window
     NSApp.mainMenu = main
+  }
+
+  // Right-click on the Dock icon: there even while another app's menu bar shows.
+  func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+    let menu = NSMenu()
+    let update = menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+    update.target = self
+    let reload = menu.addItem(withTitle: "Reload", action: #selector(reloadPage(_:)), keyEquivalent: "")
+    reload.target = self
+    return menu
   }
 
   @objc func toggleLogin(_ sender: Any?) {
