@@ -10,7 +10,8 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
-//   fn + Left               live mirror window (the JanMirror helper, if built);
+//   fn + Left               live mirror window (Hi-chat, then the screen around
+//                           the pointer; needs Screen Recording);
 //                           fn + Shift + Left closes it
 //
 // The window is a panel that takes the keyboard without making Hi-chat the
@@ -26,7 +27,8 @@ import WebKit
 let homeURL = URL(string: "https://chat.hi-techie.dev/")!
 let appHost = "chat.hi-techie.dev"
 let mirrorNote = Notification.Name("dev.hitechie.janmirror")
-let mirrorHelper = NSHomeDirectory() + "/.hammerspoon/JanMirror"
+/// The live mirror, built from scripts/hammerspoon/JanMirror.swift into the app.
+let mirrorHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/HiChatMirror").path
 /// Marks the scroll events this app posts, so its own tap lets them through.
 let ownEventMark: Int64 = 0x4869_4368
 
@@ -308,6 +310,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
         mirrorNote, object: nil, userInfo: info, deliverImmediately: true)
     }
     if mirrorTask?.isRunning == true || info["command"] == "quit" { return post() }
+    // A helper Hammerspoon started earlier listens for the same commands;
+    // two of them would both answer.
+    let stray = Process()
+    stray.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+    stray.arguments = ["-x", "JanMirror"]
+    try? stray.run()
+    stray.waitUntilExit()
     let task = Process()
     task.executableURL = URL(fileURLWithPath: mirrorHelper)
     do { try task.run() } catch {

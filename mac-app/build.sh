@@ -10,11 +10,16 @@ rm -rf "$OUT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 for arch in arm64 x86_64; do
   swiftc -O -parse-as-library -target "$arch-apple-macos14.0" HiChat.swift -o "$OUT/HiChat-$arch"
+  swiftc -O -parse-as-library -target "$arch-apple-macos14.0" \
+    ../scripts/hammerspoon/JanMirror.swift -o "$OUT/HiChatMirror-$arch"
 done
 lipo -create -output "$APP/Contents/MacOS/HiChat" "$OUT"/HiChat-arm64 "$OUT"/HiChat-x86_64
+lipo -create -output "$APP/Contents/MacOS/HiChatMirror" "$OUT"/HiChatMirror-arm64 "$OUT"/HiChatMirror-x86_64
 sed "s/__VERSION__/$VERSION/g" Info.plist > "$APP/Contents/Info.plist"
 # Ad-hoc signed, with a requirement that names only the app's identifier, so
 # macOS can keep the Accessibility and microphone permissions across updates.
+codesign --force --sign - --identifier dev.hitechie.hichat.mirror \
+  --requirements '=designated => identifier "dev.hitechie.hichat.mirror"' "$APP/Contents/MacOS/HiChatMirror"
 codesign --force --sign - --identifier dev.hitechie.hichat \
   --requirements '=designated => identifier "dev.hitechie.hichat"' "$APP"
 codesign --verify --verbose "$APP"
