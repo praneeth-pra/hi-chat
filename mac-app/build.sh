@@ -16,6 +16,14 @@ done
 lipo -create -output "$APP/Contents/MacOS/HiChat" "$OUT"/HiChat-arm64 "$OUT"/HiChat-x86_64
 lipo -create -output "$APP/Contents/MacOS/HiChatMirror" "$OUT"/HiChatMirror-arm64 "$OUT"/HiChatMirror-x86_64
 sed "s/__VERSION__/$VERSION/g" Info.plist > "$APP/Contents/Info.plist"
+# App icon: every size macOS wants, from the 1024 px AppIcon.png
+ICONSET="$OUT/AppIcon.iconset"
+mkdir "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z $size $size AppIcon.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) AppIcon.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 # Ad-hoc signed, with a requirement that names only the app's identifier, so
 # macOS can keep the Accessibility and microphone permissions across updates.
 codesign --force --sign - --identifier dev.hitechie.hichat.mirror \
