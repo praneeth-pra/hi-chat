@@ -10,8 +10,8 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
-//   Z / X                   pointer to Hi-chat's message box / back to where
-//                           it was (Option typing does the same on and off);
+//   Z / X                   click into Hi-chat's message box (Option typing on)
+//                           / pointer and keyboard back to where they were;
 //                           fn + Z / X types the letter
 //   fn + Left               live mirror window (Hi-chat, then the screen around
 //                           the pointer; needs Screen Recording);
@@ -393,6 +393,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
       let screen = self.panel.convertPoint(toScreen: point)
       self.warpPointer(CGPoint(x: screen.x, y: top - screen.y))
     }
+  }
+
+  /// Z: the pointer goes to the message box and the box takes the keyboard,
+  /// as if clicked (Option typing on).
+  func clickChat() {
+    if typing { pointerToChat() } else { startTyping() }
+  }
+
+  /// X: back to where the pointer was, handing the keyboard back too.
+  func leaveChat() {
+    if typing { stopTyping() } else { pointerBack() }
   }
 
   /// Puts the pointer back where it was before it jumped to Hi-chat.
@@ -826,7 +837,7 @@ final class Keys {
         event.flags.remove(.maskSecondaryFn)
         return pass
       }
-      if !repeating { swallow(key) { key == Key.z ? $0.pointerToChat() : $0.pointerBack() } }
+      if !repeating { swallow(key) { key == Key.z ? $0.clickChat() : $0.leaveChat() } }
       heldKey = key
       return nil
     case Key.home, Key.left:

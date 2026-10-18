@@ -801,7 +801,12 @@ sealed class Shortcuts(ChatWindow app)
       case Native.VK_X or Native.VK_Z:
         if (Shift) return pass;
         var toChat = vk == Native.VK_Z;
-        return Swallow(vk, repeating ? null : a => { if (toChat) a.PointerToChat(); else a.PointerBack(); });
+        return Swallow(vk, repeating ? null : a =>
+        {
+          // Z clicks into the message box (typing on), X goes back
+          if (toChat) { if (a.Typing) a.PointerToChat(); else a.StartTyping(focusBox: true); }
+          else { if (a.Typing) a.StopTyping(); else a.PointerBack(); }
+        });
       case Native.VK_LEFT:
         var shift = Shift;
         return Swallow(vk, repeating ? null : a => { if (shift) a.HideMirror(); else a.ToggleMirror(); });
