@@ -513,7 +513,10 @@ final class Updater {
     alert.informativeText = "Update Now installs it and restarts Hi-chat, which takes a few seconds. You have \(current)."
     alert.addButton(withTitle: "Update Now")
     alert.addButton(withTitle: "Later")
-    if await alert.beginSheetModal(for: app.panel) == .alertFirstButtonReturn {
+    busy = true // one dialog at a time
+    let answer = await alert.beginSheetModal(for: app.panel)
+    busy = false
+    if answer == .alertFirstButtonReturn {
       await install(from: url)
     } else {
       UserDefaults.standard.set(version, forKey: Updater.skippedKey)
