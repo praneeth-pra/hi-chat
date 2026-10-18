@@ -24,14 +24,25 @@ describe('assistant quick setup', () => {
       candidate: 'Priya Sharma',
       role: 'Data Analyst',
       company: '',
+      title: '',
       summary: '',
       focus: ['SQL'],
     })
   })
 
-  it('names the assistant after the candidate and role', () => {
-    expect(assistantName(profile)).toBe('Priya · Data Analyst')
-    expect(assistantName({ ...profile, candidate: '' })).toBe('Data Analyst')
+  it('names the assistant after the company and a short role', () => {
+    expect(assistantName(profile)).toBe('Acme · Data Analyst')
+    expect(assistantName({ ...profile, company: '' })).toBe('Data Analyst')
+    const long = {
+      ...profile,
+      company: 'Contoso Financial Services, Inc.',
+      role: 'Senior Software Engineer, Machine Learning Infrastructure',
+    }
+    expect(assistantName({ ...long, title: 'ML Engineer' })).toBe('ML Engineer')
+    expect(assistantName({ ...long, company: 'Acme' })).toBe(
+      'Senior Software Engineer'
+    )
+    expect(assistantName({ ...long, company: '' }).length).toBeLessThanOrEqual(28)
   })
 
   it('writes first-person instructions that forbid invented experience', () => {
@@ -133,7 +144,7 @@ describe('setupAssistant', () => {
       id: 'abc',
       avatar: '🦊',
       created_at: 1,
-      name: 'Priya · Data Analyst',
+      name: 'Acme · Data Analyst',
       description: profile.summary,
       parameters: { temperature: 0.2 },
       keyterms: ['SQL', 'Power BI'],
