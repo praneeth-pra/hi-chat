@@ -10,7 +10,8 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
-//   fn + Left               live mirror window (the JanMirror helper, if built);
+//   fn + Left               live mirror window (Hi-chat, then the screen around
+//                           the pointer; needs Screen Recording);
 //                           fn + Shift + Left closes it
 //
 // The window is a panel that takes the keyboard without making Hi-chat the
@@ -26,7 +27,8 @@ import WebKit
 let homeURL = URL(string: "https://chat.hi-techie.dev/")!
 let appHost = "chat.hi-techie.dev"
 let mirrorNote = Notification.Name("dev.hitechie.janmirror")
-let mirrorHelper = NSHomeDirectory() + "/.hammerspoon/JanMirror"
+/// The live mirror, built from scripts/hammerspoon/JanMirror.swift into the app.
+let mirrorHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/HiChatMirror").path
 /// Marks the scroll events this app posts, so its own tap lets them through.
 let ownEventMark: Int64 = 0x4869_4368
 
@@ -117,8 +119,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     panel = ChatPanel(
       contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView,
-                  .nonactivatingPanel],
+      styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel],
       backing: .buffered, defer: false)
     panel.title = "Hi-chat"
     panel.titleVisibility = .hidden
@@ -129,7 +130,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.becomesKeyOnlyIfNeeded = false
     panel.isReleasedWhenClosed = false
     panel.collectionBehavior = [.managed, .fullScreenPrimary]
-    panel.backgroundColor = NSColor(red: 23 / 255, green: 23 / 255, blue: 23 / 255, alpha: 1)
+    // The page starts below the window buttons, on a strip the colour of
+    // Hi-chat's sidebar, so the buttons never sit on the logo.
+    panel.backgroundColor = NSColor(name: nil) { look in
+      look.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(red: 13 / 255, green: 13 / 255, blue: 13 / 255, alpha: 1)
+        : NSColor(red: 249 / 255, green: 249 / 255, blue: 249 / 255, alpha: 1)
+    }
     panel.minSize = NSSize(width: 420, height: 360)
     panel.contentView = webView
     panel.delegate = self
@@ -308,6 +315,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
         mirrorNote, object: nil, userInfo: info, deliverImmediately: true)
     }
     if mirrorTask?.isRunning == true || info["command"] == "quit" { return post() }
+    // A helper Hammerspoon started earlier listens for the same commands;
+    // two of them would both answer.
+    let stray = Process()
+    stray.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+    stray.arguments = ["-x", "JanMirror"]
+    try? stray.run()
+    stray.waitUntilExit()
     let task = Process()
     task.executableURL = URL(fileURLWithPath: mirrorHelper)
     do { try task.run() } catch {
