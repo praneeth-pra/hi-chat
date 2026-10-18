@@ -384,7 +384,7 @@ describe('ChatInput', () => {
     vi.mocked(useChat).mockImplementation(() => vi.fn())
   })
 
-  it('has no Speaker/coding controls and displays background typing status', async () => {
+  it('has no Speaker/coding controls', async () => {
     vi.stubGlobal('IS_WEB_APP', true)
     localStorage.setItem(
       'jan-web-speaker-transcription',
@@ -404,49 +404,9 @@ describe('ChatInput', () => {
       screen.queryByRole('button', { name: 'Coding mode' })
     ).not.toBeInTheDocument()
     expect(screen.getByTestId('composer-model-selector')).toBeInTheDocument()
-    expect(
-      screen.getByRole('img', { name: 'Background typing off' })
-    ).toBeInTheDocument()
-    const { handleRemoteKey } = await import('@/lib/remoteKeys')
-    await act(async () => {
-      handleRemoteKey('F18')
-    })
-    expect(
-      screen.getByRole('img', { name: 'Background typing on' })
-    ).toBeInTheDocument()
-    await act(async () => {
-      handleRemoteKey('F19')
-    })
-    expect(
-      screen.getByRole('img', { name: 'Background typing off' })
-    ).toBeInTheDocument()
     localStorage.removeItem('jan-web-speaker-transcription')
     vi.unstubAllGlobals()
   })
-  it('sends an F20 external dictation paste as-is without requiring Speaker', async () => {
-    const send = vi.fn(async () => {})
-    vi.mocked(useChat).mockReturnValue(send)
-    mockPromptState.prompt = 'Unrelated typed draft'
-    await act(async () => {
-      renderWithRouter()
-    })
-    const { handleRemoteKey } = await import('@/lib/remoteKeys')
-    handleRemoteKey('F20')
-    fireEvent.paste(screen.getByTestId('chat-input'), {
-      clipboardData: { getData: () => 'Explain DNS.' },
-    })
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(
-        'Explain DNS.',
-        true,
-        undefined,
-        undefined
-      )
-    )
-    expect(useDictationDelivery.getState().pending).toEqual([])
-    vi.mocked(useChat).mockImplementation(() => vi.fn())
-  })
-
   it('calls sendMessage when send button is clicked', async () => {
     const user = userEvent.setup()
 

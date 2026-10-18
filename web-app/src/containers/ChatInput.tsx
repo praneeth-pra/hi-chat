@@ -1,19 +1,11 @@
 'use client'
 
-import {
-  deliverDictationPaste,
-  useDictationDelivery,
-} from '@/lib/dictationDelivery'
+import { useDictationDelivery } from '@/lib/dictationDelivery'
 
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
 import { cn } from '@/lib/utils'
 import { warmAnswer } from '@/lib/answerWarm'
-import {
-  cancelDictation,
-  stripFunctionKeyChars,
-  takeDictationPaste,
-} from '@/lib/remoteKeys'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -46,7 +38,6 @@ import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
 import { DictationBanner, DictationButton } from './DictationIndicator'
-import { BackgroundTypingIndicator } from './BackgroundTypingIndicator'
 import {
   ContentType,
   ExtensionTypeEnum,
@@ -1012,14 +1003,6 @@ const ChatInput = ({
   }
 
   const handlePaste = async (e: React.ClipboardEvent) => {
-    // Text pasted by a dictation app right after F20 is sent as is, without
-    // passing through the box (queued if a reply is still streaming)
-    const pasted = e.clipboardData?.getData('text/plain')?.trim()
-    if (takeDictationPaste() && pasted) {
-      e.preventDefault()
-      deliverDictationPaste(pasted)
-      return
-    }
     // Only process images if model supports mmproj
     if (hasMmproj) {
       const clipboardItems = e.clipboardData?.items
@@ -1231,7 +1214,7 @@ const ChatInput = ({
               value={prompt}
               data-testid={'chat-input'}
               onChange={(e) => {
-                const value = stripFunctionKeyChars(e.target.value)
+                const value = e.target.value
                 setPrompt(value)
                 if (value.trim()) warmAnswer()
                 // Count the number of newlines to estimate rows
@@ -1239,14 +1222,6 @@ const ChatInput = ({
                 setRows(Math.min(newRows, maxRows))
               }}
               onKeyDown={(e) => {
-                // Typing by hand (not a dictation app's Ctrl or Cmd+V) ends
-                // dictation
-                if (
-                  (e.key.length === 1 || e.key === 'Backspace') &&
-                  !e.metaKey &&
-                  !e.ctrlKey
-                )
-                  cancelDictation()
                 // e.keyCode 229 is for IME input with Safari
                 const isComposing =
                   e.nativeEvent.isComposing || e.keyCode === 229
@@ -1436,7 +1411,6 @@ const ChatInput = ({
                   variant="plain"
                 />
               </div>
-              <BackgroundTypingIndicator />
               <DictationButton />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&

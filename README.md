@@ -67,36 +67,21 @@ Use the header list icon to extract a copyable question list from that
 chat's prompts on demand. Sidebar trash buttons delete immediately; the header
 trash button opens confirmation.
 
-## Hammerspoon shortcuts
+## Mac app
 
-The Mac script is `scripts/hammerspoon/jan-remote.lua`. Replace your local copy
-and reload Hammerspoon; a Railway deployment cannot update a script on your Mac.
-The script retains scrolling, fn + Up/Down code navigation, Left Control dictation,
-fn + Right sending, Z/X and the native-sized dummy cursor. The retired Speaker
-Option toggle and recommendation shortcuts are removed. Plain arrows and fn + Left remain free.
-Tap **Left Option** to toggle background typing into Jan; tap it again or press
-Escape to stop. The pointer moves onto Jan as well (a dummy cursor stays on the
-laptop screen), hovering works and a click over Jan is sent as Shift + F20 so
-Jan clicks it itself without Safari becoming active,
-and two-finger scrolling scrolls Jan; turning it off brings the pointer back. Jan's keyboard symbol lights up while enabled. Your main app
-stays active; ordinary typing goes to Jan, including Z/X. Enter adds a newline;
-fn + Right sends; fn + Return is released. Option used in a chord does not toggle the mode. The normal
-Z/X navigation resumes when typing is off. Fn navigation remains available.
+Hi-chat for Mac (`mac-app/`) is a small Swift app around the site, with the
+shortcuts built in. Download it from
+[the latest release](https://github.com/praneeth-pra/hi-chat/releases/latest/download/Hi-chat.dmg);
+it offers each new version itself (Hi-chat > Check for Updates any time).
 
-Before first use, select Hi-chat in Safari (or the Jan web app), then return to
-your main app and tap Option. Safari must retain Hi-chat in its last selected
-window/tab; the script stops routing if that changes. It posts to the application
-without activating a window. Background event handling needs testing on your Mac;
-Linux checks cannot verify Safari receiving input or macOS window appearance.
-Only typing/editing keys are routed; Tab and non-editing Command/Control chords
-exit the mode and go to the main app. Side arrows edit Jan's text while enabled
-and pass through normally when disabled. The icon resets if script heartbeats stop. Typing and missing-window messages use the Hammerspoon console instead of popups.
+- tap **Left Control**: dictate; tap again to send. **Escape** throws it away.
+- tap **Left Option**: type into Hi-chat while the app you're in stays active.
+- **fn + Right**: send. **fn + Up / Down**: code block above / below.
+- **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
+- **fn + Left**: live mirror window; **fn + Shift + Left** closes it.
 
-The coding-mode toolbar button and toggle are also removed. F18/F19 now carry
-explicit typing-status signals, without recording or sending. Questions asking
-for code still receive the existing short-code instruction automatically.
-There is no Speaker capture, speech review UI, background question judge or microphone
-turn detector or Smart Turn model download.
+The shortcuts need Accessibility, the mirror needs Screen Recording.
+GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
 
 See [Question input alternatives and answer latency](docs/question-input-alternatives.md)
 for the assessed replacement options; no replacement listener is enabled.
@@ -130,8 +115,3 @@ entered in the app under Model Providers.
 ## License
 
 Apache 2.0, see [LICENSE](LICENSE).
-
-The dummy cursor uses macOS’s native arrow image, logical dimensions and hotspot,
-with Accessibility cursor scaling. Update the Mac script and reload Hammerspoon
-to apply this change. Run `lua scripts/hammerspoon/test-native-cursor.lua` for the
-portable cursor sizing checks; actual rendering needs a Mac.

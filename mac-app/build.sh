@@ -11,7 +11,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 for arch in arm64 x86_64; do
   swiftc -O -parse-as-library -target "$arch-apple-macos14.0" HiChat.swift -o "$OUT/HiChat-$arch"
   swiftc -O -parse-as-library -target "$arch-apple-macos14.0" \
-    ../scripts/hammerspoon/JanMirror.swift -o "$OUT/HiChatMirror-$arch"
+    HiChatMirror.swift -o "$OUT/HiChatMirror-$arch"
 done
 lipo -create -output "$APP/Contents/MacOS/HiChat" "$OUT"/HiChat-arm64 "$OUT"/HiChat-x86_64
 lipo -create -output "$APP/Contents/MacOS/HiChatMirror" "$OUT"/HiChatMirror-arm64 "$OUT"/HiChatMirror-x86_64

@@ -30,7 +30,7 @@ import WebKit
 let homeURL = URL(string: "https://chat.hi-techie.dev/")!
 let appHost = "chat.hi-techie.dev"
 let mirrorNote = Notification.Name("dev.hitechie.janmirror")
-/// The live mirror, built from scripts/hammerspoon/JanMirror.swift into the app.
+/// The live mirror, built from mac-app/HiChatMirror.swift into the app.
 let mirrorHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/HiChatMirror").path
 /// Marks the scroll events this app posts, so its own tap lets them through.
 let ownEventMark: Int64 = 0x4869_4368
