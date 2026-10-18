@@ -37,6 +37,8 @@ vi.mock('@/hooks/useMessages', () => ({
 }))
 vi.mock('@/hooks/useThreadManagement', () => ({
   useThreadManagement: () => ({ folders: [], getFolderById: vi.fn() }),
+  useThreadManagementStore: (selector: any) =>
+    selector({ folders: [], getFolderById: vi.fn() }),
 }))
 vi.mock('@/containers/dialogs', async () => ({
   RenameThreadDialog: () => null,

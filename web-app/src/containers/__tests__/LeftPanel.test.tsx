@@ -17,6 +17,7 @@ vi.mock('@tanstack/react-router', () => ({
     </a>
   ),
   useNavigate: () => vi.fn(),
+  useMatches: () => [],
   useRouterState: vi.fn((options) => {
     if (options && options.select) {
       return options.select({ location: { pathname: '/' } })
@@ -71,6 +72,7 @@ vi.mock('@/hooks/useThreadManagement', () => {
 
   return {
     useThreadManagement: () => mockStore,
+    useThreadManagementStore: (selector: any) => selector(mockStore),
   }
 })
 
@@ -87,7 +89,9 @@ vi.mock('./ThreadList', () => ({
 }))
 
 vi.mock('@/containers/DownloadManegement', () => ({
-  DownloadManagement: () => <div data-testid="download-management">DownloadManagement</div>,
+  DownloadManagement: () => (
+    <div data-testid="download-management">DownloadManagement</div>
+  ),
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -95,7 +99,6 @@ vi.mock('@/i18n/react-i18next-compat', () => ({
     t: (key: string) => key,
   }),
 }))
-
 
 vi.mock('@/hooks/useEvent', () => ({
   useEvent: () => ({
@@ -113,7 +116,9 @@ vi.mock('@/hooks/useDownloadStore', () => ({
 
 // Mock the dialogs
 vi.mock('@/containers/dialogs', () => ({
-  DeleteAllThreadsDialog: () => <div data-testid="delete-all-threads-dialog">Dialog</div>,
+  DeleteAllThreadsDialog: () => (
+    <div data-testid="delete-all-threads-dialog">Dialog</div>
+  ),
 }))
 
 // Mock the store
@@ -159,9 +164,9 @@ describe('LeftPanel', () => {
       toggle: vi.fn(),
       close: vi.fn(),
     })
-    
+
     render(<LeftPanel />)
-    
+
     // Check that the panel is rendered (it should contain some basic elements)
     expect(screen.getByPlaceholderText('common:search')).toBeDefined()
   })
@@ -205,9 +210,9 @@ describe('LeftPanel', () => {
       toggle: vi.fn(),
       close: vi.fn(),
     })
-    
+
     render(<LeftPanel />)
-    
+
     const searchInput = screen.getByPlaceholderText('common:search')
     expect(searchInput).toBeDefined()
     expect(searchInput).toHaveAttribute('type', 'text')
@@ -220,9 +225,9 @@ describe('LeftPanel', () => {
       toggle: vi.fn(),
       close: vi.fn(),
     })
-    
+
     render(<LeftPanel />)
-    
+
     expect(screen.getByTestId('download-management')).toBeDefined()
   })
 
@@ -233,13 +238,13 @@ describe('LeftPanel', () => {
       toggle: vi.fn(),
       close: vi.fn(),
     })
-    
+
     render(<LeftPanel />)
-    
+
     // Check that basic structure exists
     const searchInput = screen.getByPlaceholderText('common:search')
     expect(searchInput).toBeDefined()
-    
+
     const downloadComponent = screen.getByTestId('download-management')
     expect(downloadComponent).toBeDefined()
   })
@@ -266,11 +271,13 @@ describe('LeftPanel', () => {
       toggle: vi.fn(),
       close: vi.fn(),
     })
-    
+
     render(<LeftPanel />)
-    
+
     // Check that the sidebar toggle icon is present by looking for the IconLayoutSidebar
-    const toggleButton = document.querySelector('svg.tabler-icon-layout-sidebar')
+    const toggleButton = document.querySelector(
+      'svg.tabler-icon-layout-sidebar'
+    )
     expect(toggleButton).not.toBeNull()
   })
 })

@@ -498,10 +498,18 @@ async function transcribe(samples: Float32Array): Promise<string> {
   return (data.results?.find((r) => r.ok && r.text?.trim())?.text ?? '').trim()
 }
 
+/**
+ * The voice level the breathing dot follows, rounded so the page only
+ * redraws when the dot visibly changes (not ~23 times a second).
+ */
+export function dotLevel(block: Float32Array): number {
+  return Math.round(Math.min(1, rms(block) * 8) * 10) / 10
+}
+
 /** Takes one block from the mic; exported for tests. */
 export function onBlock(rec: Recording, block: Float32Array) {
-  const level = rms(block)
-  useDictation.setState({ level: Math.min(1, level * 8) })
+  const level = dotLevel(block)
+  if (useDictation.getState().level !== level) useDictation.setState({ level })
   const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
   rec.audio.push(down)
   rec.live?.push(down)
