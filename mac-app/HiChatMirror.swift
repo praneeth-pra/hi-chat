@@ -1,20 +1,18 @@
-// JanMirror: a floating window that mirrors Jan's window live and, on
-// request, the screen around the pointer. It uses ScreenCaptureKit, so the
-// picture is a live stream about one frame behind the real screen.
+// HiChatMirror: a floating window that mirrors the Hi-chat window live and,
+// on request, the screen around the pointer. It uses ScreenCaptureKit, so
+// the picture is a live stream about one frame behind the real screen.
 //
 // The window never takes focus: it is a non-activating panel of a helper
 // with no Dock icon. Drag it to move, drag its bottom-right corner to
-// resize, x hides it. Hammerspoon (jan-remote.lua) starts it and sends
-// commands as distributed notifications named "dev.hitechie.janmirror":
-//   { command = "toggle", window = "<CGWindowID of Jan>" }
-//     hidden -> shows Jan; Jan -> the screen around the pointer; and back
+// resize, x hides it. The Hi-chat app (HiChat.swift) starts it from inside
+// its bundle and sends commands as distributed notifications named
+// "dev.hitechie.janmirror":
+//   { command = "toggle", window = "<CGWindowID of Hi-chat>" }
+//     hidden -> shows Hi-chat; Hi-chat -> the screen around the pointer; and back
 //   { command = "hide" }   { command = "quit" }
-// fn + Shift + Left in Hammerspoon sends "hide".
+// fn + Left sends "toggle", fn + Shift + Left sends "hide".
 //
-// fn + Left in Hammerspoon sends "toggle".
-//
-// Build once (needs the Xcode Command Line Tools, macOS 14 or later):
-//   swiftc -O -parse-as-library JanMirror.swift -o ~/.hammerspoon/JanMirror
+// build.sh compiles it into Hi-chat.app (macOS 14 or later).
 
 @preconcurrency import AppKit
 @preconcurrency import CoreMedia
@@ -211,7 +209,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         if mode == .jan {
           guard let window = content.windows.first(where: { $0.windowID == janWindow }) else {
-            say("Jan's window \(janWindow) was not found; select Hi-chat in Safari")
+            say("the Hi-chat window \(janWindow) was not found")
             return
           }
           filter = SCContentFilter(desktopIndependentWindow: window)
@@ -245,9 +243,9 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
           return
         }
         stream = next
-        say("streaming \(mode == .jan ? "Jan" : "the pointer view") at \(config.width)x\(config.height)")
+        say("streaming \(mode == .jan ? "Hi-chat" : "the pointer view") at \(config.width)x\(config.height)")
       } catch {
-        say("could not start: \(error.localizedDescription) (allow Screen Recording for Hammerspoon)")
+        say("could not start: \(error.localizedDescription) (allow Screen Recording for Hi-chat)")
       }
     }
   }

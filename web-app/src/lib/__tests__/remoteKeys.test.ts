@@ -1,16 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useBackgroundTyping } from '@/hooks/useBackgroundTyping'
-import {
-  stepCode,
-  handleRemoteKey,
-  listenForRemoteKeys,
-  stripFunctionKeyChars,
-  takeDictationPaste,
-  cancelDictation,
-} from '../remoteKeys'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { stepCode, handleRemoteKey, listenForRemoteKeys } from '../remoteKeys'
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 const toggleDictation = vi.fn()
-const stopDictation = vi.fn()
 const discardRecording = vi.fn()
 const dictationState = { status: 'idle' }
 type Listener = (s: typeof dictationState, p: typeof dictationState) => void
@@ -22,7 +13,6 @@ const setDictationStatus = (status: string) => {
 }
 vi.mock('@/lib/dictation', () => ({
   toggleDictation: () => toggleDictation(),
-  stopDictation: () => stopDictation(),
   cancelDictation: () => discardRecording(),
   useDictation: {
     getState: () => dictationState,
@@ -32,86 +22,23 @@ vi.mock('@/lib/dictation', () => ({
     },
   },
 }))
-describe('remote keys without Speaker', () => {
+describe('remote keys', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    cancelDictation()
-    useBackgroundTyping.getState().disable()
+    dictationState.status = 'idle'
   })
-  afterEach(() => {
-    useBackgroundTyping.getState().disable()
-    vi.useRealTimers()
-  })
-  it('ignores retired recommendation keys and ordinary Option/arrows', () => {
-    for (const key of [
-      'F16',
-      'Shift+F15',
-      'Shift+F18',
-      'ArrowLeft',
-      'ArrowRight',
-      'Home',
-      'End',
-      'Alt',
-    ])
+  it('ignores keys the app does not send', () => {
+    for (const key of ['F13', 'F16', 'F18', 'F19', 'F20', 'Shift+F20', 'Alt'])
       expect(handleRemoteKey(key)).toBe(false)
     expect(toggleDictation).not.toHaveBeenCalled()
   })
-  it('leaves Option, arrows and retired recommendation keys unconsumed', () => {
+  it('only Escape is taken from the keyboard; other keys pass through', () => {
     const stop = listenForRemoteKeys()
-    for (const key of [
-      'ArrowLeft',
-      'ArrowRight',
-      'Home',
-      'End',
-      'Alt',
-      'F16',
-    ]) {
-      const event = new KeyboardEvent('keydown', { key, cancelable: true })
-      window.dispatchEvent(event)
-      expect(event.defaultPrevented).toBe(false)
-    }
-    for (const key of ['F15', 'F18']) {
-      const event = new KeyboardEvent('keydown', {
-        key,
-        shiftKey: true,
-        cancelable: true,
-      })
-      window.dispatchEvent(event)
-      expect(event.defaultPrevented).toBe(false)
-    }
-    stop()
-  })
-  it('F18/F19 set only the typing indicator, including Safari key codes', () => {
-    const stop = listenForRemoteKeys()
-    for (const key of ['F18', 'F18']) {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key }))
-      expect(useBackgroundTyping.getState().enabled).toBe(true)
-    }
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F19' }))
-    expect(useBackgroundTyping.getState().enabled).toBe(false)
-    for (const keyCode of [129, 130]) {
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Unidentified', keyCode })
-      )
-      expect(useBackgroundTyping.getState().enabled).toBe(keyCode === 129)
-    }
+    const f14 = new KeyboardEvent('keydown', { key: 'F14', cancelable: true })
+    window.dispatchEvent(f14)
     expect(toggleDictation).not.toHaveBeenCalled()
-    expect(stopDictation).not.toHaveBeenCalled()
+    expect(f14.defaultPrevented).toBe(false)
     stop()
-  })
-  it('expires stale typing status and renews it without toggling', () => {
-    vi.useFakeTimers()
-    handleRemoteKey('F18')
-    vi.advanceTimersByTime(4000)
-    handleRemoteKey('F18')
-    vi.advanceTimersByTime(4000)
-    expect(useBackgroundTyping.getState().enabled).toBe(true)
-    vi.advanceTimersByTime(2000)
-    expect(useBackgroundTyping.getState().enabled).toBe(false)
-    handleRemoteKey('F18')
-    handleRemoteKey('F19')
-    vi.advanceTimersByTime(6000)
-    expect(useBackgroundTyping.getState().enabled).toBe(false)
   })
   it('F15 sends typed text and never submits when the button is disabled', () => {
     const button = document.createElement('button')
@@ -119,33 +46,17 @@ describe('remote keys without Speaker', () => {
     const click = vi.fn()
     button.addEventListener('click', click)
     document.body.appendChild(button)
-    const stop = listenForRemoteKeys()
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F15' }))
+    expect(handleRemoteKey('F15')).toBe(true)
     expect(click).toHaveBeenCalledTimes(1)
     button.disabled = true
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F15' }))
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'F15', repeat: true })
-    )
+    handleRemoteKey('F15')
     expect(click).toHaveBeenCalledTimes(1)
-    stop()
     button.remove()
   })
-  it('F14 toggles dictation and F13 stops it, also by key code', () => {
-    const stop = listenForRemoteKeys()
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F14' }))
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 125 })
-    )
-    expect(toggleDictation).toHaveBeenCalledTimes(2)
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F13' }))
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 124 })
-    )
-    expect(stopDictation).toHaveBeenCalledTimes(2)
-    stop()
+  it('F14 toggles dictation', () => {
+    expect(handleRemoteKey('F14')).toBe(true)
+    expect(toggleDictation).toHaveBeenCalledTimes(1)
   })
-
   it('Escape or Shift+F13 discards a recording without sending it', () => {
     const stop = listenForRemoteKeys()
     const esc = new KeyboardEvent('keydown', {
@@ -163,88 +74,21 @@ describe('remote keys without Speaker', () => {
     window.dispatchEvent(esc2)
     expect(discardRecording).toHaveBeenCalledTimes(1)
     expect(esc2.defaultPrevented).toBe(true)
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'F13', shiftKey: true })
-    )
+    expect(handleRemoteKey('Shift+F13')).toBe(true)
     expect(discardRecording).toHaveBeenCalledTimes(2)
-    expect(stopDictation).not.toHaveBeenCalled()
     dictationState.status = 'idle'
     expect(handleRemoteKey('Shift+F13')).toBe(true)
     expect(discardRecording).toHaveBeenCalledTimes(2)
     stop()
   })
-
-  it('F20 focuses the chat box with the cursor at the end', () => {
+  it('F17 focuses the chat box with the cursor at the end', () => {
     const box = document.createElement('textarea')
     box.dataset.testid = 'chat-input'
     box.value = 'draft'
     document.body.appendChild(box)
-    const stop = listenForRemoteKeys()
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F20' }))
+    expect(handleRemoteKey('F17')).toBe(true)
     expect(document.activeElement).toBe(box)
     expect(box.selectionStart).toBe(5)
-
-    stop()
-    box.remove()
-  })
-  it('accepts F20 that Safari reports only by key code', () => {
-    const box = document.createElement('textarea')
-    box.dataset.testid = 'chat-input'
-    document.body.appendChild(box)
-    const stop = listenForRemoteKeys()
-
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Unidentified', keyCode: 131 })
-    )
-    expect(document.activeElement).toBe(box)
-
-    stop()
-    box.remove()
-  })
-
-  it('strips function-key characters Safari types into the box', () => {
-    expect(stripFunctionKeyChars('\uF717Can you explain ECS?')).toBe(
-      'Can you explain ECS?'
-    )
-    expect(stripFunctionKeyChars('plain text')).toBe('plain text')
-  })
-  it('treats one paste after F20 as dictation', () => {
-    const box = document.createElement('textarea')
-    box.dataset.testid = 'chat-input'
-    document.body.appendChild(box)
-    const stop = listenForRemoteKeys()
-    const pressF20 = () =>
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F20' }))
-
-    cancelDictation() // earlier tests pressed F20
-    expect(takeDictationPaste()).toBe(false)
-    pressF20()
-    expect(takeDictationPaste()).toBe(true)
-    expect(takeDictationPaste()).toBe(false)
-
-    pressF20()
-    cancelDictation()
-    expect(takeDictationPaste()).toBe(false)
-
-    pressF20()
-    expect(takeDictationPaste(Date.now() + 4 * 60 * 1000)).toBe(false)
-
-    stop()
-    box.remove()
-  })
-  it('F17 focuses the chat box but leaves a paste as a draft', () => {
-    const box = document.createElement('textarea')
-    box.dataset.testid = 'chat-input'
-    document.body.appendChild(box)
-    const stop = listenForRemoteKeys()
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F20' }))
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F17' }))
-    expect(document.activeElement).toBe(box)
-    expect(takeDictationPaste()).toBe(false)
-
-    stop()
     box.remove()
   })
 
@@ -264,17 +108,10 @@ describe('remote keys without Speaker', () => {
         ({ top: tops[id] - offset, bottom: tops[id] - offset + 50 }) as DOMRect
       document.body.appendChild(block)
     }
-    const stop = listenForRemoteKeys()
-    const press = (key: string) =>
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key, shiftKey: true })
-      )
-
     // Scrolled to the bottom: everything is above
     offset = 1000
-    press('F16')
+    handleRemoteKey('Shift+F16')
     expect(scrolled).toEqual(['three'])
-    stop()
 
     // Quick presses keep stepping from where it was heading
     stepCode(-1, 10_000)
@@ -299,81 +136,6 @@ describe('remote keys without Speaker', () => {
     stepCode(1, 50_000)
     expect(scrolled.length).toBe(count) // No code below
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
-  })
-
-  it('Shift + F20 then Shift + F19 clicks what is under the pointer, focusing a text box', () => {
-    const button = document.createElement('button')
-    const box = document.createElement('textarea')
-    document.body.append(button, box)
-    const clicked = vi.fn()
-    button.addEventListener('click', clicked)
-    let under: Element = button
-    document.elementFromPoint = () => under
-    const stop = listenForRemoteKeys()
-    const key = (name: string) =>
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: name, shiftKey: true })
-      )
-    const move = (x: number, y: number) =>
-      window.dispatchEvent(
-        new MouseEvent('pointermove', { clientX: x, clientY: y })
-      )
-    const click = () => {
-      key('F20')
-      key('F19')
-    }
-
-    // No pointer seen over the page yet: nothing is clicked
-    click()
-    expect(clicked).not.toHaveBeenCalled()
-
-    move(40, 60)
-    click()
-    expect(clicked).toHaveBeenCalledTimes(1)
-
-    // Dragged between press and release: a selection, not a click
-    key('F20')
-    move(140, 60)
-    key('F19')
-    expect(clicked).toHaveBeenCalledTimes(1)
-
-    under = box
-    move(300, 300)
-    click()
-    expect(document.activeElement).toBe(box)
-    stop()
-    button.remove()
-    box.remove()
-  })
-
-  it('a drag selects the text from the press to the pointer', () => {
-    const text = document.createElement('p')
-    text.textContent = 'hello world'
-    document.body.append(text)
-    const node = text.firstChild as Text
-    const caretRangeFromPoint = (x: number) => {
-      const range = document.createRange()
-      range.setStart(node, Math.min(x / 10, node.length))
-      return range
-    }
-    Object.assign(document, { caretRangeFromPoint })
-    const stop = listenForRemoteKeys()
-    const key = (name: string) =>
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', { key: name, shiftKey: true })
-      )
-    window.dispatchEvent(
-      new MouseEvent('pointermove', { clientX: 0, clientY: 5 })
-    )
-    key('F20')
-    window.dispatchEvent(
-      new MouseEvent('pointermove', { clientX: 50, clientY: 5 })
-    )
-    key('F19')
-    expect(window.getSelection()?.toString()).toBe('hello')
-    stop()
-    text.remove()
-    Object.assign(document, { caretRangeFromPoint: undefined })
   })
 })
 

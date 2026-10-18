@@ -3,10 +3,10 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ['mac-app/**', 'scripts/hammerspoon/JanMirror.swift', '.github/workflows/mac-app.yml']
+    paths: ['mac-app/**', '.github/workflows/mac-app.yml']
   pull_request:
     branches: [main]
-    paths: ['mac-app/**', 'scripts/hammerspoon/JanMirror.swift', '.github/workflows/mac-app.yml']
+    paths: ['mac-app/**', '.github/workflows/mac-app.yml']
   workflow_dispatch:
 
 permissions:
