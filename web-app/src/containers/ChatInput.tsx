@@ -1,5 +1,6 @@
 'use client'
 
+import { AppTypingIndicator } from './AppTypingIndicator'
 import { useDictationDelivery } from '@/lib/dictationDelivery'
 
 import TextareaAutosize from 'react-textarea-autosize'
@@ -1411,6 +1412,7 @@ const ChatInput = ({
                   variant="plain"
                 />
               </div>
+              <AppTypingIndicator />
               <DictationButton />
               {selectedProvider === 'llamacpp' &&
                 hasActiveModels &&

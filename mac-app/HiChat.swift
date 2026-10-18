@@ -51,7 +51,9 @@ enum Key {
 
 /// A window that takes the keyboard without activating Hi-chat.
 final class ChatPanel: NSPanel {
-  override var canBecomeKey: Bool { true }
+  /// Set for a moment while handing the keyboard back (see stopTyping).
+  var refusesKey = false
+  override var canBecomeKey: Bool { !refusesKey }
   override var canBecomeMain: Bool { true }
 
   // Hi-chat is usually not the active app, so its menu bar isn't there to
@@ -290,8 +292,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   }
 
   /// On while Option typing is: until it is tapped off, or another window
-  /// takes the keyboard.
-  var typing = false
+  /// takes the keyboard. The page shows it by the message box.
+  var typing = false {
+    didSet { if typing != oldValue { tellPageTyping() } }
+  }
+
+  func tellPageTyping() {
+    webView.evaluateJavaScript("window.hiChatTyping && window.hiChatTyping(\(typing))")
+  }
+
+  /// A window that is never seen: taking the keyboard for a moment and
+  /// dropping it hands the keyboard back to the app in front, without
+  /// hiding Hi-chat (which made it blink).
+  lazy var keySink: ChatPanel = {
+    let sink = ChatPanel(contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+    sink.alphaValue = 0
+    sink.ignoresMouseEvents = true
+    sink.isReleasedWhenClosed = false
+    return sink
+  }()
 
   /// Option typing: Hi-chat takes the keyboard, the app in front stays active.
   func toggleTyping() {
@@ -314,11 +334,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     typing = false
     typingReturnTo = nil
     guard panel.isKeyWindow else { return }
-    // Giving up the keyboard: hide and show again without taking it, so it
-    // goes back to the app in front.
-    panel.orderOut(nil)
+    // Giving up the keyboard without hiding: the unseen window takes it, then
+    // drops it while Hi-chat's window refuses it, so it goes back to the app
+    // in front.
+    panel.refusesKey = true
+    keySink.makeKeyAndOrderFront(nil)
+    keySink.orderOut(nil)
     back?.activate()
-    panel.orderFrontRegardless()
+    DispatchQueue.main.async { [weak self] in self?.panel.refusesKey = false }
   }
 
   func windowDidResignKey(_ notification: Notification) {
@@ -466,6 +489,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     alert.addButton(withTitle: "OK")
     alert.addButton(withTitle: "Cancel")
     alert.beginSheetModal(for: panel) { completionHandler($0 == .alertFirstButtonReturn) }
+  }
+
+  // A reload starts the page afresh: tell it again whether typing is on.
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    if typing { tellPageTyping() }
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
