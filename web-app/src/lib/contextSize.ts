@@ -4,7 +4,8 @@ import { recentMessages } from '@/lib/messages'
 /**
  * Roughly how much each question sends: the assistant's instructions and
  * documents, the recent messages (see recentMessages) and every image still
- * among them, which goes again, whole, with each question.
+ * among them, which goes again, whole, with each question. Whether that
+ * slows answers down is measured, not guessed: see replySpeed.
  */
 export type ContextSize = {
   /** Text tokens, estimated at 4 characters a token. */
@@ -13,8 +14,6 @@ export type ContextSize = {
   baseTokens: number
   images: number
   imageBytes: number
-  /** light: answers as fast as a new chat; heavy: noticeably slower. */
-  level: 'light' | 'medium' | 'heavy'
 }
 
 const CHARS_PER_TOKEN = 4
@@ -42,22 +41,12 @@ export function contextSize(
       else chars += part.text?.value?.length ?? 0
     }
   }
-  // Only what the chat adds counts towards the level: a new chat sends the
-  // instructions and documents too. Text costs Groq little (about 0.1 s per
-  // 10k tokens); images cost far more.
   const chatTokens = Math.round(chars / CHARS_PER_TOKEN)
   const baseTokens = Math.round(system.length / CHARS_PER_TOKEN)
   const tokens = chatTokens + baseTokens
   const imageBytes = imageUrls.reduce((sum, url) => sum + urlBytes(url), 0)
   const images = imageUrls.length
-  const MB = 1024 * 1024
-  const level =
-    chatTokens > 25_000 || images > 4 || imageBytes > 8 * MB
-      ? 'heavy'
-      : chatTokens > 12_000 || images > 2 || imageBytes > 3 * MB
-        ? 'medium'
-        : 'light'
-  return { tokens, baseTokens, images, imageBytes, level }
+  return { tokens, baseTokens, images, imageBytes }
 }
 
 /** "3.2k" for tokens, "1.4 MB" / "300 KB" for bytes. */

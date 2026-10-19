@@ -80,6 +80,7 @@ import {
   pageHidden,
   type StreamTiming,
 } from '@/lib/replyTiming'
+import { recordReply } from '@/lib/replySpeed'
 
 // Helper to create thread content with consistent structure
 const createThreadContent = (
@@ -1299,6 +1300,7 @@ export const useChat = () => {
           // Every reply outside Accuracy (which logs its own line): Auto ·
           // Speed and hand-picked models alike, so slow replies can be traced.
           if (!accuracyRequested) reportSpeech(speedLogLine(timings))
+          recordReply(timings)
 
           // Create a final content object for adding to the thread
           let finalContent = newAssistantThreadContent(

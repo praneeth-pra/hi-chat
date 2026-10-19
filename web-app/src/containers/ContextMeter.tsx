@@ -4,6 +4,7 @@ import { useAssistant } from '@/hooks/useAssistant'
 import { withAnswerDetail } from '@/lib/answerDetail'
 import { withDocuments } from '@/lib/assistantDocuments'
 import { contextSize, formatBytes, formatTokens } from '@/lib/contextSize'
+import { chatDelay } from '@/lib/replySpeed'
 import { cn } from '@/lib/utils'
 
 const DOT = {
@@ -11,15 +12,14 @@ const DOT = {
   medium: 'bg-amber-500',
   heavy: 'bg-red-500',
 }
-const SPEED = {
-  light: 'Answers stay fast.',
-  medium: 'Answers are a little slower.',
-  heavy: 'Answers are noticeably slower: a new chat (fn + N) starts light.',
-}
+
+const secs = (s: number) => `${s.toFixed(1)} s`
 
 /**
- * Next to the model: how much the next question sends, and whether the chat
- * is getting heavy (mostly images, which go again with every question).
+ * Next to the model: how much the next question sends, and whether that is
+ * actually slowing this chat's answers down. The colour comes from measured
+ * timings (this chat's latest answers against a fresh chat's), never from
+ * the size alone.
  */
 export function ContextMeter({
   messages,
@@ -45,11 +45,18 @@ export function ContextMeter({
       ),
     [messages, assistant, draft, draftImages]
   )
+  const delay = useMemo(() => chatDelay(messages), [messages])
   if (!messages.length && !draft.trim() && !draftImages.length) return null
+  const level = delay?.level ?? 'light'
   const images = size.images
     ? ` and ${size.images} image${size.images > 1 ? 's' : ''} (${formatBytes(size.imageBytes)})`
     : ''
-  const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text (${formatTokens(size.baseTokens)} of them your assistant's instructions and documents, sent in every chat)${images}. ${SPEED[size.level]}`
+  const speed = !delay
+    ? 'No slowdown measured yet.'
+    : level === 'light'
+      ? `Answers here start as fast as in a new chat (${secs(delay.recentS)}).`
+      : `Answers here start ${secs(delay.delayS)} later than in a new chat (${secs(delay.recentS)} against ${secs(delay.baselineS)}).${level === 'heavy' ? ' A new chat (fn + N) starts fast again.' : ''}`
+  const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text${images}. ${speed}`
   return (
     <span
       role="img"
@@ -59,10 +66,12 @@ export function ContextMeter({
       className="h-7 px-1 flex items-center gap-1 text-xs text-main-view-fg/50 tabular-nums shrink-0"
     >
       <span
-        className={cn('size-1.5 rounded-full', DOT[size.level])}
+        className={cn('size-1.5 rounded-full', DOT[level])}
         aria-hidden="true"
       />
-      {formatTokens(size.tokens)}
+      {level === 'light' || !delay
+        ? formatTokens(size.tokens)
+        : `+${secs(delay.delayS)}`}
       {size.images > 0 && (
         <span className="hidden sm:inline">· {size.images} img</span>
       )}
