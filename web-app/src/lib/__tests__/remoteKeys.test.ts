@@ -27,6 +27,13 @@ describe('remote keys', () => {
     vi.clearAllMocks()
     dictationState.status = 'idle'
   })
+  it('opens a new chat on fn + N', () => {
+    const newChat = vi.fn()
+    const stop = listenForRemoteKeys(newChat)
+    expect(handleRemoteKey('Shift+F18')).toBe(true)
+    expect(newChat).toHaveBeenCalledOnce()
+    stop()
+  })
   it('ignores keys the app does not send', () => {
     for (const key of ['F13', 'F16', 'F18', 'F19', 'F20', 'Shift+F20', 'Alt'])
       expect(handleRemoteKey(key)).toBe(false)

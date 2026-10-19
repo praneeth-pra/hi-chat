@@ -22,6 +22,11 @@ export const CODE_UP_KEY = 'Shift+F16'
 export const CODE_DOWN_KEY = 'Shift+F17'
 /** Tap Left Option: the cursor goes to the end of the message box. */
 export const FOCUS_BOX_KEY = 'F17'
+/** fn + N: a new chat. */
+export const NEW_CHAT_KEY = 'Shift+F18'
+
+/** Opens a new chat; set by the page, which has the router. */
+let openNewChat: () => void = () => {}
 
 /** A press within this long of the last continues from where it was going. */
 const CODE_STEP_MS = 1000
@@ -98,6 +103,10 @@ function focusChatBox(): boolean {
 /** Dictation, send and code-block shortcuts. */
 export function handleRemoteKey(key: string): boolean {
   if (key === FOCUS_BOX_KEY) return focusChatBox()
+  if (key === NEW_CHAT_KEY) {
+    openNewChat()
+    return true
+  }
   if (key === CODE_UP_KEY) return stepCode(-1)
   if (key === CODE_DOWN_KEY) return stepCode(1)
   if (key === DICTATION_TOGGLE_KEY) {
@@ -170,7 +179,8 @@ export function connectApp(win: AppWindow = window): () => void {
  * Escape on the page throws a recording away; inside the Mac or Windows app
  * the other keys arrive as calls. Returns the cleanup.
  */
-export function listenForRemoteKeys() {
+export function listenForRemoteKeys(onNewChat?: () => void) {
+  if (onNewChat) openNewChat = onNewChat
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape' && !e.repeat && handleRemoteKey('Escape'))
       e.preventDefault()
