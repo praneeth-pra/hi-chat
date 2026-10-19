@@ -5,7 +5,7 @@
 //   tap Left Control        dictate: tap again to stop and send
 //   Escape while dictating  throw the recording away
 //   tap Left Option         silent screenshot of the screen the pointer is
-//                           on, sent in Hi-chat (also saved where the Mac
+//                           on, put in Hi-chat's message box (also saved where the Mac
 //                           saves screenshots and copied; needs Screen
 //                           Recording)
 //   fn + Right              send what's typed in the box
@@ -19,6 +19,9 @@
 //   fn + Left               live mirror window (Hi-chat, then the screen around
 //                           the pointer; needs Screen Recording);
 //                           fn + Shift + Left closes it
+//
+// Those are the defaults: each can be changed in Hi-chat's Settings > App
+// keys, which records the next keys you press (see ShortcutStore).
 //
 // The window is a panel that takes the keyboard without making Hi-chat the
 // active app, so a click or typing in it never greys out the app you're in.
@@ -60,6 +63,34 @@ enum Key {
   static let z: Int64 = 6
   static let x: Int64 = 7
   static let n: Int64 = 45
+
+  /// The modifier keys: the flag each sets, its name in a shortcut, and how
+  /// Settings writes it on its own.
+  static let modifiers: [Int64: (mask: CGEventFlags, mod: String, name: String)] = [
+    59: (.maskControl, "control", "Left Control"), 62: (.maskControl, "control", "Right Control"),
+    58: (.maskAlternate, "option", "Left Option"), 61: (.maskAlternate, "option", "Right Option"),
+    55: (.maskCommand, "command", "Left Command"), 54: (.maskCommand, "command", "Right Command"),
+    56: (.maskShift, "shift", "Left Shift"), 60: (.maskShift, "shift", "Right Shift"),
+    63: (.maskSecondaryFn, "fn", "fn"),
+  ]
+  /// Home, End, Page Up and Page Down are fn + an arrow on a laptop.
+  static let fnArrow: [Int64: String] = [115: "←", 119: "→", 116: "↑", 121: "↓"]
+  static let names: [Int64: String] = [
+    36: "Return", 48: "Tab", 49: "Space", 51: "Delete", 53: "Esc", 76: "Enter", 117: "Forward Delete",
+    115: "Home", 119: "End", 116: "Page Up", 121: "Page Down", 123: "←", 124: "→", 125: "↓", 126: "↑",
+    122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7", 100: "F8", 101: "F9",
+    109: "F10", 103: "F11", 111: "F12", 105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17",
+    79: "F18", 80: "F19", 90: "F20",
+    0: "A", 11: "B", 8: "C", 2: "D", 14: "E", 3: "F", 5: "G", 4: "H", 34: "I", 38: "J", 40: "K",
+    37: "L", 46: "M", 45: "N", 31: "O", 35: "P", 12: "Q", 15: "R", 1: "S", 17: "T", 32: "U", 9: "V",
+    13: "W", 7: "X", 16: "Y", 6: "Z", 29: "0", 18: "1", 19: "2", 20: "3", 21: "4", 23: "5", 22: "6",
+    26: "7", 28: "8", 25: "9", 27: "-", 24: "=", 33: "[", 30: "]", 41: ";", 39: "'", 43: ",", 47: ".",
+    44: "/", 42: "\\", 50: "`",
+  ]
+
+  static func name(_ key: Int64) -> String {
+    modifiers[key]?.name ?? names[key] ?? "Key \(key)"
+  }
 }
 
 /// A window that takes the keyboard without activating Hi-chat.
@@ -99,6 +130,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var panel: ChatPanel!
   var webView: WKWebView!
   var keys: Keys?
+  let shortcuts = ShortcutStore()
   lazy var updater = Updater(app: self)
   var mirrorTask: Process?
   var loginItems: [NSMenuItem] = []
@@ -337,12 +369,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
       }
       return
     }
-    let listener = Keys(app: self)
+    let listener = Keys(app: self, store: shortcuts)
     if listener.start() { keys = listener } else {
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
         self?.startKeys(prompt: false)
       }
     }
+  }
+
+  /// Settings > App keys: list, record (the next keys pressed), cancel,
+  /// clear or reset (one action, or all with no id).
+  func shortcutCommand(_ command: String, _ id: String?) {
+    let action = id.flatMap(Action.init(rawValue:))
+    switch command {
+    case "record":
+      if let action, let keys { keys.recording = action; keys.lone = nil }
+    case "cancel": keys?.recording = nil
+    case "clear": if let action { shortcuts.clear(action) }
+    case "reset": shortcuts.reset(action)
+    default: break
+    }
+    sendShortcuts()
+  }
+
+  func sendShortcuts() {
+    var json = shortcuts.json(recording: keys?.recording)
+    // Without Accessibility there are no shortcuts to record
+    if keys == nil { json = "Object.assign(\(json), { unavailable: 'Allow Hi-chat in System Settings > Privacy & Security > Accessibility first.' })" }
+    webView.evaluateJavaScript("window.hiChatShortcuts && window.hiChatShortcuts(\(json))")
   }
 
   /// Runs one of the page's remote keys (see web-app/src/lib/remoteKeys.ts).
@@ -628,6 +682,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
           let body = message.body as? [String: Any] else { return }
     // Settings > General > Check for updates
     if body["checkForUpdates"] as? Bool == true { checkForUpdates(nil) }
+    // Settings > App keys
+    if let command = body["shortcuts"] as? String { shortcutCommand(command, body["id"] as? String) }
     if let status = body["dictation"] as? String {
       keys?.dictating = status == "recording" || status == "starting"
       // Started from the page's own mic button or a shortcut alike
@@ -926,21 +982,194 @@ final class Updater {
   }
 }
 
+/// One way to press a shortcut: a modifier tapped on its own, a key with
+/// modifiers held, or (for scrolling) a modifier held while you scroll.
+struct Shortcut: Codable, Equatable {
+  enum Kind: String, Codable { case tap, chord, hold }
+  var kind: Kind
+  /// The key's code; for a tap, the modifier's own
+  var key: Int64 = -1
+  /// fn, control, option, command, shift, in that order
+  var mods: [String] = []
+
+  static func tap(_ key: Int64) -> Shortcut { Shortcut(kind: .tap, key: key) }
+  static func chord(_ key: Int64, _ mods: [String] = []) -> Shortcut { Shortcut(kind: .chord, key: key, mods: mods) }
+  static func hold(_ mod: String) -> Shortcut { Shortcut(kind: .hold, mods: [mod]) }
+
+  /// As Settings shows it, such as "Tap Left Control", "fn N" or "Hold fn + scroll".
+  var display: String {
+    switch kind {
+    case .tap: return "Tap " + Key.name(key)
+    case .hold: return "Hold " + (mods.first.map(Shortcut.symbol) ?? "") + " + scroll"
+    case .chord:
+      var parts = mods.map(Shortcut.symbol)
+      // On a laptop these are fn + an arrow
+      if mods.contains("fn"), let arrow = Key.fnArrow[key] {
+        parts.append(arrow)
+      } else {
+        parts.append(Key.name(key))
+      }
+      return parts.joined(separator: " ")
+    }
+  }
+
+  static func symbol(_ mod: String) -> String {
+    ["fn": "fn", "control": "⌃", "option": "⌥", "command": "⌘", "shift": "⇧"][mod] ?? mod
+  }
+}
+
+/// What a shortcut does. Escape (stop dictating, give the keyboard back)
+/// always stays Escape.
+enum Action: String, CaseIterable {
+  case dictate, screenshot, toChat, back, send, newChat, codeUp, codeDown,
+       pageUp, pageDown, mirror, mirrorClose, scroll
+
+  var label: String {
+    switch self {
+    case .dictate: "Dictate (again to stop and send)"
+    case .screenshot: "Screenshot of the screen under the pointer"
+    case .toChat: "Pointer and keyboard into Hi-chat"
+    case .back: "Pointer and keyboard back"
+    case .send: "Send what's typed"
+    case .newChat: "New chat"
+    case .codeUp: "Code block above"
+    case .codeDown: "Code block below"
+    case .pageUp: "Scroll the chat up a screen"
+    case .pageDown: "Scroll the chat down a screen"
+    case .mirror: "Mirror window"
+    case .mirrorClose: "Close the mirror window"
+    case .scroll: "Scroll Hi-chat from anywhere"
+    }
+  }
+
+  var defaults: [Shortcut] {
+    switch self {
+    case .dictate: [.tap(Key.leftControl)]
+    case .screenshot: [.tap(Key.leftOption)]
+    case .toChat: [.chord(Key.z)]
+    case .back: [.chord(Key.x)]
+    case .send: [.chord(Key.end, ["fn"]), .chord(Key.right, ["fn"])]
+    case .newChat: [.chord(Key.n, ["fn"])]
+    case .codeUp: [.chord(Key.pageUp, ["fn"]), .chord(Key.pageUp)]
+    case .codeDown: [.chord(Key.pageDown, ["fn"]), .chord(Key.pageDown)]
+    case .pageUp: [.chord(Key.pageUp, ["fn", "shift"]), .chord(Key.pageUp, ["shift"])]
+    case .pageDown: [.chord(Key.pageDown, ["fn", "shift"]), .chord(Key.pageDown, ["shift"])]
+    case .mirror: [.chord(Key.home, ["fn"]), .chord(Key.left, ["fn"])]
+    case .mirrorClose: [.chord(Key.home, ["fn", "shift"]), .chord(Key.left, ["fn", "shift"])]
+    case .scroll: [.hold("fn")]
+    }
+  }
+
+  /// Held down, the key does it again and again.
+  var repeats: Bool { self == .pageUp || self == .pageDown }
+
+  @MainActor func run(_ app: AppController) {
+    switch self {
+    case .dictate: app.remote("F14")
+    case .screenshot: app.screenshot()
+    case .toChat: app.clickChat()
+    case .back: app.leaveChat()
+    case .send: app.remote("F15")
+    case .newChat: app.bringUp(); app.remote("Shift+F18")
+    case .codeUp: app.remote("Shift+F16")
+    case .codeDown: app.remote("Shift+F17")
+    case .pageUp: app.scrollChat(by: -0.8)
+    case .pageDown: app.scrollChat(by: 0.8)
+    case .mirror: app.toggleMirror()
+    case .mirrorClose: app.hideMirror()
+    case .scroll: break
+    }
+  }
+}
+
+/// The shortcuts you set in Hi-chat's Settings > App keys, kept in the
+/// app's defaults; an action you never changed uses its own defaults.
+final class ShortcutStore {
+  static let defaultsKey = "shortcuts"
+  private var custom: [String: [Shortcut]] = [:]
+
+  init() {
+    if let data = UserDefaults.standard.data(forKey: ShortcutStore.defaultsKey),
+       let saved = try? JSONDecoder().decode([String: [Shortcut]].self, from: data) {
+      custom = saved
+    }
+  }
+
+  func shortcuts(_ action: Action) -> [Shortcut] { custom[action.rawValue] ?? action.defaults }
+
+  /// The action a tap or key press runs, if any.
+  func action(for pressed: Shortcut) -> Action? {
+    Action.allCases.first { a in shortcuts(a).contains { $0 == pressed } }
+  }
+
+  /// The modifier that, held, makes a scroll scroll Hi-chat.
+  var scrollModifier: String? { shortcuts(.scroll).first?.mods.first }
+
+  /// A shortcut for one action only: any other action using it gives it up.
+  func set(_ action: Action, to shortcut: Shortcut) {
+    for other in Action.allCases where other != action {
+      let mine = shortcuts(other)
+      if mine.contains(shortcut) { custom[other.rawValue] = mine.filter { $0 != shortcut } }
+    }
+    custom[action.rawValue] = [shortcut]
+    save()
+  }
+
+  func clear(_ action: Action) {
+    custom[action.rawValue] = []
+    save()
+  }
+
+  /// One action, or all of them, back to the defaults.
+  func reset(_ action: Action?) {
+    if let action { custom[action.rawValue] = nil } else { custom = [:] }
+    save()
+  }
+
+  func save() {
+    if let data = try? JSONEncoder().encode(custom) {
+      UserDefaults.standard.set(data, forKey: ShortcutStore.defaultsKey)
+    }
+  }
+
+  /// For the page: each action with its shortcuts as they read.
+  func json(recording: Action?) -> String {
+    let actions: [[String: Any]] = Action.allCases.map { a in
+      ["id": a.rawValue, "label": a.label, "keys": shortcuts(a).map(\.display),
+       "isDefault": custom[a.rawValue] == nil, "hold": a == .scroll]
+    }
+    let body: [String: Any] = ["actions": actions, "recording": recording.map { $0.rawValue as Any } ?? NSNull()]
+    guard let data = try? JSONSerialization.data(withJSONObject: body),
+          let text = String(data: data, encoding: .utf8) else { return "null" }
+    return text
+  }
+}
+
 /// The global shortcuts: one event tap on the main run loop. It only reads
 /// the event and remembers a few flags, so it never holds up the Mac's input.
+/// Which keys do what comes from the ShortcutStore (Settings > App keys).
 final class Keys {
   unowned let app: AppController
+  let store: ShortcutStore
   var tap: CFMachPort?
   var dictating = false
   var fnDown = false
+  /// The modifier keys held now, by key code.
+  var heldMods: Set<Int64> = []
   /// A modifier pressed on its own: which, and when. Another key, a click or
   /// a hand scroll meanwhile turns it into a chord, which is left alone.
   var lone: (key: Int64, at: TimeInterval)?
   var heldKey: Int64?
   var redirecting = false
+  /// Settings is waiting for the keys to use for this action; meanwhile no
+  /// shortcut runs and the keys pressed go nowhere else.
+  var recording: Action?
   static let tapSeconds = 0.5
 
-  init(app: AppController) { self.app = app }
+  init(app: AppController, store: ShortcutStore) {
+    self.app = app
+    self.store = store
+  }
 
   func start() -> Bool {
     let kinds: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown,
@@ -966,6 +1195,14 @@ final class Keys {
   func later(_ action: @escaping @MainActor (AppController) -> Void) {
     let app = self.app
     Task { @MainActor in action(app) }
+  }
+
+  /// Settings got its keys (nil: recording was cancelled).
+  func recorded(_ shortcut: Shortcut?) {
+    guard let action = recording else { return }
+    recording = nil
+    if let shortcut { store.set(action, to: shortcut) }
+    later { $0.sendShortcuts() }
   }
 
   func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -994,30 +1231,45 @@ final class Keys {
   }
 
   func flagsChanged(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+    let pass = Unmanaged.passUnretained(event)
     let key = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
     if key == Key.fn { fnDown = flags.contains(.maskSecondaryFn) }
-    let down: Bool
-    switch key {
-    case Key.leftControl: down = flags.contains(.maskControl)
-    case Key.leftOption: down = flags.contains(.maskAlternate)
-    default:
+    guard let modifier = Key.modifiers[key] else {
       lone = nil
-      return Unmanaged.passUnretained(event)
+      return pass
     }
-    let others: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate]
-    let alone = flags.intersection(others).subtracting(
-      key == Key.leftControl ? .maskControl : .maskAlternate).isEmpty
+    let down = flags.contains(modifier.mask) && !heldMods.contains(key)
+    if down { heldMods.insert(key) } else { heldMods.remove(key) }
+    let now = ProcessInfo.processInfo.systemUptime
     if down {
-      lone = alone ? (key, ProcessInfo.processInfo.systemUptime) : nil
-    } else if let lone, lone.key == key,
-              ProcessInfo.processInfo.systemUptime - lone.at < Keys.tapSeconds {
+      if recording == .scroll { recorded(.hold(modifier.mod)); return pass }
+      lone = heldMods.count == 1 ? (key, now) : nil
+    } else if let lone, lone.key == key, recording != nil || now - lone.at < Keys.tapSeconds {
       self.lone = nil
-      if key == Key.leftControl { later { $0.remote("F14") } } else { later { $0.screenshot() } }
+      if recording != nil {
+        if recording != .scroll { recorded(.tap(key)) }
+      } else if let action = store.action(for: .tap(key)) {
+        later { action.run($0) }
+      }
     } else {
       lone = nil
     }
-    return Unmanaged.passUnretained(event)
+    return pass
+  }
+
+  /// The modifiers held for this key press. Arrows and the keys fn makes of
+  /// them (Page Up and the like) carry the fn flag anyway, so for those only
+  /// the fn key itself counts.
+  func modsHeld(_ key: Int64, _ flags: CGEventFlags) -> [String] {
+    let navigation = (123...126).contains(key) || [115, 116, 117, 119, 121].contains(key)
+    var mods: [String] = []
+    if fnDown || (!navigation && flags.contains(.maskSecondaryFn)) { mods.append("fn") }
+    if flags.contains(.maskControl) { mods.append("control") }
+    if flags.contains(.maskAlternate) { mods.append("option") }
+    if flags.contains(.maskCommand) { mods.append("command") }
+    if flags.contains(.maskShift) { mods.append("shift") }
+    return mods
   }
 
   func keyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -1025,60 +1277,49 @@ final class Keys {
     let key = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
     let repeating = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-    let shift = flags.contains(.maskShift)
+    let mods = modsHeld(key, flags)
     let chord = flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
 
+    if recording != nil {
+      // Escape on its own cancels; scrolling waits for a modifier
+      if key == Key.escape && mods.isEmpty { recorded(nil) } else if recording != .scroll, !repeating {
+        recorded(.chord(key, mods))
+      }
+      heldKey = key
+      return nil
+    }
     if key == Key.escape && !chord {
       if dictating { swallow(key) { $0.remote("Shift+F13") }; return nil }
       if MainActor.assumeIsolated({ app.typing }) { swallow(key) { $0.stopTyping() }; return nil }
       return pass
     }
-    if chord { return pass }
-    switch key {
-    case Key.pageUp, Key.pageDown:
-      // fn + Up / Down on a Mac keyboard
-      let up = key == Key.pageUp
-      if shift {
-        swallow(key) { $0.scrollChat(by: up ? -0.8 : 0.8) }
-      } else if !repeating {
-        swallow(key) { $0.remote(up ? "Shift+F16" : "Shift+F17") }
-      }
+    if let action = store.action(for: .chord(key, mods)) {
+      if !repeating || action.repeats { swallow(key) { action.run($0) } }
       heldKey = key
       return nil
-    case Key.end, Key.right:
-      guard fnDown, !shift else { return pass }
-      if !repeating { swallow(key) { $0.remote("F15") } }
-      heldKey = key
-      return nil
-    case Key.x, Key.z:
-      // Plain Z / X go into Hi-chat and back; fn + Z / X (and Shift) type the letter
-      if shift { return pass }
-      if fnDown || flags.contains(.maskSecondaryFn) {
-        event.flags.remove(.maskSecondaryFn)
-        return pass
-      }
-      if !repeating { swallow(key) { key == Key.z ? $0.clickChat() : $0.leaveChat() } }
-      heldKey = key
-      return nil
-    case Key.n:
-      // fn + N: a new chat, with Hi-chat brought up to show it
-      guard fnDown || flags.contains(.maskSecondaryFn), !shift else { return pass }
-      if !repeating { swallow(key) { $0.bringUp(); $0.remote("Shift+F18") } }
-      heldKey = key
-      return nil
-    case Key.home, Key.left:
-      guard fnDown else { return pass }
-      if !repeating { swallow(key) { shift ? $0.hideMirror() : $0.toggleMirror() } }
-      heldKey = key
-      return nil
-    default:
-      return pass
     }
+    // fn + a key that is a shortcut on its own (Z, X) types it
+    if mods == ["fn"], store.action(for: .chord(key)) != nil {
+      event.flags.remove(.maskSecondaryFn)
+    }
+    return pass
   }
 
   func swallow(_ key: Int64, _ action: @escaping @MainActor (AppController) -> Void) {
     heldKey = key
     later(action)
+  }
+
+  /// Is the scroll modifier (fn unless changed in Settings) held?
+  func scrollModifierHeld(_ flags: CGEventFlags) -> Bool {
+    switch store.scrollModifier {
+    case "fn": fnDown || flags.contains(.maskSecondaryFn)
+    case "control": flags.contains(.maskControl)
+    case "option": flags.contains(.maskAlternate)
+    case "command": flags.contains(.maskCommand)
+    case "shift": flags.contains(.maskShift)
+    default: false
+    }
   }
 
   /// fn + scroll (and any scroll while Z typing is on) scrolls Hi-chat:
@@ -1091,7 +1332,7 @@ final class Keys {
     let phase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
     // A hand scroll makes a held Control/Option a chord; its glide doesn't.
     if momentum == 0 && (phase == 0 || phase == 1 || phase == 2) { lone = nil }
-    if event.flags.contains(.maskSecondaryFn) || fnDown || MainActor.assumeIsolated({ app.typing }) {
+    if scrollModifierHeld(event.flags) || MainActor.assumeIsolated({ app.typing }) {
       redirecting = true
     } else if momentum == 0 {
       redirecting = false

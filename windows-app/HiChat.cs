@@ -20,6 +20,9 @@
 //                                 again the screen around the pointer, and
 //                                 back; Ctrl + Shift + Left closes it
 //
+// Those are the defaults: each can be changed in Hi-chat's Settings > App
+// keys, which records the next keys you press (see ShortcutStore).
+//
 // A click in Hi-chat doesn't take the keyboard from the app you're in;
 // clicking into a text box (or Z) does. Closing the window
 // keeps Hi-chat running beside the clock, so the shortcuts keep working.
@@ -178,6 +181,8 @@ sealed class Settings
   public int[]? Window { get; set; }
   public int[]? Mirror { get; set; }
   public string? SkippedVersion { get; set; }
+  /// Settings > App keys: the shortcuts changed there, by action
+  public Dictionary<string, string[]>? Shortcuts { get; set; }
 
   static string FilePath => Path.Combine(App.DataDir, "settings.json");
   public static Settings Current { get; } = Load();
@@ -486,9 +491,31 @@ sealed class ChatWindow : Form
         _ = updater.Check(asked: true);
       if (body.TryGetProperty("keyboard", out var k) && k.ValueKind == JsonValueKind.True && !Typing)
         StartTyping(focusBox: false);
+      // Settings > App keys
+      if (body.TryGetProperty("shortcuts", out var c) && c.ValueKind == JsonValueKind.String)
+        ShortcutCommand(c.GetString()!, body.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null);
     }
     catch (JsonException) { }
   }
+
+  /// Settings > App keys: list, record (the next keys pressed), cancel,
+  /// clear or reset (one action, or all with no id).
+  void ShortcutCommand(string command, string? id)
+  {
+    var action = ShortcutStore.Parse(id);
+    var store = ShortcutStore.Current;
+    switch (command)
+    {
+      case "record" when action != null && keys != null: keys.Recording = action; break;
+      case "cancel" when keys != null: keys.Recording = null; break;
+      case "clear" when action is { } a: store.Clear(a); break;
+      case "reset": store.Reset(action); break;
+    }
+    SendShortcuts();
+  }
+
+  public void SendShortcuts() => _ = webView.CoreWebView2?.ExecuteScriptAsync(
+    $"window.hiChatShortcuts && window.hiChatShortcuts({ShortcutStore.Current.Json(keys?.Recording)})");
 
   /// Runs one of the page's remote keys (see web-app/src/lib/remoteKeys.ts).
   public void Remote(string key)
@@ -830,6 +857,191 @@ sealed class Updater(ChatWindow app)
   void Tell(string message) => MessageBox.Show(app, message, "Hi-chat");
 }
 
+/// What a shortcut does. Escape (throw a recording away) always stays Escape.
+enum KeyAction { Dictate, Screenshot, ToChat, Back, Send, NewChat, CodeUp, CodeDown, PageUp, PageDown, Mirror, MirrorClose, Scroll }
+
+/// One way to press a shortcut, written as text so it compares and saves
+/// easily: "tap:162" (a modifier tapped on its own, by its key code),
+/// "chord:ctrl,shift:37" (a key with modifiers held, in the order ctrl,
+/// alt, shift, win) or "hold:alt" (held while you scroll).
+static class Shortcut
+{
+  public static string Tap(uint vk) => $"tap:{vk}";
+  public static string Chord(uint vk, string[] mods) => $"chord:{string.Join(",", mods)}:{vk}";
+  public static string Chord(uint vk) => Chord(vk, []);
+  public static string Hold(string mod) => $"hold:{mod}";
+
+  static readonly Dictionary<string, string> ModNames = new()
+  {
+    ["ctrl"] = "Ctrl", ["alt"] = "Alt", ["shift"] = "Shift", ["win"] = "Win",
+  };
+
+  /// As Settings shows it, such as "Tap Left Ctrl", "Ctrl + ←" or "Hold Alt + scroll".
+  public static string Display(string shortcut)
+  {
+    var parts = shortcut.Split(':');
+    switch (parts[0])
+    {
+      case "tap" when parts.Length == 2 && uint.TryParse(parts[1], out var vk):
+        return "Tap " + KeyName(vk);
+      case "hold" when parts.Length == 2:
+        return "Hold " + ModNames.GetValueOrDefault(parts[1], parts[1]) + " + scroll";
+      case "chord" when parts.Length == 3 && uint.TryParse(parts[2], out var key):
+        var mods = parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(m => ModNames.GetValueOrDefault(m, m));
+        return string.Join(" + ", mods.Append(KeyName(key)));
+      default:
+        return shortcut;
+    }
+  }
+
+  static readonly Dictionary<uint, string> Names = new()
+  {
+    [0x08] = "Backspace", [0x09] = "Tab", [0x0D] = "Enter", [0x1B] = "Esc", [0x20] = "Space",
+    [0x21] = "Page Up", [0x22] = "Page Down", [0x23] = "End", [0x24] = "Home",
+    [0x25] = "←", [0x26] = "↑", [0x27] = "→", [0x28] = "↓", [0x2D] = "Insert", [0x2E] = "Delete",
+    [0x5B] = "Left Win", [0x5C] = "Right Win", [0x5D] = "Menu",
+    [0xA0] = "Left Shift", [0xA1] = "Right Shift", [0xA2] = "Left Ctrl", [0xA3] = "Right Ctrl",
+    [0xA4] = "Left Alt", [0xA5] = "Right Alt",
+  };
+
+  public static string KeyName(uint vk)
+  {
+    if (Names.TryGetValue(vk, out var name)) return name;
+    if (vk is >= 0x70 and <= 0x87) return $"F{vk - 0x6F}";
+    if (vk is >= 0x60 and <= 0x69) return $"Num {vk - 0x60}";
+    // Letters, digits and punctuation, as the keyboard layout writes them
+    var ch = Native.MapVirtualKey(vk, Native.MAPVK_VK_TO_CHAR) & 0xFFFF;
+    return ch is > 0x20 and < 0xFFFF ? char.ToUpperInvariant((char)ch).ToString() : $"Key {vk}";
+  }
+}
+
+static class KeyActions
+{
+  public static string Id(this KeyAction a) => char.ToLowerInvariant(a.ToString()[0]) + a.ToString()[1..];
+
+  public static string Label(this KeyAction a) => a switch
+  {
+    KeyAction.Dictate => "Dictate (again to stop and send)",
+    KeyAction.Screenshot => "Screenshot of the screen under the pointer",
+    KeyAction.ToChat => "Pointer and keyboard into Hi-chat",
+    KeyAction.Back => "Pointer and keyboard back",
+    KeyAction.Send => "Send what's typed",
+    KeyAction.NewChat => "New chat",
+    KeyAction.CodeUp => "Code block above",
+    KeyAction.CodeDown => "Code block below",
+    KeyAction.PageUp => "Scroll the chat up a screen",
+    KeyAction.PageDown => "Scroll the chat down a screen",
+    KeyAction.Mirror => "Mirror window",
+    KeyAction.MirrorClose => "Close the mirror window",
+    KeyAction.Scroll => "Scroll Hi-chat from anywhere",
+    _ => a.ToString(),
+  };
+
+  public static string[] Defaults(this KeyAction a) => a switch
+  {
+    KeyAction.Dictate => [Shortcut.Tap(Native.VK_LCONTROL)],
+    KeyAction.Screenshot => [Shortcut.Tap(Native.VK_RCONTROL)],
+    KeyAction.ToChat => [Shortcut.Chord(Native.VK_Z)],
+    KeyAction.Back => [Shortcut.Chord(Native.VK_X)],
+    KeyAction.CodeUp => [Shortcut.Chord(Native.VK_PRIOR)],
+    KeyAction.CodeDown => [Shortcut.Chord(Native.VK_NEXT)],
+    KeyAction.PageUp => [Shortcut.Chord(Native.VK_PRIOR, ["shift"])],
+    KeyAction.PageDown => [Shortcut.Chord(Native.VK_NEXT, ["shift"])],
+    KeyAction.Mirror => [Shortcut.Chord(Native.VK_LEFT, ["ctrl"])],
+    KeyAction.MirrorClose => [Shortcut.Chord(Native.VK_LEFT, ["ctrl", "shift"])],
+    KeyAction.Scroll => [Shortcut.Hold("alt")],
+    _ => [],
+  };
+
+  /// Held down, the key does it again and again.
+  public static bool Repeats(this KeyAction a) => a is KeyAction.PageUp or KeyAction.PageDown;
+
+  public static void Run(this KeyAction a, ChatWindow app)
+  {
+    switch (a)
+    {
+      case KeyAction.Dictate: app.Remote("F14"); break;
+      case KeyAction.Screenshot: app.Screenshot(); break;
+      case KeyAction.ToChat: if (app.Typing) app.PointerToChat(); else app.StartTyping(focusBox: true); break;
+      case KeyAction.Back: if (app.Typing) app.StopTyping(); else app.PointerBack(); break;
+      case KeyAction.Send: app.Remote("F15"); break;
+      case KeyAction.NewChat: app.BringUp(); app.Remote("Shift+F18"); break;
+      case KeyAction.CodeUp: app.Remote("Shift+F16"); break;
+      case KeyAction.CodeDown: app.Remote("Shift+F17"); break;
+      case KeyAction.PageUp: app.ScrollChat(-0.8); break;
+      case KeyAction.PageDown: app.ScrollChat(0.8); break;
+      case KeyAction.Mirror: app.ToggleMirror(); break;
+      case KeyAction.MirrorClose: app.HideMirror(); break;
+    }
+  }
+}
+
+/// The shortcuts set in Hi-chat's Settings > App keys, kept in
+/// settings.json; an action you never changed uses its defaults. Read on the
+/// shortcuts thread and changed on the window's, so it swaps whole maps.
+sealed class ShortcutStore
+{
+  public static ShortcutStore Current { get; } = new();
+  volatile Dictionary<string, string[]> custom = new(Settings.Current.Shortcuts ?? new Dictionary<string, string[]>());
+
+  public string[] Of(KeyAction a) => custom.TryGetValue(a.Id(), out var mine) ? mine : a.Defaults();
+
+  /// The action a tap or key press runs, if any.
+  public KeyAction? ActionFor(string pressed)
+  {
+    foreach (var a in Enum.GetValues<KeyAction>())
+      if (Of(a).Contains(pressed)) return a;
+    return null;
+  }
+
+  /// The modifier that, held, makes a scroll scroll Hi-chat (alt, ctrl, shift or win).
+  public string? ScrollModifier => Of(KeyAction.Scroll).FirstOrDefault()?.Split(':') is ["hold", var m] ? m : null;
+
+  /// A shortcut for one action only: any other action using it gives it up.
+  public void Set(KeyAction action, string shortcut)
+  {
+    var next = new Dictionary<string, string[]>(custom);
+    foreach (var other in Enum.GetValues<KeyAction>())
+      if (other != action && Of(other).Contains(shortcut)) next[other.Id()] = Of(other).Where(s => s != shortcut).ToArray();
+    next[action.Id()] = [shortcut];
+    Save(next);
+  }
+
+  public void Clear(KeyAction action) => Save(new(custom) { [action.Id()] = [] });
+
+  /// One action, or all of them, back to the defaults.
+  public void Reset(KeyAction? action)
+  {
+    var next = new Dictionary<string, string[]>(custom);
+    if (action is { } a) next.Remove(a.Id()); else next.Clear();
+    Save(next);
+  }
+
+  void Save(Dictionary<string, string[]> next)
+  {
+    custom = next;
+    Settings.Current.Shortcuts = next;
+    Settings.Current.Save();
+  }
+
+  public static KeyAction? Parse(string? id) =>
+    Enum.GetValues<KeyAction>().Cast<KeyAction?>().FirstOrDefault(a => a!.Value.Id() == id);
+
+  /// For the page: each action with its shortcuts as they read.
+  public string Json(KeyAction? recording) => JsonSerializer.Serialize(new
+  {
+    actions = Enum.GetValues<KeyAction>().Select(a => new
+    {
+      id = a.Id(),
+      label = a.Label(),
+      keys = Of(a).Select(Shortcut.Display).ToArray(),
+      isDefault = !custom.ContainsKey(a.Id()),
+      hold = a == KeyAction.Scroll,
+    }),
+    recording = recording?.Id(),
+  });
+}
+
 /// The global shortcuts: low-level keyboard and mouse hooks on their own
 /// thread. They only read the event and remember a few flags, so they never
 /// hold up the PC's input; actions run on the window's thread.
@@ -848,6 +1060,29 @@ sealed class Shortcuts(ChatWindow app)
   const long TapMs = 500;
   /// Alt + scroll already sent the key that keeps Alt from opening menus.
   bool altMasked;
+  readonly ShortcutStore store = ShortcutStore.Current;
+  /// Settings is waiting for the keys to use for this action; meanwhile no
+  /// shortcut runs and the keys pressed go nowhere else. Set from the window.
+  volatile object? recordingBox;
+  KeyAction? recording => (KeyAction?)recordingBox;
+
+  public KeyAction? Recording
+  {
+    get => recording;
+    set { recordingBox = value; lone = null; }
+  }
+
+  /// Settings got its keys (null: recording was cancelled).
+  void Recorded(string? shortcut)
+  {
+    if (recording is not { } action) return;
+    recordingBox = null;
+    Later(a =>
+    {
+      if (shortcut != null) store.Set(action, shortcut);
+      a.SendShortcuts();
+    });
+  }
 
   public void Start()
   {
@@ -918,31 +1153,28 @@ sealed class Shortcuts(ChatWindow app)
     {
       if (repeating) return pass;
       if (vk is Native.VK_LMENU or Native.VK_RMENU) altMasked = false;
-      var tapKey = vk is Native.VK_LCONTROL or Native.VK_RCONTROL;
-      lone = tapKey && held.Count == 1 ? (vk, Environment.TickCount64) : null;
+      if (recording == KeyAction.Scroll && ModName(vk) is { } mod)
+      {
+        Recorded(Shortcut.Hold(mod));
+        return pass;
+      }
+      lone = held.Count == 1 ? (vk, Environment.TickCount64) : null;
       return pass;
     }
     lone = null;
+    if (recording is { } r)
+    {
+      // Escape on its own cancels; scrolling waits for a modifier
+      if (vk == Native.VK_ESCAPE && Mods().Length == 0) Recorded(null);
+      else if (r != KeyAction.Scroll && !repeating) Recorded(Shortcut.Chord(vk, Mods()));
+      return Swallow(vk, null);
+    }
     if (vk == Native.VK_ESCAPE && Dictating && !Ctrl && !Alt && !Win)
       return Swallow(vk, a => a.Remote("Shift+F13"));
-    // Page Up / Down (Fn + Up / Down on most laptops): Hi-chat's code block
-    // above / below; with Shift the chat scrolls by most of a screen
-    if (vk is Native.VK_PRIOR or Native.VK_NEXT && !Ctrl && !Alt && !Win)
-    {
-      var up = vk == Native.VK_PRIOR;
-      if (Shift) return Swallow(vk, a => a.ScrollChat(up ? -0.8 : 0.8));
-      return Swallow(vk, repeating ? null : a => a.Remote(up ? "Shift+F16" : "Shift+F17"));
-    }
-    // Ctrl + Left: the mirror, switching between Hi-chat and the pointer view;
-    // Ctrl + Shift + Left closes it
-    if (vk == Native.VK_LEFT && Ctrl && !Alt && !Win)
-    {
-      var shift = Shift;
-      return Swallow(vk, repeating ? null : a => { if (shift) a.HideMirror(); else a.ToggleMirror(); });
-    }
-    // Plain Z / X go into Hi-chat and back; Alt + Z / X type the letter
-    if (vk is not (Native.VK_X or Native.VK_Z) || Ctrl || Shift || Win) return pass;
-    if (Alt)
+    if (store.ActionFor(Shortcut.Chord(vk, Mods())) is { } action)
+      return Swallow(vk, repeating && !action.Repeats() ? null : a => action.Run(a));
+    // Alt + a key that is a shortcut on its own (Z, X) types it
+    if (Alt && !Ctrl && !Shift && !Win && store.ActionFor(Shortcut.Chord(vk)) != null)
     {
       swallowed.Add(vk);
       // The app in front gets the plain letter: Alt let go first, with an
@@ -951,28 +1183,63 @@ sealed class Shortcuts(ChatWindow app)
         Native.VK_LMENU, true, Native.VK_RMENU, true, vk, false, vk, true);
       return true;
     }
-    var toChat = vk == Native.VK_Z;
-    return Swallow(vk, repeating ? null : a =>
-    {
-      if (toChat) { if (a.Typing) a.PointerToChat(); else a.StartTyping(focusBox: true); }
-      else { if (a.Typing) a.StopTyping(); else a.PointerBack(); }
-    });
+    return pass;
   }
 
   bool KeyUp(uint vk)
   {
     const bool pass = false;
     held.Remove(vk);
-    if (vk is Native.VK_LMENU or Native.VK_RMENU && TouchpadScroll.Scrolling) Later(a => a.StopTouchpadScroll());
+    if (ModName(vk) is { } mod && mod == store.ScrollModifier && TouchpadScroll.Scrolling)
+      Later(a => a.StopTouchpadScroll());
     if (swallowed.Remove(vk)) return true;
-    if (lone is { } l && l.key == vk && Environment.TickCount64 - l.at < TapMs)
+    if (lone is { } l && l.key == vk && (recording != null || Environment.TickCount64 - l.at < TapMs))
     {
       lone = null;
-      if (vk == Native.VK_RCONTROL) Later(a => a.Screenshot()); else Later(a => a.Remote("F14"));
+      if (recording is { } r) { if (r != KeyAction.Scroll) Recorded(Shortcut.Tap(vk)); }
+      else if (store.ActionFor(Shortcut.Tap(vk)) is { } action) Later(a => action.Run(a));
       return pass;
     }
     if (IsModifier(vk)) lone = null;
     return pass;
+  }
+
+  /// The modifiers held now, in the order a shortcut writes them.
+  string[] Mods()
+  {
+    var mods = new List<string>(4);
+    if (Ctrl) mods.Add("ctrl");
+    if (Alt) mods.Add("alt");
+    if (Shift) mods.Add("shift");
+    if (Win) mods.Add("win");
+    return [.. mods];
+  }
+
+  static string? ModName(uint vk) => vk switch
+  {
+    Native.VK_LCONTROL or Native.VK_RCONTROL => "ctrl",
+    Native.VK_LMENU or Native.VK_RMENU => "alt",
+    Native.VK_LSHIFT or Native.VK_RSHIFT => "shift",
+    Native.VK_LWIN or Native.VK_RWIN => "win",
+    _ => null,
+  };
+
+  /// Is the scroll modifier (Alt unless changed in Settings) held?
+  bool ScrollHeld() => store.ScrollModifier switch
+  {
+    "ctrl" => Ctrl, "alt" => Alt, "shift" => Shift, "win" => Win, _ => false,
+  };
+
+  /// The same, asked from another thread: whether the key is down now.
+  public static bool ScrollKeyDown()
+  {
+    static bool Down(int vk) => (Native.GetAsyncKeyState(vk) & 0x8000) != 0;
+    return ShortcutStore.Current.ScrollModifier switch
+    {
+      "ctrl" => Down(0x11), "alt" => Down(0x12), "shift" => Down(0x10),
+      "win" => Down((int)Native.VK_LWIN) || Down((int)Native.VK_RWIN),
+      _ => false,
+    };
   }
 
   bool Swallow(uint vk, Action<ChatWindow>? action)
@@ -1004,9 +1271,9 @@ sealed class Shortcuts(ChatWindow app)
         lone = null;
         // Alt + scroll (a wheel or two fingers on the touchpad) scrolls
         // Hi-chat from anywhere; the window under the pointer gets nothing
-        if (!Alt || Ctrl || Win) return pass;
+        if (!ScrollHeld()) return pass;
         var delta = (short)(e.mouseData >> 16);
-        if (!altMasked)
+        if (!altMasked && (Alt || Win))
         {
           // So letting go of Alt afterwards doesn't open the menu of the app in front
           altMasked = true;
@@ -1064,7 +1331,7 @@ sealed class TouchpadScroll(Action<int> scroll)
 
   public void Input(IntPtr handle)
   {
-    var alt = (Native.GetAsyncKeyState((int)Native.VK_MENU) & 0x8000) != 0;
+    var alt = Shortcuts.ScrollKeyDown();
     if (!alt)
     {
       fingers.Clear();
@@ -1700,6 +1967,8 @@ static class Native
   [DllImport("user32.dll")]
   public static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
+  [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
+  public const uint MAPVK_VK_TO_CHAR = 2;
   [DllImport("hid.dll")] public static extern int HidP_GetCaps(IntPtr parsed, IntPtr caps);
   [DllImport("hid.dll")]
   public static extern int HidP_GetValueCaps(int type, IntPtr caps, ref ushort length, IntPtr parsed);
