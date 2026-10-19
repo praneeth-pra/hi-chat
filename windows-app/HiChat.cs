@@ -425,6 +425,9 @@ sealed class ChatWindow : Form
         // Started from the page's own mic button or a shortcut alike
         if (status is "starting" or "recording" or "transcribing") BringUp();
       }
+      // Settings > General > Check for updates
+      if (body.TryGetProperty("checkForUpdates", out var u) && u.ValueKind == JsonValueKind.True)
+        _ = updater.Check(asked: true);
       if (body.TryGetProperty("keyboard", out var k) && k.ValueKind == JsonValueKind.True && !Typing)
         StartTyping(focusBox: false);
     }
