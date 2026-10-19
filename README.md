@@ -80,6 +80,7 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
 - **Z**: Option typing on, with Hi-chat's cursor in the message box (the real pointer never moves); **X**: keyboard back to the app in front. **fn + Z / X** (or Shift) types the letter.
 - **fn + Left**: live mirror window; **fn + Shift + Left** closes it.
+- **fn + N**: a new chat.
 
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.

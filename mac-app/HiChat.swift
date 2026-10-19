@@ -57,6 +57,7 @@ enum Key {
   static let pageDown: Int64 = 121
   static let z: Int64 = 6
   static let x: Int64 = 7
+  static let n: Int64 = 45
 }
 
 /// A window that takes the keyboard without activating Hi-chat.
@@ -1030,6 +1031,12 @@ final class Keys {
         return pass
       }
       if !repeating { swallow(key) { key == Key.z ? $0.clickChat() : $0.leaveChat() } }
+      heldKey = key
+      return nil
+    case Key.n:
+      // fn + N: a new chat, with Hi-chat brought up to show it
+      guard fnDown || flags.contains(.maskSecondaryFn), !shift else { return pass }
+      if !repeating { swallow(key) { $0.bringUp(); $0.remote("Shift+F18") } }
       heldKey = key
       return nil
     case Key.home, Key.left:
