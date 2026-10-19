@@ -91,14 +91,11 @@ Hi-chat for Windows (`windows-app/`) is the same app in C# with WebView2,
 published as one `Hi-chat.exe` in the `win-1.0.N` releases. The first run
 installs it for your Windows user (Start menu entry, no admin). After that it
 offers each new version itself, and Check for updates is on the tray icon's menu.
-Windows keyboards have no usable fn key, so fn becomes **Ctrl + Alt**:
+Its shortcuts:
 
 - tap **Ctrl**: dictate; tap again to send. **Escape** throws it away.
-- tap **Right Alt**: type into Hi-chat; tap again (or Escape) to go back.
-- **Ctrl + Alt + Right** (or Enter): send. **Ctrl + Alt + Up / Down**: code block above / below.
-- **Ctrl + Alt + Shift + Up / Down**: scroll the chat. **Ctrl + Alt** + scroll: scroll Hi-chat.
-- **Ctrl + Alt + Z**: clicks into Hi-chat's message box (typing on); **Ctrl + Alt + X**: back.
-- **Ctrl + Alt + Left**: live mirror window; **Ctrl + Alt + Shift + Left** closes it.
+- **Z**: the pointer goes to Hi-chat's message box (typing on); **X**: pointer and keyboard back.
+- **Alt + Z / X** types the letter.
 
 Closing the window keeps Hi-chat running in the tray so the shortcuts keep
 working; Quit is on the tray icon's menu. GitHub Actions

@@ -1,23 +1,14 @@
-// Hi-chat for Windows: the Hi-chat site in its own window, with the same
-// global shortcuts as the Mac app (mac-app/HiChat.swift). Windows keyboards
-// have no usable fn key, so the fn chords are Ctrl + Alt chords here:
+// Hi-chat for Windows: the Hi-chat site in its own window, with a few
+// global shortcuts:
 //
 //   tap Ctrl (left or right)      dictate: tap again to stop and send
 //   Escape while dictating        throw the recording away
-//   tap Right Alt                 type into Hi-chat; tap again (or Escape)
-//                                 to go back to the app you were in
-//   Ctrl + Alt + Right / Enter    send what's typed in the box
-//   Ctrl + Alt + Up / Down        code block above / below
-//   Ctrl + Alt + Shift + Up/Down  scroll the chat by most of a screen
-//   Ctrl + Alt + scroll           scroll Hi-chat from anywhere
-//   Ctrl + Alt + Z / X            pointer to Hi-chat's message box / back to
-//                                 where it was (Right Alt typing does the same)
-//   Ctrl + Alt + Left             live mirror window (Hi-chat, then the
-//                                 screen around the pointer);
-//                                 Ctrl + Alt + Shift + Left closes it
+//   Z / X                         pointer to Hi-chat's message box (typing on)
+//                                 / pointer and keyboard back to where they were
+//   Alt + Z / X                   types the letter
 //
 // A click in Hi-chat doesn't take the keyboard from the app you're in;
-// clicking into a text box (or tapping Right Alt) does. Closing the window
+// clicking into a text box (or Z) does. Closing the window
 // keeps Hi-chat running beside the clock, so the shortcuts keep working.
 //
 // The first run installs it for this Windows user (no admin needed) in
@@ -182,7 +173,7 @@ sealed class ChatWindow : Form
   readonly Updater updater;
   Shortcuts? keys;
   bool quitting;
-  /// On while Hi-chat has the keyboard from Right Alt or a click in a box,
+  /// On while Hi-chat has the keyboard from Z or a click in a box,
   /// until it goes back or another window takes it. The page shows it by
   /// the message box. Set on the window's thread only.
   public bool Typing
@@ -782,42 +773,30 @@ sealed class Shortcuts(ChatWindow app)
     if (IsModifier(vk))
     {
       if (repeating) return pass;
-      var tapKey = vk is Native.VK_LCONTROL or Native.VK_RCONTROL or Native.VK_RMENU;
+      var tapKey = vk is Native.VK_LCONTROL or Native.VK_RCONTROL;
       lone = tapKey && held.Count == 1 ? (vk, Environment.TickCount64) : null;
       return pass;
     }
     lone = null;
-    if (vk == Native.VK_ESCAPE && !Ctrl && !Alt && !Win)
+    if (vk == Native.VK_ESCAPE && Dictating && !Ctrl && !Alt && !Win)
+      return Swallow(vk, a => a.Remote("Shift+F13"));
+    // Plain Z / X go into Hi-chat and back; Alt + Z / X type the letter
+    if (vk is not (Native.VK_X or Native.VK_Z) || Ctrl || Shift || Win) return pass;
+    if (Alt)
     {
-      if (Dictating) return Swallow(vk, a => a.Remote("Shift+F13"));
-      if (app.Typing) return Swallow(vk, a => a.StopTyping());
-      return pass;
+      swallowed.Add(vk);
+      // The app in front gets the plain letter: Alt let go first, with an
+      // unused key in between so that doesn't open its menu
+      Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true,
+        Native.VK_LMENU, true, Native.VK_RMENU, true, vk, false, vk, true);
+      return true;
     }
-    if (!Ctrl || !Alt || Win) return pass;
-    switch (vk)
+    var toChat = vk == Native.VK_Z;
+    return Swallow(vk, repeating ? null : a =>
     {
-      case Native.VK_UP or Native.VK_DOWN:
-        var up = vk == Native.VK_UP;
-        if (Shift) return Swallow(vk, a => a.ScrollChat(up ? -0.8 : 0.8));
-        return repeating ? Swallow(vk, null) : Swallow(vk, a => a.Remote(up ? "Shift+F16" : "Shift+F17"));
-      case Native.VK_RIGHT or Native.VK_RETURN:
-        if (Shift) return pass;
-        return Swallow(vk, repeating ? null : a => a.Remote("F15"));
-      case Native.VK_X or Native.VK_Z:
-        if (Shift) return pass;
-        var toChat = vk == Native.VK_Z;
-        return Swallow(vk, repeating ? null : a =>
-        {
-          // Z clicks into the message box (typing on), X goes back
-          if (toChat) { if (a.Typing) a.PointerToChat(); else a.StartTyping(focusBox: true); }
-          else { if (a.Typing) a.StopTyping(); else a.PointerBack(); }
-        });
-      case Native.VK_LEFT:
-        var shift = Shift;
-        return Swallow(vk, repeating ? null : a => { if (shift) a.HideMirror(); else a.ToggleMirror(); });
-      default:
-        return pass;
-    }
+      if (toChat) { if (a.Typing) a.PointerToChat(); else a.StartTyping(focusBox: true); }
+      else { if (a.Typing) a.StopTyping(); else a.PointerBack(); }
+    });
   }
 
   bool KeyUp(uint vk)
@@ -828,14 +807,6 @@ sealed class Shortcuts(ChatWindow app)
     if (lone is { } l && l.key == vk && Environment.TickCount64 - l.at < TapMs)
     {
       lone = null;
-      if (vk == Native.VK_RMENU)
-      {
-        Later(a => a.ToggleTyping());
-        // Alt pressed and let go alone opens the menu of the app in front;
-        // an unused key in between stops that (as AutoHotkey does).
-        Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true, Native.VK_RMENU, true);
-        return true;
-      }
       Later(a => a.Remote("F14"));
       return pass;
     }
@@ -870,11 +841,7 @@ sealed class Shortcuts(ChatWindow app)
         return pass;
       case Native.WM_MOUSEWHEEL:
         lone = null;
-        // Ctrl + Alt + scroll scrolls Hi-chat from anywhere
-        if (!Ctrl || !Alt || Win) return pass;
-        var delta = (short)(e.mouseData >> 16);
-        Later(a => a.ScrollChatBy(-delta));
-        return true;
+        return pass;
       default:
         return pass;
     }
