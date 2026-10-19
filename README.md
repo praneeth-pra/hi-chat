@@ -97,6 +97,8 @@ Its shortcuts:
 - tap **Right Ctrl**: a silent screenshot of the whole screen the pointer is on, saved to Pictures\Screenshots and copied, ready to paste.
 - **Z**: the pointer goes to Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back.
 - **Alt + Z / X** types the letter.
+- **Page Up / Down** (Fn + Up / Down on most laptops): the code block above / below in Hi-chat; with **Shift**, the chat scrolls by most of a screen.
+- **Alt + scroll** (mouse wheel or two fingers on the touchpad): scrolls Hi-chat from anywhere. Windows can't see the Fn key, so Alt stands in for Mac's fn + scroll.
 - **Ctrl + Left**: live mirror window of Hi-chat; again to switch to the screen around the pointer and back. **Ctrl + Shift + Left** closes it.
 
 Closing the window keeps Hi-chat running in the tray so the shortcuts keep

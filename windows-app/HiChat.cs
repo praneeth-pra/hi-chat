@@ -10,6 +10,11 @@
 //   Alt + Z / X                   types the letter
 //                                 (Z leaves a lookalike of the pointer where
 //                                 it was; X puts the pointer back on it)
+//   Page Up / Down (Fn + Up / Down
+//   on most laptops)              Hi-chat's code block above / below;
+//                                 with Shift, scroll the chat a screen
+//   Alt + scroll                  scroll Hi-chat from anywhere (wheel or
+//                                 two fingers on the touchpad)
 //   Ctrl + Left                   live mirror window: Hi-chat, pressed
 //                                 again the screen around the pointer, and
 //                                 back; Ctrl + Shift + Left closes it
@@ -787,6 +792,8 @@ sealed class Shortcuts(ChatWindow app)
   /// a scroll meanwhile turns it into a chord, which is left alone.
   (uint key, long at)? lone;
   const long TapMs = 500;
+  /// Alt + scroll already sent the key that keeps Alt from opening menus.
+  bool altMasked;
 
   public void Start()
   {
@@ -856,6 +863,7 @@ sealed class Shortcuts(ChatWindow app)
     if (IsModifier(vk))
     {
       if (repeating) return pass;
+      if (vk is Native.VK_LMENU or Native.VK_RMENU) altMasked = false;
       var tapKey = vk is Native.VK_LCONTROL or Native.VK_RCONTROL;
       lone = tapKey && held.Count == 1 ? (vk, Environment.TickCount64) : null;
       return pass;
@@ -863,6 +871,14 @@ sealed class Shortcuts(ChatWindow app)
     lone = null;
     if (vk == Native.VK_ESCAPE && Dictating && !Ctrl && !Alt && !Win)
       return Swallow(vk, a => a.Remote("Shift+F13"));
+    // Page Up / Down (Fn + Up / Down on most laptops): Hi-chat's code block
+    // above / below; with Shift the chat scrolls by most of a screen
+    if (vk is Native.VK_PRIOR or Native.VK_NEXT && !Ctrl && !Alt && !Win)
+    {
+      var up = vk == Native.VK_PRIOR;
+      if (Shift) return Swallow(vk, a => a.ScrollChat(up ? -0.8 : 0.8));
+      return Swallow(vk, repeating ? null : a => a.Remote(up ? "Shift+F16" : "Shift+F17"));
+    }
     // Ctrl + Left: the mirror, switching between Hi-chat and the pointer view;
     // Ctrl + Shift + Left closes it
     if (vk == Native.VK_LEFT && Ctrl && !Alt && !Win)
@@ -931,7 +947,18 @@ sealed class Shortcuts(ChatWindow app)
         return pass;
       case Native.WM_MOUSEWHEEL:
         lone = null;
-        return pass;
+        // Alt + scroll (a wheel or two fingers on the touchpad) scrolls
+        // Hi-chat from anywhere; the window under the pointer gets nothing
+        if (!Alt || Ctrl || Win) return pass;
+        var delta = (short)(e.mouseData >> 16);
+        if (!altMasked)
+        {
+          // So letting go of Alt afterwards doesn't open the menu of the app in front
+          altMasked = true;
+          Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true);
+        }
+        Later(a => a.ScrollChatBy(-delta * 100 / 120));
+        return true;
       default:
         return pass;
     }
@@ -1290,7 +1317,7 @@ static class Native
   public const int WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
   public const int WM_LBUTTONDOWN = 0x201, WM_RBUTTONDOWN = 0x204, WM_MBUTTONDOWN = 0x207, WM_MOUSEWHEEL = 0x20A;
   public const uint LLKHF_INJECTED = 0x10, LLMHF_INJECTED = 1;
-  public const uint VK_RETURN = 0x0D, VK_ESCAPE = 0x1B, VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27,
+  public const uint VK_RETURN = 0x0D, VK_ESCAPE = 0x1B, VK_PRIOR = 0x21, VK_NEXT = 0x22, VK_LEFT = 0x25, VK_UP = 0x26, VK_RIGHT = 0x27,
     VK_DOWN = 0x28, VK_X = 0x58, VK_Z = 0x5A, VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1,
     VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_LMENU = 0xA4, VK_RMENU = 0xA5;
   /// A key no keyboard has; pressing it in between keeps a lone Alt from opening menus.
