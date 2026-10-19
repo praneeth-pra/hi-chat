@@ -9,8 +9,8 @@
 //                                 (Z leaves a lookalike of the pointer where
 //                                 it was; X puts the pointer back on it)
 //   Ctrl + Left                   live mirror window: Hi-chat, pressed
-//                                 again the screen around the pointer,
-//                                 a third time closed
+//                                 again the screen around the pointer, and
+//                                 back; Ctrl + Shift + Left closes it
 //
 // A click in Hi-chat doesn't take the keyboard from the app you're in;
 // clicking into a text box (or Z) does. Closing the window
@@ -312,9 +312,13 @@ sealed class ChatWindow : Form
     base.OnDeactivate(e);
     Typing = false;
     typingReturnTo = IntPtr.Zero;
-    // The keyboard went elsewhere (a click in another app, say): the
-    // lookalike would only mislead now.
-    PointerForget();
+    // The keyboard went to another app (a click there, say): the lookalike
+    // would only mislead now. Hi-chat's own windows don't count.
+    BeginInvoke(() =>
+    {
+      Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out var pid);
+      if (pid != Environment.ProcessId) PointerForget();
+    });
   }
 
   protected override void OnFormClosing(FormClosingEventArgs e)
@@ -833,9 +837,13 @@ sealed class Shortcuts(ChatWindow app)
     lone = null;
     if (vk == Native.VK_ESCAPE && Dictating && !Ctrl && !Alt && !Win)
       return Swallow(vk, a => a.Remote("Shift+F13"));
-    // Ctrl + Left opens and closes the mirror (Ctrl + Shift + Left still selects a word)
-    if (vk == Native.VK_LEFT && Ctrl && !Alt && !Shift && !Win)
-      return Swallow(vk, repeating ? null : a => a.ToggleMirror());
+    // Ctrl + Left: the mirror, switching between Hi-chat and the pointer view;
+    // Ctrl + Shift + Left closes it
+    if (vk == Native.VK_LEFT && Ctrl && !Alt && !Win)
+    {
+      var shift = Shift;
+      return Swallow(vk, repeating ? null : a => { if (shift) a.HideMirror(); else a.ToggleMirror(); });
+    }
     // Plain Z / X go into Hi-chat and back; Alt + Z / X type the letter
     if (vk is not (Native.VK_X or Native.VK_Z) || Ctrl || Shift || Win) return pass;
     if (Alt)
@@ -924,7 +932,8 @@ sealed class PointerLookalike : Form
     StartPosition = FormStartPosition.Manual;
     BackColor = Clear;
     TransparencyKey = Clear;
-    TopMost = true;
+    // On top through WS_EX_TOPMOST below: setting TopMost here would activate
+    // it, taking the keyboard (and the pointer's way back) from Hi-chat
   }
 
   protected override bool ShowWithoutActivation => true;
@@ -1112,13 +1121,7 @@ sealed class Mirror : Form
       Native.ShowWindow(Handle, Native.SW_SHOWNOACTIVATE);
       Visible = true;
     }
-    else if (mode == Mode.Chat) mode = Mode.Pointer;
-    else
-    {
-      // Ctrl + Left a third time: Hi-chat, the pointer, then closed
-      HideMirror();
-      return;
-    }
+    else mode = mode == Mode.Chat ? Mode.Pointer : Mode.Chat;
     Restart();
   }
 
