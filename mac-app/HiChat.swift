@@ -13,9 +13,10 @@
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
 //   hold fn + scroll        scroll Hi-chat from anywhere
-//   Z / X                   click into Hi-chat's message box (Option typing on)
-//                           / pointer and keyboard back to where they were;
-//                           fn + Z / X types the letter
+//   Z / X                   the real pointer jumps into Hi-chat's message box
+//                           (typing on), leaving a lookalike pointer where it
+//                           was / pointer and keyboard back to where they
+//                           were; fn + Z / X types the letter
 //   fn + Left               live mirror window (Hi-chat, then the screen around
 //                           the pointer; needs Screen Recording);
 //                           fn + Shift + Left closes it
@@ -409,9 +410,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     if typing { stopTyping() } else { startTyping() }
   }
 
-  /// The real pointer stays where it is; Hi-chat's cursor shows up in the
-  /// message box instead (Option and Z alike).
-  func startTyping() {
+  /// jump: the real pointer goes to the message box and a lookalike stays
+  /// where it was (Z); otherwise the real pointer stays where it is and
+  /// Hi-chat's cursor shows up in the box instead (Option).
+  func startTyping(jump: Bool = false) {
     let front = NSWorkspace.shared.frontmostApplication
     if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
       typingReturnTo = front
@@ -420,13 +422,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.makeKeyAndOrderFront(nil)
     typing = true
     remote("F17") // the cursor goes to the end of the message box
-    cursorStart()
+    if jump { pointerToChat() } else { cursorStart() }
   }
 
   func stopTyping() {
     let back = typingReturnTo
     typing = false
     typingReturnTo = nil
+    pointerBack()
     guard panel.isKeyWindow else { return }
     // Giving up the keyboard without hiding: the unseen window takes it, then
     // drops it while Hi-chat's window refuses it, so it goes back to the app
@@ -441,9 +444,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   func windowDidResignKey(_ notification: Notification) {
     typing = false
     typingReturnTo = nil
+    // The keyboard went elsewhere (a click in another app, say): the
+    // lookalike would only mislead now.
+    pointerForget()
   }
 
   // MARK: Pointer
+
+  /// Where the pointer was before Z took it to Hi-chat (screen coordinates,
+  /// origin at the top left, as CGEvent uses). A lookalike shows there.
+  var pointerHome: CGPoint?
 
   func pointerNow() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
 
@@ -452,6 +462,40 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     // Without this the pointer ignores the mouse for a moment after a jump
     CGAssociateMouseAndMouseCursorPosition(1)
   }
+
+  /// Moves the real pointer into the message box, leaving a lookalike where
+  /// it was (unless it was on Hi-chat already).
+  func pointerToChat() {
+    guard panel.isVisible, !panel.isMiniaturized else { return }
+    let now = pointerNow()
+    let top = NSScreen.screens.first?.frame.maxY ?? panel.frame.maxY
+    let frame = panel.frame
+    let onChat = CGRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+    if !onChat.contains(now) && pointerHome == nil {
+      pointerHome = now
+      pointerLookalike.show(at: now)
+    }
+    messageBoxPoint { [weak self] point in
+      guard let self else { return }
+      let screen = self.panel.convertPoint(toScreen: point)
+      self.warpPointer(CGPoint(x: screen.x, y: top - screen.y))
+    }
+  }
+
+  /// Puts the real pointer back on its lookalike, which goes away.
+  func pointerBack() {
+    guard let home = pointerHome else { return }
+    pointerForget()
+    warpPointer(home)
+  }
+
+  func pointerForget() {
+    pointerHome = nil
+    pointerLookalike.hide()
+  }
+
+  /// The pointer as it looked where Z took it from.
+  lazy var pointerLookalike = PointerLookalike()
 
   /// The middle of the message box (or the bottom middle of the window when
   /// the page can't say where it is), in window coordinates.
@@ -472,16 +516,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
   }
 
-  /// Z: Option typing on with Hi-chat's cursor in the message box, as if
-  /// clicked there; the real pointer never moves. Pressed again, the cursor
-  /// goes back to the box.
+  /// Z: the real pointer goes to the message box and the box takes the
+  /// keyboard, as if clicked there; a lookalike pointer stays where it was.
+  /// Pressed again (or during Option typing), the pointer goes back to the box.
   func clickChat() {
-    if !typing { startTyping() } else if cursorOn { cursorToBox() } else { cursorStart() }
+    if typing { cursorStop(); pointerToChat() } else { startTyping(jump: true) }
   }
 
-  /// X: hands the keyboard back to the app in front.
+  /// X: hands the keyboard back to the app in front, and the pointer back to
+  /// where it was.
   func leaveChat() {
-    if typing { stopTyping() }
+    if typing { stopTyping() } else { pointerBack() }
   }
 
   // MARK: Hi-chat's cursor
@@ -1118,6 +1163,42 @@ final class ChatCursorView: NSView {
       NSColor.systemBlue.setFill(); path.fill()
     }
   }
+}
+
+/// A picture of the pointer, left where it was while Z has the real one in
+/// Hi-chat. Clicks go through it and it never takes the keyboard.
+@MainActor
+final class PointerLookalike {
+  let window: NSPanel
+  let image = NSImageView()
+
+  init() {
+    window = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                     backing: .buffered, defer: true)
+    window.isOpaque = false
+    window.backgroundColor = .clear
+    window.hasShadow = false
+    window.ignoresMouseEvents = true
+    window.isReleasedWhenClosed = false
+    window.level = .screenSaver
+    window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+    image.imageScaling = .scaleNone
+    window.contentView = image
+  }
+
+  /// at: the pointer's position, origin at the top left (as CGEvent uses).
+  func show(at point: CGPoint) {
+    let cursor = NSCursor.currentSystem ?? NSCursor.arrow
+    let size = cursor.image.size
+    let hot = cursor.hotSpot // from the image's top left
+    let top = NSScreen.screens.first?.frame.maxY ?? 0
+    image.image = cursor.image
+    window.setFrame(NSRect(x: point.x - hot.x, y: top - point.y - (size.height - hot.y),
+                           width: size.width, height: size.height), display: true)
+    window.orderFrontRegardless()
+  }
+
+  func hide() { window.orderOut(nil) }
 }
 
 /// The page's side of Hi-chat's cursor: highlights text at a point without
