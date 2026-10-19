@@ -2,7 +2,10 @@
 
 import { AppTypingIndicator } from './AppTypingIndicator'
 import { useDictationDelivery } from '@/lib/dictationDelivery'
-import { useScreenshotDelivery } from '@/lib/screenshotDelivery'
+import {
+  takeHeldScreenshots,
+  useScreenshotDelivery,
+} from '@/lib/screenshotDelivery'
 
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
@@ -340,7 +343,8 @@ const ChatInput = ({
       restoreTimer = setTimeout(() => unsubscribe(), 5000)
     }
     Promise.resolve()
-      .then(() => sendMessage(text, true, undefined, projectId))
+      // With any screenshots taken while dictating
+      .then(() => sendMessage(text, true, takeHeldScreenshots(), projectId))
       .catch((error: Error) => {
         usePrompt.getState().setPrompt(text)
         toast(`Dictation could not send: ${error.message}`)
