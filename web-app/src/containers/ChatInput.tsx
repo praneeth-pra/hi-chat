@@ -365,40 +365,14 @@ const ChatInput = ({
     dictationDone,
   ])
 
-  // The app's screenshot key: each screenshot goes out on its own, no words
+  // The app's screenshot key: each screenshot waits in the message box,
+  // sent when you press Enter
   const screenshots = useScreenshotDelivery((s) => s.pending)
-  const screenshotSending = useRef(false)
-  const [screenshotDone, setScreenshotDone] = useState(0)
   useEffect(() => {
-    if (
-      !screenshots.length ||
-      streamingContent ||
-      ingestingAny ||
-      !selectedModel ||
-      screenshotSending.current
-    )
-      return
-    const image = screenshots[0]
-    screenshotSending.current = true
-    useScreenshotDelivery.setState((s) => ({ pending: s.pending.slice(1) }))
-    Promise.resolve()
-      .then(() => sendMessage('', true, [image], projectId))
-      .catch((error: Error) => {
-        toast(`Screenshot could not send: ${error.message}`)
-      })
-      .finally(() => {
-        screenshotSending.current = false
-        setScreenshotDone((n) => n + 1)
-      })
-  }, [
-    screenshots,
-    streamingContent,
-    ingestingAny,
-    selectedModel,
-    sendMessage,
-    projectId,
-    screenshotDone,
-  ])
+    if (!screenshots.length) return
+    useScreenshotDelivery.setState({ pending: [] })
+    setAttachmentsForThread(attachmentsKey, (prev) => [...prev, ...screenshots])
+  }, [screenshots, attachmentsKey, setAttachmentsForThread])
 
   useEffect(() => {
     const handleFocusIn = () => {
