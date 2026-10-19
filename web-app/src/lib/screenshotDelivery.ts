@@ -5,7 +5,7 @@ import { useDictationDelivery } from '@/lib/dictationDelivery'
 
 /**
  * Screenshots the Mac or Windows app took with its screenshot key. pending:
- * waiting for the message box to send each on its own, with no words. held:
+ * waiting to go into the message box, sent when you press Enter. held:
  * taken while dictating, so they go out with the dictated words instead.
  */
 export const useScreenshotDelivery = create<{
@@ -50,7 +50,7 @@ export function takeHeldScreenshots(): Attachment[] | undefined {
 }
 
 // A dictation that ends with no words to send (heard nothing, thrown away,
-// failed) still sends its screenshots, on their own.
+// failed) leaves its screenshots in the message box.
 let watching = false
 function watchDictation() {
   if (watching) return

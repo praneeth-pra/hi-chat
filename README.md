@@ -75,7 +75,7 @@ shortcuts built in. Download it from
 it offers each new version itself. It lives in the menu bar at the top (its H logo: Check for Updates, Show in Dock, Quit); the Dock icon is off unless "Show in Dock" is ticked.
 
 - tap **Left Control**: dictate; tap again to send. **Escape** throws it away.
-- tap **Left Option**: a silent screenshot of the whole screen the pointer is on, sent in Hi-chat on its own (taken while dictating, it goes with the dictated message). It's also saved where your Mac saves screenshots (the Desktop by default) and copied. The first time, macOS asks to allow Screen Recording.
+- tap **Left Option**: a silent screenshot of the whole screen the pointer is on, put in Hi-chat's message box for you to send with Enter (taken while dictating, it goes out with the dictated message). It's also saved where your Mac saves screenshots (the Desktop by default) and copied. The first time, macOS asks to allow Screen Recording.
 - **fn + Right**: send. **fn + Up / Down**: code block above / below.
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
 - **Z**: your real pointer jumps into Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back to where they were. **fn + Z / X** (or Shift) types the letter.
@@ -103,7 +103,7 @@ offers each new version itself, and Check for updates is on the tray icon's menu
 Its shortcuts:
 
 - tap **Left Ctrl**: dictate; tap again to send. **Escape** throws it away.
-- tap **Right Ctrl**: a silent screenshot of the whole screen the pointer is on, sent in Hi-chat on its own (taken while dictating, it goes with the dictated message). It's also saved to Pictures\Screenshots and copied.
+- tap **Right Ctrl**: a silent screenshot of the whole screen the pointer is on, put in Hi-chat's message box for you to send with Enter (taken while dictating, it goes out with the dictated message). It's also saved to Pictures\Screenshots and copied.
 - **Z**: the pointer goes to Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back.
 - **Alt + Z / X** types the letter.
 - **Page Up / Down** (Fn + Up / Down on most laptops): the code block above / below in Hi-chat; with **Shift**, the chat scrolls by most of a screen.
