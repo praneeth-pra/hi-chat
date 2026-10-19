@@ -78,7 +78,7 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 - tap **Left Option**: type into Hi-chat while the app you're in stays active. Meanwhile the mouse moves Hi-chat's own blue cursor and your pointer stays where it is: click and drag to highlight text in Hi-chat, double click for a word.
 - **fn + Right**: send. **fn + Up / Down**: code block above / below.
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
-- **Z**: Option typing on, with Hi-chat's cursor in the message box (the real pointer never moves); **X**: keyboard back to the app in front. **fn + Z / X** (or Shift) types the letter.
+- **Z**: your real pointer jumps into Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back to where they were. **fn + Z / X** (or Shift) types the letter.
 - **fn + Left**: live mirror window; **fn + Shift + Left** closes it.
 - **fn + N**: a new chat.
 
