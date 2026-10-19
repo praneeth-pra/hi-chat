@@ -44,6 +44,19 @@ jobs:
         with:
           name: Hi-chat-exe
           path: windows-app/out
+      # The apps install only updates signed with this key (see Updater)
+      - name: Sign the update
+        env:
+          HICHAT_SIGNING: ${{ secrets.HICHAT_SIGNING }}
+        run: |
+          if [ -z "$HICHAT_SIGNING" ]; then
+            echo "::error::The HICHAT_SIGNING secret is missing, so this release can't be signed"
+            exit 1
+          fi
+          keys=$(mktemp -d)
+          echo "$HICHAT_SIGNING" | base64 --decode | tar -xzf - -C "$keys"
+          openssl dgst -sha256 -sign "$keys/update.pem" -out windows-app/out/Hi-chat.exe.sig windows-app/out/Hi-chat.exe
+          rm -rf "$keys"
       # Windows releases are win-1.0.N and never "latest": the Mac app's
       # updater reads the latest release. The Windows app finds its own.
       - name: Publish release
@@ -51,7 +64,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "win-1.0.${{ github.run_number }}" windows-app/out/Hi-chat.exe \
+          gh release create "win-1.0.${{ github.run_number }}" windows-app/out/Hi-chat.exe windows-app/out/Hi-chat.exe.sig \
             --title "Hi-chat for Windows 1.0.${{ github.run_number }}" \
             --notes "Download Hi-chat.exe and open it. It installs itself for your Windows user and adds Hi-chat to the Start menu." \
             --target "${{ github.sha }}" --latest=false
