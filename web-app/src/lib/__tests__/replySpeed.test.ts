@@ -104,4 +104,20 @@ describe('replySpeed', () => {
     expect(chatDelay([], base)).toBeUndefined()
     expect(chatDelay([answer(3)], [])).toBeUndefined()
   })
+
+  it('leaves Auto · Accuracy answers out, whose start includes the web search', () => {
+    recordReply({
+      model_used: MODEL,
+      history_messages: 2,
+      wait_for_first_byte_s: 2.5,
+      auto_mode: 'accuracy',
+    })
+    expect(readSamples()).toEqual([])
+    const messages = [
+      answer(0.16),
+      answer(2.5, { auto_mode: 'accuracy' }),
+      answer(2.8, { auto_mode: 'accuracy' }),
+    ]
+    expect(chatDelay(messages, base)?.level).toBe('light')
+  })
 })

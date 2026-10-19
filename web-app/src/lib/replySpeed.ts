@@ -27,6 +27,7 @@ type Timings = {
   history_messages?: number
   wait_for_first_byte_s?: number
   tab_hidden_at_send?: boolean
+  auto_mode?: string
   provider_queue_s?: unknown
   provider_prompt_s?: unknown
 }
@@ -48,7 +49,10 @@ const num = (x: unknown) =>
 
 function toSample(t: Timings): ReplySample | undefined {
   const s = num(t.wait_for_first_byte_s)
+  // Accuracy's start includes the web search and its longer grounded
+  // request: that is the mode's cost, not the chat's.
   if (!t.model_used || s === undefined || t.tab_hidden_at_send) return
+  if (t.auto_mode === 'accuracy') return
   return {
     model: t.model_used,
     fresh: (t.history_messages ?? Infinity) <= FRESH_MESSAGES,
