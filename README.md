@@ -85,6 +85,8 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
 
+These are the defaults. Each can be changed, turned off or reset in Hi-chat's **Settings > App keys**: press Change, then press the new keys (a key with modifiers, or a modifier tapped on its own). Esc cancels.
+
 ### Signed updates
 
 Both apps install an update only when its download carries a valid signature
@@ -116,6 +118,8 @@ working; Quit is on the tray icon's menu. GitHub Actions
 
 See [Question input alternatives and answer latency](docs/question-input-alternatives.md)
 for the assessed replacement options; no replacement listener is enabled.
+
+These are the defaults. Each can be changed, turned off or reset in Hi-chat's **Settings > App keys**: press Change, then press the new keys (a key with modifiers, or a modifier tapped on its own). Esc cancels.
 
 ## Test and build
 

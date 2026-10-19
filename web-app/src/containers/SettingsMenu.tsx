@@ -16,6 +16,7 @@ import { getProviderTitle } from '@/lib/utils'
 import ProvidersAvatar from '@/containers/ProvidersAvatar'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
+import { inHiChatApp } from '@/lib/appShortcuts'
 
 const SettingsMenu = () => {
   const { t } = useTranslation()
@@ -108,6 +109,12 @@ const SettingsMenu = () => {
       route: route.settings.shortcuts,
       hasSubMenu: false,
       isEnabled: PlatformFeatures[PlatformFeature.SHORTCUT],
+    },
+    {
+      title: 'common:appKeys',
+      route: route.settings.app_keys,
+      hasSubMenu: false,
+      isEnabled: inHiChatApp(),
     },
     {
       title: 'common:hardware',

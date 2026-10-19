@@ -28,6 +28,7 @@ import { Route as SettingsGeneralImport } from './routes/settings/general'
 import { Route as SettingsExtensionsImport } from './routes/settings/extensions'
 import { Route as SettingsAttachmentsImport } from './routes/settings/attachments'
 import { Route as SettingsAssistantImport } from './routes/settings/assistant'
+import { Route as SettingsAppKeysImport } from './routes/settings/app-keys'
 import { Route as ProjectProjectIdImport } from './routes/project/$projectId'
 import { Route as LocalApiServerLogsImport } from './routes/local-api-server/logs'
 import { Route as HubModelIdImport } from './routes/hub/$modelId'
@@ -138,6 +139,12 @@ const SettingsAssistantRoute = SettingsAssistantImport.update({
   getParentRoute: () => rootRoute,
 } as any)
 
+const SettingsAppKeysRoute = SettingsAppKeysImport.update({
+  id: '/settings/app-keys',
+  path: '/settings/app-keys',
+  getParentRoute: () => rootRoute,
+} as any)
+
 const ProjectProjectIdRoute = ProjectProjectIdImport.update({
   id: '/project/$projectId',
   path: '/project/$projectId',
@@ -213,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/project/$projectId'
       fullPath: '/project/$projectId'
       preLoaderRoute: typeof ProjectProjectIdImport
+      parentRoute: typeof rootRoute
+    }
+    '/settings/app-keys': {
+      id: '/settings/app-keys'
+      path: '/settings/app-keys'
+      fullPath: '/settings/app-keys'
+      preLoaderRoute: typeof SettingsAppKeysImport
       parentRoute: typeof rootRoute
     }
     '/settings/assistant': {
@@ -339,6 +353,7 @@ export interface FileRoutesByFullPath {
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
+  '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -364,6 +379,7 @@ export interface FileRoutesByTo {
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
+  '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -390,6 +406,7 @@ export interface FileRoutesById {
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
+  '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
   '/settings/attachments': typeof SettingsAttachmentsRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -417,6 +434,7 @@ export interface FileRouteTypes {
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
+    | '/settings/app-keys'
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/extensions'
@@ -441,6 +459,7 @@ export interface FileRouteTypes {
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
+    | '/settings/app-keys'
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/extensions'
@@ -465,6 +484,7 @@ export interface FileRouteTypes {
     | '/hub/$modelId'
     | '/local-api-server/logs'
     | '/project/$projectId'
+    | '/settings/app-keys'
     | '/settings/assistant'
     | '/settings/attachments'
     | '/settings/extensions'
@@ -491,6 +511,7 @@ export interface RootRouteChildren {
   HubModelIdRoute: typeof HubModelIdRoute
   LocalApiServerLogsRoute: typeof LocalApiServerLogsRoute
   ProjectProjectIdRoute: typeof ProjectProjectIdRoute
+  SettingsAppKeysRoute: typeof SettingsAppKeysRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
   SettingsAttachmentsRoute: typeof SettingsAttachmentsRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
@@ -516,6 +537,7 @@ const rootRouteChildren: RootRouteChildren = {
   HubModelIdRoute: HubModelIdRoute,
   LocalApiServerLogsRoute: LocalApiServerLogsRoute,
   ProjectProjectIdRoute: ProjectProjectIdRoute,
+  SettingsAppKeysRoute: SettingsAppKeysRoute,
   SettingsAssistantRoute: SettingsAssistantRoute,
   SettingsAttachmentsRoute: SettingsAttachmentsRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
@@ -550,6 +572,7 @@ export const routeTree = rootRoute
         "/hub/$modelId",
         "/local-api-server/logs",
         "/project/$projectId",
+        "/settings/app-keys",
         "/settings/assistant",
         "/settings/attachments",
         "/settings/extensions",
@@ -585,6 +608,9 @@ export const routeTree = rootRoute
     },
     "/project/$projectId": {
       "filePath": "project/$projectId.tsx"
+    },
+    "/settings/app-keys": {
+      "filePath": "settings/app-keys.tsx"
     },
     "/settings/assistant": {
       "filePath": "settings/assistant.tsx"
