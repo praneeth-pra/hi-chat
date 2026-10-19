@@ -96,6 +96,7 @@ Its shortcuts:
 - tap **Ctrl**: dictate; tap again to send. **Escape** throws it away.
 - **Z**: the pointer goes to Hi-chat's message box (typing on); **X**: pointer and keyboard back.
 - **Alt + Z / X** types the letter.
+- **Ctrl + Left**: live mirror window of Hi-chat; again for the screen around the pointer; a third time closes it.
 
 Closing the window keeps Hi-chat running in the tray so the shortcuts keep
 working; Quit is on the tray icon's menu. GitHub Actions
