@@ -4,6 +4,7 @@ import {
   getDictationJudges,
   judgeDictation,
   lastJudge,
+  notLonger,
   onlyHeardWords,
   setDictationJudges,
   warmJudges,
@@ -199,6 +200,36 @@ describe('judgeDictation', () => {
     expect(onlyHeardWords('Compare CloudFormation and Terraform', heard)).toBe(
       false
     )
+  })
+
+  it('keeps the vote when the judge joins two versions of one spot', async () => {
+    providers.cerebras = { api_key: 'csk' }
+    const heard = [
+      {
+        engine: 'cartesia',
+        text: 'what is network load balancer and how it is different from',
+      },
+      {
+        engine: 'soniox',
+        text: 'What is Network Load Balancer, and how it is different from CNAPP?',
+      },
+      {
+        engine: 'elevenlabs',
+        text: 'What is network load balancer and how it is different from AWS?',
+      },
+    ]
+    const joined =
+      'What is Network Load Balancer, and how it is different from CNAPP and AWS?'
+    expect(notLonger(joined, heard)).toBe(false)
+    expect(notLonger(heard[2].text, heard)).toBe(true)
+    expect(
+      await judgeDictation(
+        heard,
+        heard[2].text,
+        [],
+        reply(joined) as unknown as typeof fetch
+      )
+    ).toBeUndefined()
   })
 
   it('records which judge model answered', async () => {

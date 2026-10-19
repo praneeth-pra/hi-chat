@@ -34,26 +34,18 @@ describe('contextSize', () => {
       's'.repeat(800),
       'd'.repeat(400)
     )
-    expect(size).toMatchObject({ tokens: 500, images: 0, level: 'light' })
+    expect(size).toMatchObject({
+      tokens: 500,
+      baseTokens: 200,
+      images: 0,
+    })
   })
 
   it('counts each image still in the recent messages, which is sent again', () => {
-    const size = contextSize([
-      image(600_000),
-      image(600_000),
-      text('assistant', 'ok'),
-    ])
+    const imgs = (n: number) => Array.from({ length: n }, () => image(600_000))
+    const size = contextSize(imgs(2))
     expect(size.images).toBe(2)
     expect(size.imageBytes).toBe(1_200_000)
-    expect(size.level).toBe('medium')
-    expect(
-      contextSize([
-        image(600_000),
-        image(600_000),
-        image(600_000),
-        image(600_000),
-      ]).level
-    ).toBe('heavy')
   })
 
   it('leaves out messages older than the ones sent', () => {
