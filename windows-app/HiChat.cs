@@ -502,6 +502,8 @@ sealed class ChatWindow : Form
   public void ScrollChat(double fraction) => RunInPage(
     $"const s = document.querySelector('[data-thread-scroller]'); if (s) s.scrollBy({{ top: s.clientHeight * {fraction.ToString(System.Globalization.CultureInfo.InvariantCulture)}, behavior: 'smooth' }})");
 
+  public void StopTouchpadScroll() => touchpad.Stop();
+
   public void ScrollChatBy(int pixels) => RunInPage(
     $"const s = document.querySelector('[data-thread-scroller]'); if (s) s.scrollBy({{ top: {pixels} }})");
 
@@ -961,6 +963,7 @@ sealed class Shortcuts(ChatWindow app)
   {
     const bool pass = false;
     held.Remove(vk);
+    if (vk is Native.VK_LMENU or Native.VK_RMENU && TouchpadScroll.Scrolling) Later(a => a.StopTouchpadScroll());
     if (swallowed.Remove(vk)) return true;
     if (lone is { } l && l.key == vk && Environment.TickCount64 - l.at < TapMs)
     {
@@ -1009,7 +1012,8 @@ sealed class Shortcuts(ChatWindow app)
           altMasked = true;
           Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true);
         }
-        Later(a => a.ScrollChatBy(-delta * 100 / 120));
+        // Two fingers on the touchpad already scroll the chat through raw input
+        if (!TouchpadScroll.Scrolling) Later(a => a.ScrollChatBy(-delta * 100 / 120));
         return true;
       default:
         return pass;
@@ -1020,9 +1024,15 @@ sealed class Shortcuts(ChatWindow app)
 /// Alt + two fingers on the touchpad scrolls Hi-chat from anywhere. Windows
 /// sends touchpad scrolling straight to the window under the pointer, past
 /// the mouse hook, so this reads the fingers from the touchpad itself (raw
-/// input) and scrolls the chat by as much as two fingers moved.
+/// input) and scrolls the chat by as much as two fingers moved. Meanwhile
+/// a see-through window covers the screens, so the scroll Windows makes of
+/// the same fingers lands on it and not on the window under the pointer.
 sealed class TouchpadScroll(Action<int> scroll)
 {
+  /// On while Alt is held with two fingers on the pad. Read on other threads.
+  public static volatile bool Scrolling;
+  readonly ScrollShield shield = new();
+
   /// One touchpad: where each finger's fields are in its reports.
   sealed class Pad
   {
@@ -1059,6 +1069,7 @@ sealed class TouchpadScroll(Action<int> scroll)
     {
       fingers.Clear();
       masked = false;
+      Shield(false);
       return;
     }
     var header = (uint)Marshal.SizeOf<Native.RAWINPUTHEADER>();
@@ -1076,6 +1087,9 @@ sealed class TouchpadScroll(Action<int> scroll)
       var count = Marshal.ReadInt32(hid, 4);
       double moved = 0;
       for (var i = 0; i < count; i++) moved += Report(pad, hid + 8 + i * (int)reportSize, reportSize);
+      // Up as soon as the second finger lands, before Windows sees a scroll
+      // and picks the window to send it to
+      Shield(fingers.Count >= 2);
       if (moved == 0 || inFrame < 2) return;
       if (!masked)
       {
@@ -1090,6 +1104,20 @@ sealed class TouchpadScroll(Action<int> scroll)
       if (px != 0) scroll(px);
     }
     finally { Marshal.FreeHGlobal(data); }
+  }
+
+  /// Alt let go: the shield comes down even if the pad sends nothing more.
+  public void Stop()
+  {
+    fingers.Clear();
+    Shield(false);
+  }
+
+  void Shield(bool on)
+  {
+    if (Scrolling == on) return;
+    Scrolling = on;
+    if (on) shield.Cover(); else shield.Uncover();
   }
 
   /// Reads one report; returns how far its fingers moved down the pad.
@@ -1180,6 +1208,54 @@ sealed class TouchpadScroll(Action<int> scroll)
     }
     finally { Marshal.FreeHGlobal(caps); }
   }
+}
+
+/// A window over all the screens, too faint to see, that catches Windows'
+/// own scrolling of the touchpad while Alt + two fingers scroll Hi-chat.
+/// It never takes the keyboard and is up only while the fingers are down.
+sealed class ScrollShield : Form
+{
+  public ScrollShield()
+  {
+    FormBorderStyle = FormBorderStyle.None;
+    ShowInTaskbar = false;
+    StartPosition = FormStartPosition.Manual;
+    BackColor = Color.Black;
+    // Not fully clear: Windows sends nothing to a window with no opacity
+    Opacity = 0.01;
+  }
+
+  protected override bool ShowWithoutActivation => true;
+
+  protected override CreateParams CreateParams
+  {
+    get
+    {
+      var p = base.CreateParams;
+      p.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW | Native.WS_EX_TOPMOST | Native.WS_EX_LAYERED;
+      return p;
+    }
+  }
+
+  protected override void WndProc(ref Message m)
+  {
+    if (m.Msg == Native.WM_MOUSEACTIVATE)
+    {
+      m.Result = (IntPtr)Native.MA_NOACTIVATE;
+      return;
+    }
+    base.WndProc(ref m);
+  }
+
+  public void Cover()
+  {
+    var all = SystemInformation.VirtualScreen;
+    Native.SetWindowPos(Handle, Native.HWND_TOPMOST, all.X, all.Y, all.Width, all.Height,
+      Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
+    Visible = true;
+  }
+
+  public void Uncover() => Visible = false;
 }
 
 /// The live mirror: a small window on top of everything that shows the
