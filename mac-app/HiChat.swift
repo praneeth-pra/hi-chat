@@ -4,11 +4,9 @@
 //
 //   tap Left Control        dictate: tap again to stop and send
 //   Escape while dictating  throw the recording away
-//   tap Left Option         type into Hi-chat while the app you're in stays
-//                           active; tap again (or Escape) to stop. Meanwhile
-//                           the mouse moves Hi-chat's own cursor and the real
-//                           pointer stays put: click or drag to highlight
-//                           text in Hi-chat (double click a word)
+//   tap Left Option         silent screenshot of the screen the pointer is
+//                           on, saved where the Mac saves screenshots and
+//                           copied (needs Screen Recording)
 //   fn + Right              send what's typed in the box
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
@@ -104,7 +102,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var statusItem: NSStatusItem?
   var dockItem: NSMenuItem!
   static let showInDockKey = "showInDock"
-  /// The app that was in front when Option typing started.
+  /// The app that was in front when Z started typing.
   var typingReturnTo: NSRunningApplication?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -134,8 +132,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     config.mediaTypesRequiringUserActionForPlayback = []
     config.preferences.setValue(true, forKey: "developerExtrasEnabled")
     config.userContentController.add(self, name: "hiChat")
-    config.userContentController.addUserScript(
-      WKUserScript(source: chatCursorScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
 
     webView = WKWebView(frame: .zero, configuration: config)
     webView.uiDelegate = self
@@ -171,8 +167,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     webView.frame = content.bounds
     webView.autoresizingMask = [.width, .height]
     content.addSubview(webView)
-    chatCursor.isHidden = true
-    content.addSubview(chatCursor, positioned: .above, relativeTo: webView)
     panel.contentView = content
     panel.delegate = self
     panel.center()
@@ -379,13 +373,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     return CGPoint(x: frame.midX, y: top - frame.midY)
   }
 
-  /// On while Option typing is: until it is tapped off, or another window
+  /// On while Z has Hi-chat typing: until X, Escape, or another window
   /// takes the keyboard. The page shows it by the message box.
   var typing = false {
-    didSet {
-      if typing != oldValue { tellPageTyping() }
-      if !typing { cursorStop() }
-    }
+    didSet { if typing != oldValue { tellPageTyping() } }
   }
 
   func tellPageTyping() {
@@ -404,16 +395,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     return sink
   }()
 
-  /// Option typing: Hi-chat takes the keyboard, the app in front stays active,
-  /// and the mouse drives Hi-chat's own cursor.
-  func toggleTyping() {
-    if typing { stopTyping() } else { startTyping() }
-  }
-
-  /// jump: the real pointer goes to the message box and a lookalike stays
-  /// where it was (Z); otherwise the real pointer stays where it is and
-  /// Hi-chat's cursor shows up in the box instead (Option).
-  func startTyping(jump: Bool = false) {
+  /// Hi-chat takes the keyboard while the app in front stays active; the
+  /// real pointer goes to the message box and a lookalike stays where it was.
+  func startTyping() {
     let front = NSWorkspace.shared.frontmostApplication
     if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
       typingReturnTo = front
@@ -422,7 +406,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.makeKeyAndOrderFront(nil)
     typing = true
     remote("F17") // the cursor goes to the end of the message box
-    if jump { pointerToChat() } else { cursorStart() }
+    pointerToChat()
   }
 
   func stopTyping() {
@@ -518,9 +502,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   /// Z: the real pointer goes to the message box and the box takes the
   /// keyboard, as if clicked there; a lookalike pointer stays where it was.
-  /// Pressed again (or during Option typing), the pointer goes back to the box.
+  /// Pressed again, the pointer goes back to the box.
   func clickChat() {
-    if typing { cursorStop(); pointerToChat() } else { startTyping(jump: true) }
+    if typing { pointerToChat() } else { startTyping() }
   }
 
   /// X: hands the keyboard back to the app in front, and the pointer back to
@@ -529,97 +513,51 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     if typing { stopTyping() } else { pointerBack() }
   }
 
-  // MARK: Hi-chat's cursor
+  // MARK: Screenshot
 
-  /// Hi-chat's own cursor, drawn over the page. It shows and follows the
-  /// mouse while Option typing is on; the real pointer stays where it was.
-  lazy var chatCursor = ChatCursorView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-  /// On while the mouse drives Hi-chat's cursor.
-  var cursorOn = false
-  /// Hi-chat's cursor, in the page's coordinates (from the top left).
-  var cursorAt = NSPoint.zero
-  /// Where the real pointer stays meanwhile (CGEvent coordinates).
-  var cursorHome = CGPoint.zero
-  var cursorDragging = false
-  var cursorAsking = false
-  var cursorAskAgain = false
-
-  func cursorStart() {
-    guard panel.isVisible, !panel.isMiniaturized, !cursorOn else { return }
-    cursorOn = true
-    cursorHome = pointerNow()
-    cursorToBox()
-  }
-
-  /// Puts Hi-chat's cursor in the message box.
-  func cursorToBox() {
-    messageBoxPoint { [weak self] point in
-      guard let self, self.cursorOn else { return }
-      self.cursorAt = self.webView.convert(point, from: nil)
-      self.chatCursor.text = false
-      self.placeCursor()
-      self.chatCursor.isHidden = false
-      self.askPage()
-    }
-  }
-
-  func cursorStop() {
-    guard cursorOn else { return }
-    cursorOn = false
-    cursorDragging = false
-    chatCursor.isHidden = true
-    if pointerNow() != cursorHome { warpPointer(cursorHome) }
-  }
-
-  /// The mouse moved by (dx, dy) points: so does Hi-chat's cursor, kept
-  /// inside the window.
-  func cursorMove(dx: Double, dy: Double) {
-    guard cursorOn else { return }
-    let size = webView.bounds.size
-    cursorAt.x = min(max(cursorAt.x + dx, 0), size.width - 1)
-    cursorAt.y = min(max(cursorAt.y + dy, 0), size.height - 1)
-    placeCursor()
-    askPage()
-  }
-
-  /// A click at Hi-chat's cursor: starts a highlight there (a double click
-  /// takes the word, a triple click the paragraph); dragging stretches it.
-  func cursorDown(clicks: Int64) {
-    guard cursorOn else { return }
-    cursorDragging = true
-    webView.evaluateJavaScript(
-      "window.hiChatCursor && window.hiChatCursor.down(\(cursorAt.x), \(cursorAt.y), \(clicks))")
-  }
-
-  func cursorUp() { cursorDragging = false }
-
-  func placeCursor() {
-    let hot = chatCursor.hotSpot
-    chatCursor.setFrameOrigin(NSPoint(x: cursorAt.x - hot.x, y: cursorAt.y - hot.y))
-  }
-
-  /// Stretches the highlight while dragging and asks whether the cursor is
-  /// over text (I-beam) or not (arrow). One question at a time; the newest
-  /// position goes next.
-  func askPage() {
-    if cursorAsking { cursorAskAgain = true; return }
-    cursorAsking = true
-    let x = cursorAt.x, y = cursorAt.y
-    let drag = cursorDragging ? "c.drag(\(x), \(y)); " : ""
-    webView.evaluateJavaScript(
-      "(() => { const c = window.hiChatCursor; if (!c) return false; \(drag)return c.overText(\(x), \(y)) })()"
-    ) { [weak self] result, _ in
-      guard let self else { return }
-      self.cursorAsking = false
-      if let text = result as? Bool, text != self.chatCursor.text {
-        self.chatCursor.text = text
-        self.placeCursor() // the I-beam's point is its middle, the arrow's its tip
-      }
-      if self.cursorAskAgain && self.cursorOn {
-        self.cursorAskAgain = false
-        self.askPage()
+  /// Left Option: the whole screen the pointer is on, without a sound, saved
+  /// where the Mac saves screenshots (the Desktop unless that was changed)
+  /// and copied for pasting.
+  func screenshot() {
+    var display = CGMainDisplayID()
+    var found: UInt32 = 0
+    CGGetDisplaysWithPoint(pointerNow(), 1, &display, &found)
+    var displays = [CGDirectDisplayID](repeating: 0, count: 16)
+    var count: UInt32 = 0
+    CGGetActiveDisplayList(16, &displays, &count)
+    // screencapture numbers the screens from 1, in this same order
+    let number = (displays.prefix(Int(count)).firstIndex(of: display) ?? 0) + 1
+    let saved = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location")
+    var folder = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+    if let saved, !saved.isEmpty {
+      var isFolder: ObjCBool = false
+      let path = (saved as NSString).expandingTildeInPath
+      if FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue {
+        folder = URL(fileURLWithPath: path)
       }
     }
+    let stamp = DateFormatter()
+    stamp.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+    let name = "Screenshot \(stamp.string(from: Date()))"
+    var file = folder.appendingPathComponent(name + ".png")
+    var n = 2
+    while FileManager.default.fileExists(atPath: file.path) {
+      file = folder.appendingPathComponent("\(name) (\(n)).png")
+      n += 1
+    }
+    let shot = file
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    task.arguments = ["-x", "-D", String(number), "-t", "png", shot.path]
+    task.terminationHandler = { _ in
+      DispatchQueue.main.async {
+        guard let data = try? Data(contentsOf: shot) else { return }
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setData(data, forType: .png)
+      }
+    }
+    do { try task.run() } catch { NSLog("Hi-chat: screenshot didn't start: \(error)") }
   }
 
   // MARK: Mirror
@@ -930,15 +868,13 @@ final class Keys {
   var lone: (key: Int64, at: TimeInterval)?
   var heldKey: Int64?
   var redirecting = false
-  /// A click that went to Hi-chat's cursor, so its release does too.
-  var cursorClick = false
   static let tapSeconds = 0.5
 
   init(app: AppController) { self.app = app }
 
   func start() -> Bool {
-    let kinds: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .leftMouseUp,
-                                .rightMouseDown, .mouseMoved, .leftMouseDragged, .scrollWheel]
+    let kinds: [CGEventType] = [.flagsChanged, .keyDown, .keyUp, .leftMouseDown,
+                                .rightMouseDown, .scrollWheel]
     let mask = kinds.reduce(CGEventMask(0)) { $0 | (1 << CGEventMask($1.rawValue)) }
     guard let tap = CGEvent.tapCreate(
       tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -979,33 +915,7 @@ final class Keys {
       return pass
     case .leftMouseDown, .rightMouseDown:
       lone = nil
-      if type == .leftMouseDown && MainActor.assumeIsolated({ app.cursorOn }) {
-        cursorClick = true
-        let clicks = event.getIntegerValueField(.mouseEventClickState)
-        later { $0.cursorDown(clicks: clicks) }
-        return nil
-      }
       return pass
-    case .leftMouseUp:
-      if cursorClick {
-        cursorClick = false
-        later { $0.cursorUp() }
-        return nil
-      }
-      return pass
-    case .mouseMoved, .leftMouseDragged:
-      // While Option typing is on the mouse moves Hi-chat's cursor only. The
-      // real pointer is put straight back, here in the tap, before the next
-      // movement: macOS lets only the app in front hold the pointer still.
-      guard let home = MainActor.assumeIsolated({ app.cursorOn ? app.cursorHome : nil })
-      else { return pass }
-      let dx = event.getDoubleValueField(.mouseEventDeltaX)
-      let dy = event.getDoubleValueField(.mouseEventDeltaY)
-      CGWarpMouseCursorPosition(home)
-      // Without this the mouse goes quiet for a moment after a warp
-      CGAssociateMouseAndMouseCursorPosition(1)
-      later { $0.cursorMove(dx: dx, dy: dy) }
-      return nil
     case .scrollWheel:
       return scroll(event)
     default:
@@ -1033,7 +943,7 @@ final class Keys {
     } else if let lone, lone.key == key,
               ProcessInfo.processInfo.systemUptime - lone.at < Keys.tapSeconds {
       self.lone = nil
-      if key == Key.leftControl { later { $0.remote("F14") } } else { later { $0.toggleTyping() } }
+      if key == Key.leftControl { later { $0.remote("F14") } } else { later { $0.screenshot() } }
     } else {
       lone = nil
     }
@@ -1101,7 +1011,7 @@ final class Keys {
     later(action)
   }
 
-  /// fn + scroll (and any scroll while Option typing is on) scrolls Hi-chat:
+  /// fn + scroll (and any scroll while Z typing is on) scrolls Hi-chat:
   /// a fresh event at the window's middle with the same distance, phase and
   /// glide. A copy could carry the pointer over with it.
   func scroll(_ event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -1133,38 +1043,6 @@ final class Keys {
 /// Lays its subviews out from the top left, like the page.
 final class FlippedView: NSView {
   override var isFlipped: Bool { true }
-}
-
-/// Hi-chat's cursor: an arrow, or an I-beam over text, in blue with a white
-/// edge so it never looks like the real pointer. Clicks go through it.
-final class ChatCursorView: NSView {
-  var text = false {
-    didSet { if text != oldValue { needsDisplay = true } }
-  }
-  /// The point that is the cursor's position, from the view's top left.
-  var hotSpot: NSPoint { text ? NSPoint(x: 8, y: 11) : NSPoint(x: 2, y: 2) }
-  override var isFlipped: Bool { true }
-  override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-  override func draw(_ dirtyRect: NSRect) {
-    let path = NSBezierPath()
-    if text {
-      path.move(to: NSPoint(x: 4, y: 2)); path.line(to: NSPoint(x: 12, y: 2))
-      path.move(to: NSPoint(x: 8, y: 2)); path.line(to: NSPoint(x: 8, y: 20))
-      path.move(to: NSPoint(x: 4, y: 20)); path.line(to: NSPoint(x: 12, y: 20))
-      path.lineCapStyle = .round
-      NSColor.white.setStroke(); path.lineWidth = 4; path.stroke()
-      NSColor.systemBlue.setStroke(); path.lineWidth = 2; path.stroke()
-    } else {
-      let points: [(CGFloat, CGFloat)] = [(0, 0), (0, 17), (4, 13), (7, 20), (10, 19), (7, 12), (12, 12)]
-      path.move(to: NSPoint(x: points[0].0 + 2, y: points[0].1 + 2))
-      for p in points.dropFirst() { path.line(to: NSPoint(x: p.0 + 2, y: p.1 + 2)) }
-      path.close()
-      path.lineJoinStyle = .round
-      NSColor.white.setStroke(); path.lineWidth = 2.5; path.stroke()
-      NSColor.systemBlue.setFill(); path.fill()
-    }
-  }
 }
 
 /// A picture of the pointer, left where it was while Z has the real one in
@@ -1202,45 +1080,6 @@ final class PointerLookalike {
 
   func hide() { window.orderOut(nil) }
 }
-
-/// The page's side of Hi-chat's cursor: highlights text at a point without
-/// a real click, so the message box keeps the keyboard.
-let chatCursorScript = """
-  (() => {
-    let anchor = null
-    const at = (x, y) => document.caretRangeFromPoint(x, y)
-    window.hiChatCursor = {
-      overText(x, y) {
-        const r = at(x, y)
-        if (!r || r.startContainer.nodeType !== Node.TEXT_NODE) return false
-        const all = document.createRange()
-        all.selectNodeContents(r.startContainer)
-        for (const b of all.getClientRects()) {
-          if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return true
-        }
-        return false
-      },
-      down(x, y, clicks) {
-        const r = at(x, y), s = getSelection()
-        anchor = null
-        if (!r || !s) return
-        s.setBaseAndExtent(r.startContainer, r.startOffset, r.startContainer, r.startOffset)
-        if (clicks >= 2) {
-          const unit = clicks >= 3 ? 'paragraphboundary' : 'word'
-          s.modify('move', 'backward', unit)
-          s.modify('extend', 'forward', unit)
-        } else {
-          anchor = r
-        }
-      },
-      drag(x, y) {
-        const r = at(x, y), s = getSelection()
-        if (!anchor || !r || !s) return
-        s.setBaseAndExtent(anchor.startContainer, anchor.startOffset, r.startContainer, r.startOffset)
-      },
-    }
-  })()
-  """
 
 @main
 @MainActor
