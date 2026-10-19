@@ -38,6 +38,7 @@ static class App
   public static readonly string DataDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hi-chat");
   const string ShowEventName = "dev.hitechie.hichat.show";
+  const string QuitEventName = "dev.hitechie.hichat.quit";
 
   public static string Version
   {
@@ -71,6 +72,15 @@ static class App
 
     using var single = new Mutex(true, "dev.hitechie.hichat", out var first);
     using var show = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+    using var quit = new EventWaitHandle(false, EventResetMode.AutoReset, QuitEventName);
+    if (!first && !IsInstalledCopy())
+    {
+      // A downloaded copy replaces the Hi-chat that is running: that one
+      // quits (it may only be in the tray), then this one installs itself.
+      quit.Set();
+      try { first = single.WaitOne(TimeSpan.FromSeconds(15)); }
+      catch (AbandonedMutexException) { first = true; }
+    }
     if (!first)
     {
       show.Set(); // Hi-chat is already running: bring its window up
@@ -85,9 +95,17 @@ static class App
     var window = new ChatWindow();
     var waiter = new Thread(() =>
     {
-      while (show.WaitOne())
+      WaitHandle[] events = [show, quit];
+      while (true)
       {
-        try { window.BeginInvoke(window.ShowChat); } catch { return; }
+        var quitting = WaitHandle.WaitAny(events) == 1;
+        try
+        {
+          if (quitting) window.BeginInvoke(window.Quit);
+          else window.BeginInvoke(window.ShowChat);
+        }
+        catch { return; }
+        if (quitting) return;
       }
     }) { IsBackground = true };
     waiter.Start();
@@ -96,15 +114,25 @@ static class App
 
   /// First run from a download: copy into the user's Programs folder, add a
   /// Start menu entry and start that copy. True when this copy should quit.
-  static bool InstallIfNeeded()
+  static bool IsInstalledCopy()
   {
     var here = Environment.ProcessPath;
-    if (here == null || string.Equals(Path.GetFullPath(here), InstalledExe, StringComparison.OrdinalIgnoreCase))
-      return false;
+    return here == null || string.Equals(Path.GetFullPath(here), InstalledExe, StringComparison.OrdinalIgnoreCase);
+  }
+
+  static bool InstallIfNeeded()
+  {
+    if (IsInstalledCopy()) return false;
+    var here = Environment.ProcessPath!;
     try
     {
       Directory.CreateDirectory(InstallDir);
-      File.Copy(here, InstalledExe, true);
+      // The Hi-chat that just quit can hold its file for a moment
+      for (var tries = 0; ; tries++)
+      {
+        try { File.Copy(here, InstalledExe, true); break; }
+        catch (IOException) when (tries < 10) { Thread.Sleep(500); }
+      }
       var menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Hi-chat.lnk");
       var shell = Type.GetTypeFromProgID("WScript.Shell");
       if (shell != null)
