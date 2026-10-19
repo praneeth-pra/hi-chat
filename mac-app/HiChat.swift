@@ -551,13 +551,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
     task.arguments = ["-x", "-D", String(number), "-t", "png", shot.path]
-    task.terminationHandler = { [weak self] _ in
+    let app = self
+    task.terminationHandler = { _ in
       Task { @MainActor in
         guard let data = try? Data(contentsOf: shot) else { return }
         let board = NSPasteboard.general
         board.clearContents()
         board.setData(data, forType: .png)
-        self?.sendScreenshot(data)
+        app.sendScreenshot(data)
       }
     }
     do { try task.run() } catch { NSLog("Hi-chat: screenshot didn't start: \(error)") }
