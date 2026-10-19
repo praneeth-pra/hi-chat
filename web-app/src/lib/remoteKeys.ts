@@ -176,6 +176,17 @@ export function connectApp(win: AppWindow = window): () => void {
 }
 
 /**
+ * Inside the Mac or Windows app: asks it to look for a new version (it
+ * answers in its own dialog, even "up to date"). False in a browser.
+ */
+export function checkAppForUpdates(win: AppWindow = window): boolean {
+  const app = win.webkit?.messageHandlers?.hiChat ?? win.chrome?.webview
+  if (!app) return false
+  app.postMessage({ checkForUpdates: true })
+  return true
+}
+
+/**
  * Escape on the page throws a recording away; inside the Mac or Windows app
  * the other keys arrive as calls. Returns the cleanup.
  */

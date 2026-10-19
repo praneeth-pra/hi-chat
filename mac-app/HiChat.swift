@@ -666,6 +666,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "https",
           message.frameInfo.securityOrigin.host == appHost,
           let body = message.body as? [String: Any] else { return }
+    // Settings > General > Check for updates
+    if body["checkForUpdates"] as? Bool == true { checkForUpdates(nil) }
     if let status = body["dictation"] as? String {
       keys?.dictating = status == "recording" || status == "starting"
       // Started from the page's own mic button or a shortcut alike

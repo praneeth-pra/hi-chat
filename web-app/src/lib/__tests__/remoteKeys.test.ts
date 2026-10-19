@@ -201,4 +201,15 @@ describe('app bridge', () => {
     expect(sent).toEqual([{ dictation: 'idle' }])
     stop()
   })
+
+  it('asks the app to check for updates, and only inside the app', async () => {
+    const { checkAppForUpdates } = await import('../remoteKeys')
+    expect(checkAppForUpdates({} as Window)).toBe(false)
+    const sent: unknown[] = []
+    const win = {
+      chrome: { webview: { postMessage: (m: unknown) => sent.push(m) } },
+    } as unknown as Window
+    expect(checkAppForUpdates(win)).toBe(true)
+    expect(sent).toEqual([{ checkForUpdates: true }])
+  })
 })

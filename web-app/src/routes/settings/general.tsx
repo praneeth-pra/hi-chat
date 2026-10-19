@@ -29,6 +29,7 @@ import {
   parseDataFile,
 } from '@/lib/dataTransfer'
 import { isDev } from '@/lib/utils'
+import { checkAppForUpdates, useAppTyping } from '@/lib/remoteKeys'
 import { SystemEvent } from '@/types/events'
 import { Input } from '@/components/ui/input'
 import { useHardware } from '@/hooks/useHardware'
@@ -99,6 +100,7 @@ export const Route = createFileRoute(route.settings.general as any)({
 
 function General() {
   const { t } = useTranslation()
+  const inApp = useAppTyping((s) => s.inApp)
   const {
     spellCheckChatInput,
     setSpellCheckChatInput,
@@ -329,6 +331,25 @@ function General() {
                     }
                   />
                 )}
+              {inApp && (
+                <CardItem
+                  title="Check for updates"
+                  description="Looks for a new version of the Hi-chat app and offers to install it."
+                  className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
+                  actions={
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0"
+                      onClick={() => checkAppForUpdates()}
+                    >
+                      <div className="cursor-pointer rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
+                        Check for updates
+                      </div>
+                    </Button>
+                  }
+                />
+              )}
               <CardItem
                 title={t('common:language')}
                 actions={<LanguageSwitcher />}
