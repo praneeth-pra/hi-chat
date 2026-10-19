@@ -50,7 +50,7 @@ export const SKIP_AGREEMENT = 0.93
 /** The judge's text must keep at least this much of the vote's words. */
 const MIN_AGREEMENT = 0.6
 
-export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless a version only some of them heard matches a key term. Every engine was given the key terms. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
+export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless a version only some of them heard matches a key term. Where they heard different words at the same spot, choose one of them; never join both (not "CNAPP and AWS" when one engine heard CNAPP and another AWS). Every engine was given the key terms. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
   grok: 'Grok',
@@ -356,6 +356,16 @@ const JUDGE_HEDGE_MS = 2000
 const judgeFetch: typeof fetch = (input, init) =>
   groqFetch(input, init, fetch, JUDGE_HEDGE_MS)
 
+/**
+ * The judge chooses between the engines' words, so its reply is no longer
+ * than the longest one heard; a longer reply joined two versions of one
+ * spot ("CNAPP and AWS").
+ */
+export function notLonger(reply: string, results: EngineText[]): boolean {
+  const longest = Math.max(0, ...results.map((r) => words(r.text).length))
+  return words(reply).length <= longest
+}
+
 const keytermLine = (keyterms: string[]) =>
   keyterms.length
     ? `Key terms the speaker may use: ${keyterms.join(', ')}\n\n`
@@ -387,7 +397,8 @@ export async function judgeDictation(
     (reply) =>
       !!clean(reply) &&
       textAgreement(clean(reply), vote) >= MIN_AGREEMENT &&
-      onlyHeardWords(clean(reply), results, keyterms)
+      onlyHeardWords(clean(reply), results, keyterms) &&
+      notLonger(clean(reply), results)
   )
   return reply === undefined ? undefined : clean(reply)
 }
