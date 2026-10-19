@@ -75,7 +75,7 @@ shortcuts built in. Download it from
 it offers each new version itself. It lives in the menu bar at the top (its H logo: Check for Updates, Show in Dock, Quit); the Dock icon is off unless "Show in Dock" is ticked.
 
 - tap **Left Control**: dictate; tap again to send. **Escape** throws it away.
-- tap **Left Option**: type into Hi-chat while the app you're in stays active. Meanwhile the mouse moves Hi-chat's own blue cursor and your pointer stays where it is: click and drag to highlight text in Hi-chat, double click for a word.
+- tap **Left Option**: a silent screenshot of the whole screen the pointer is on, saved where your Mac saves screenshots (the Desktop by default) and copied, ready to paste. The first time, macOS asks to allow Screen Recording.
 - **fn + Right**: send. **fn + Up / Down**: code block above / below.
 - **fn + Shift + Up / Down**: scroll the chat. Hold **fn** and scroll: scroll Hi-chat.
 - **Z**: your real pointer jumps into Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back to where they were. **fn + Z / X** (or Shift) types the letter.
@@ -93,7 +93,8 @@ installs it for your Windows user (Start menu entry, no admin). After that it
 offers each new version itself, and Check for updates is on the tray icon's menu.
 Its shortcuts:
 
-- tap **Ctrl**: dictate; tap again to send. **Escape** throws it away.
+- tap **Left Ctrl**: dictate; tap again to send. **Escape** throws it away.
+- tap **Right Ctrl**: a silent screenshot of the whole screen the pointer is on, saved to Pictures\Screenshots and copied, ready to paste.
 - **Z**: the pointer goes to Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back.
 - **Alt + Z / X** types the letter.
 - **Ctrl + Left**: live mirror window of Hi-chat; again to switch to the screen around the pointer and back. **Ctrl + Shift + Left** closes it.

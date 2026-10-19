@@ -1,7 +1,9 @@
 // Hi-chat for Windows: the Hi-chat site in its own window, with a few
 // global shortcuts:
 //
-//   tap Ctrl (left or right)      dictate: tap again to stop and send
+//   tap Left Ctrl                 dictate: tap again to stop and send
+//   tap Right Ctrl                silent screenshot of the screen the pointer
+//                                 is on (Pictures\Screenshots, and copied)
 //   Escape while dictating        throw the recording away
 //   Z / X                         pointer to Hi-chat's message box (typing on)
 //                                 / pointer and keyboard back to where they were
@@ -595,6 +597,30 @@ sealed class ChatWindow : Form
 
   public void ToggleMirror() => mirror.Toggle();
   public void HideMirror() => mirror.HideMirror();
+
+  /// Right Ctrl: the whole screen the pointer is on, without a sound or a
+  /// flash, saved to Pictures\Screenshots and copied for pasting.
+  public void Screenshot()
+  {
+    try
+    {
+      var bounds = Screen.FromPoint(Cursor.Position).Bounds;
+      using var shot = new Bitmap(bounds.Width, bounds.Height);
+      using (var g = Graphics.FromImage(shot))
+        g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+      var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
+      Directory.CreateDirectory(folder);
+      var name = $"Hi-chat {DateTime.Now:yyyy-MM-dd HHmmss}";
+      var file = Path.Combine(folder, name + ".png");
+      for (var n = 2; File.Exists(file); n++) file = Path.Combine(folder, $"{name} ({n}).png");
+      shot.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+      Clipboard.SetImage(shot);
+    }
+    catch (Exception e)
+    {
+      Debug.WriteLine($"Hi-chat: screenshot failed: {e.Message}");
+    }
+  }
 }
 
 /// Updates: looks at the newest Windows release on GitHub when Hi-chat opens
@@ -871,7 +897,7 @@ sealed class Shortcuts(ChatWindow app)
     if (lone is { } l && l.key == vk && Environment.TickCount64 - l.at < TapMs)
     {
       lone = null;
-      Later(a => a.Remote("F14"));
+      if (vk == Native.VK_RCONTROL) Later(a => a.Screenshot()); else Later(a => a.Remote("F14"));
       return pass;
     }
     if (IsModifier(vk)) lone = null;
