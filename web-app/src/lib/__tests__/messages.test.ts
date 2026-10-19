@@ -107,6 +107,21 @@ describe('CompletionMessagesBuilder', () => {
       )
     })
 
+    it('sends an image with no words without an empty text part', () => {
+      const message = createMockThreadMessage('user', '')
+      message.content.push({
+        type: 'image_url' as any,
+        image_url: { url: 'data:image/jpeg;base64,QUJD', detail: 'auto' },
+      } as any)
+      const result = new CompletionMessagesBuilder([message]).getMessages()
+      expect(result[0].content).toEqual([
+        {
+          type: 'image_url',
+          image_url: { url: 'data:image/jpeg;base64,QUJD', detail: 'auto' },
+        },
+      ])
+    })
+
     it('should handle messages with empty content', () => {
       const message: ThreadMessage = {
         ...createMockThreadMessage('user', ''),

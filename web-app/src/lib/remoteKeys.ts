@@ -5,6 +5,7 @@ import {
   toggleDictation,
   useDictation,
 } from '@/lib/dictation'
+import { deliverScreenshot } from '@/lib/screenshotDelivery'
 
 /**
  * Keys the Hi-chat Mac and Windows apps send to the page (as calls to
@@ -145,6 +146,8 @@ type Bridge = { postMessage: (message: unknown) => void }
 type AppWindow = Window & {
   hiChatRemote?: (key: string) => boolean
   hiChatTyping?: (on: boolean) => void
+  /** The screenshot key: a JPEG or PNG data URL to send as it is */
+  hiChatScreenshot?: (dataUrl: string) => boolean
   /** The Mac app (WKWebView) */
   webkit?: { messageHandlers?: { hiChat?: Bridge } }
   /** The Windows app (WebView2) */
@@ -161,6 +164,7 @@ export function connectApp(win: AppWindow = window): () => void {
   if (!app) return () => {}
   win.hiChatRemote = handleRemoteKey
   win.hiChatTyping = (on) => useAppTyping.setState({ typing: on })
+  win.hiChatScreenshot = (dataUrl) => deliverScreenshot(dataUrl)
   useAppTyping.setState({ inApp: true })
   const post = (status: string) => app.postMessage({ dictation: status })
   post(useDictation.getState().status)
@@ -171,6 +175,7 @@ export function connectApp(win: AppWindow = window): () => void {
     stop()
     delete win.hiChatRemote
     delete win.hiChatTyping
+    delete win.hiChatScreenshot
     useAppTyping.setState({ inApp: false, typing: false })
   }
 }

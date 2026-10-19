@@ -181,12 +181,17 @@ describe('app bridge', () => {
     const { connectApp, useAppTyping } = await import('../remoteKeys')
     const win = {
       chrome: { webview: { postMessage: () => {} } },
-    } as unknown as Window & { hiChatTyping?: (on: boolean) => void }
+    } as unknown as Window & {
+      hiChatTyping?: (on: boolean) => void
+      hiChatScreenshot?: (url: string) => boolean
+    }
     const stop = connectApp(win)
+    expect(win.hiChatScreenshot!('data:image/png;base64,QUJD')).toBe(true)
     expect(useAppTyping.getState()).toEqual({ inApp: true, typing: false })
     win.hiChatTyping!(true)
     expect(useAppTyping.getState().typing).toBe(true)
     stop()
+    expect(win.hiChatScreenshot).toBeUndefined()
     expect(useAppTyping.getState()).toEqual({ inApp: false, typing: false })
   })
 

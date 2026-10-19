@@ -5,8 +5,9 @@
 //   tap Left Control        dictate: tap again to stop and send
 //   Escape while dictating  throw the recording away
 //   tap Left Option         silent screenshot of the screen the pointer is
-//                           on, saved where the Mac saves screenshots and
-//                           copied (needs Screen Recording)
+//                           on, sent in Hi-chat (also saved where the Mac
+//                           saves screenshots and copied; needs Screen
+//                           Recording)
 //   fn + Right              send what's typed in the box
 //   fn + Up / Down          code block above / below
 //   fn + Shift + Up / Down  scroll the chat by most of a screen
@@ -32,6 +33,7 @@
 // Build: mac-app/build.sh (GitHub Actions builds the DMG on every change).
 
 import AppKit
+import ImageIO
 import ServiceManagement
 import WebKit
 
@@ -516,8 +518,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   // MARK: Screenshot
 
   /// Left Option: the whole screen the pointer is on, without a sound, saved
-  /// where the Mac saves screenshots (the Desktop unless that was changed)
-  /// and copied for pasting.
+  /// where the Mac saves screenshots (the Desktop unless that was changed),
+  /// copied for pasting and sent in Hi-chat on its own.
   func screenshot() {
     var display = CGMainDisplayID()
     var found: UInt32 = 0
@@ -549,15 +551,33 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
     task.arguments = ["-x", "-D", String(number), "-t", "png", shot.path]
-    task.terminationHandler = { _ in
-      DispatchQueue.main.async {
+    task.terminationHandler = { [weak self] _ in
+      Task { @MainActor in
         guard let data = try? Data(contentsOf: shot) else { return }
         let board = NSPasteboard.general
         board.clearContents()
         board.setData(data, forType: .png)
+        self?.sendScreenshot(data)
       }
     }
     do { try task.run() } catch { NSLog("Hi-chat: screenshot didn't start: \(error)") }
+  }
+
+  /// The page sends it as a message with no words: a JPEG at most 2560
+  /// pixels across, small enough for the vision model.
+  func sendScreenshot(_ png: Data) {
+    let options = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceThumbnailMaxPixelSize: 2560,
+    ] as CFDictionary
+    guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options),
+          let jpeg = NSBitmapImageRep(cgImage: image)
+            .representation(using: .jpeg, properties: [.compressionFactor: 0.75])
+    else { return }
+    let url = "data:image/jpeg;base64," + jpeg.base64EncodedString()
+    bringUp()
+    webView.evaluateJavaScript("window.hiChatScreenshot && window.hiChatScreenshot(\"\(url)\")")
   }
 
   // MARK: Mirror

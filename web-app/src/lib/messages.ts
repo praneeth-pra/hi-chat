@@ -152,7 +152,12 @@ export class CompletionMessagesBuilder {
         // Fallback for unknown content types
         return { type: 'text' as const, text: '' }
       })
-      return { role: 'user', content } as ChatCompletionMessageParam
+      // An image sent with no words (the app's screenshot key) has no text part
+      const parts = content.filter((p) => p.type !== 'text' || p.text)
+      return {
+        role: 'user',
+        content: parts.length ? parts : content,
+      } as ChatCompletionMessageParam
     }
     // Single text part
     const text = msg?.content?.[0]?.text?.value ?? '.'

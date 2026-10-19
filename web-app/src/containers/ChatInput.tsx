@@ -2,6 +2,7 @@
 
 import { AppTypingIndicator } from './AppTypingIndicator'
 import { useDictationDelivery } from '@/lib/dictationDelivery'
+import { useScreenshotDelivery } from '@/lib/screenshotDelivery'
 
 import TextareaAutosize from 'react-textarea-autosize'
 import { routesImages } from '@/lib/visionModels'
@@ -358,6 +359,41 @@ const ChatInput = ({
     sendMessage,
     projectId,
     dictationDone,
+  ])
+
+  // The app's screenshot key: each screenshot goes out on its own, no words
+  const screenshots = useScreenshotDelivery((s) => s.pending)
+  const screenshotSending = useRef(false)
+  const [screenshotDone, setScreenshotDone] = useState(0)
+  useEffect(() => {
+    if (
+      !screenshots.length ||
+      streamingContent ||
+      ingestingAny ||
+      !selectedModel ||
+      screenshotSending.current
+    )
+      return
+    const image = screenshots[0]
+    screenshotSending.current = true
+    useScreenshotDelivery.setState((s) => ({ pending: s.pending.slice(1) }))
+    Promise.resolve()
+      .then(() => sendMessage('', true, [image], projectId))
+      .catch((error: Error) => {
+        toast(`Screenshot could not send: ${error.message}`)
+      })
+      .finally(() => {
+        screenshotSending.current = false
+        setScreenshotDone((n) => n + 1)
+      })
+  }, [
+    screenshots,
+    streamingContent,
+    ingestingAny,
+    selectedModel,
+    sendMessage,
+    projectId,
+    screenshotDone,
   ])
 
   useEffect(() => {
