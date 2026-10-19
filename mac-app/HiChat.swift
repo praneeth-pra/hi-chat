@@ -685,17 +685,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
       url = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
       n += 1
     }
+    downloads[ObjectIdentifier(download)] = url
     completionHandler(url)
   }
 
+  /// Where each download is going, so it can be marked once it lands.
+  var downloads: [ObjectIdentifier: URL] = [:]
+
   func downloadDidFinish(_ download: WKDownload) {
+    // Marked as downloaded, as a browser does, so macOS checks it before it
+    // opens: a saved script or app never runs unasked
+    if let url = downloads.removeValue(forKey: ObjectIdentifier(download)) {
+      let mark: [String: Any] = [
+        kLSQuarantineAgentNameKey as String: "Hi-chat",
+        kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload as String,
+      ]
+      try? (url as NSURL).setResourceValue(mark, forKey: .quarantinePropertiesKey)
+    }
     NSLog("Hi-chat: download saved")
   }
 
   // Links that open a new window go to the default browser.
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-    if let url = action.request.url { NSWorkspace.shared.open(url) }
+    // Web and mail links only: never file:, an app's own scheme or the like
+    if let url = action.request.url, let scheme = url.scheme?.lowercased(),
+       ["https", "http", "mailto"].contains(scheme) {
+      NSWorkspace.shared.open(url)
+    }
     return nil
   }
 

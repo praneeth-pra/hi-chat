@@ -38,6 +38,10 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
 
+// Windows' own DLLs (hid.dll, Magnification.dll) only ever come from System32,
+// never from a copy planted next to Hi-chat.exe
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+
 namespace HiChat;
 
 static class App
@@ -701,7 +705,7 @@ sealed class Updater(ChatWindow app)
       // The Mac app's releases are the repository's "latest"; Windows ones are
       // win-*. GitHub doesn't list them in version order, so take the highest.
       using var doc = JsonDocument.Parse(await http.GetStringAsync(
-        $"https://api.github.com/repos/{App.Repo}/releases?per_page=50"));
+        $"https://api.github.com/repos/{App.Repo}/releases?per_page=100"));
       foreach (var release in doc.RootElement.EnumerateArray())
       {
         var tag = release.GetProperty("tag_name").GetString() ?? "";
