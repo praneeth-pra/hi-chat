@@ -204,9 +204,14 @@ const processStreamingCompletion = async (
             timing.providerCreated = part.created
           timing.hiddenAtFirstChunk = pageHidden()
         }
-        // Groq reports its own queue, prompt and generation times on the last chunk
+        // Groq reports its own queue, prompt and generation times on the last
+        // chunk; Cerebras sends them as time_info beside the usage
         if (part.x_groq?.usage) timing.usage = part.x_groq.usage
-        else if (part.usage) timing.usage ??= part.usage
+        else if (part.usage)
+          timing.usage ??= {
+            ...part.usage,
+            ...(part as { time_info?: Record<string, unknown> }).time_info,
+          }
       }
 
       // Handle prompt progress if available

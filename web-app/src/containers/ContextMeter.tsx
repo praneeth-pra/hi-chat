@@ -13,7 +13,7 @@ const DOT = {
   heavy: 'bg-red-500',
 }
 
-const secs = (s: number) => `${s.toFixed(1)} s`
+const secs = (s: number) => `${s.toFixed(s < 1 ? 2 : 1)} s`
 
 /**
  * Next to the model: how much the next question sends, and whether that is
@@ -51,11 +51,15 @@ export function ContextMeter({
   const images = size.images
     ? ` and ${size.images} image${size.images > 1 ? 's' : ''} (${formatBytes(size.imageBytes)})`
     : ''
+  const why =
+    delay?.readingS !== undefined
+      ? ` (${secs(delay.readingS)} of it the model reading the longer chat, ${secs(delay.delayS - delay.readingS)} sending it)`
+      : ''
   const speed = !delay
-    ? 'No slowdown measured yet.'
+    ? 'No slowdown measured yet: it compares with a few answers in new chats first.'
     : level === 'light'
-      ? `Answers here start as fast as in a new chat (${secs(delay.recentS)}).`
-      : `Answers here start ${secs(delay.delayS)} later than in a new chat (${secs(delay.recentS)} against ${secs(delay.baselineS)}).${level === 'heavy' ? ' A new chat (fn + N) starts fast again.' : ''}`
+      ? `Answers here start as fast as in a new chat (${secs(delay.recentS)} against ${secs(delay.baselineS)}).`
+      : `Answers here start ${secs(delay.delayS)} later than in a new chat${why}.${level === 'heavy' ? ' A new chat (fn + N) starts fast again.' : ''}`
   const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text${images}. ${speed}`
   return (
     <span
