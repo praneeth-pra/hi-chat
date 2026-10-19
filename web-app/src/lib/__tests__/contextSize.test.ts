@@ -34,26 +34,22 @@ describe('contextSize', () => {
       's'.repeat(800),
       'd'.repeat(400)
     )
-    expect(size).toMatchObject({ tokens: 500, images: 0, level: 'light' })
+    expect(size).toMatchObject({
+      tokens: 500,
+      baseTokens: 200,
+      images: 0,
+      level: 'light',
+    })
   })
 
   it('counts each image still in the recent messages, which is sent again', () => {
-    const size = contextSize([
-      image(600_000),
-      image(600_000),
-      text('assistant', 'ok'),
-    ])
+    const imgs = (n: number) => Array.from({ length: n }, () => image(600_000))
+    const size = contextSize(imgs(2))
     expect(size.images).toBe(2)
     expect(size.imageBytes).toBe(1_200_000)
-    expect(size.level).toBe('medium')
-    expect(
-      contextSize([
-        image(600_000),
-        image(600_000),
-        image(600_000),
-        image(600_000),
-      ]).level
-    ).toBe('heavy')
+    expect(size.level).toBe('light')
+    expect(contextSize(imgs(3)).level).toBe('medium')
+    expect(contextSize(imgs(5)).level).toBe('heavy')
   })
 
   it('leaves out messages older than the ones sent', () => {
@@ -61,6 +57,12 @@ describe('contextSize', () => {
       i === 0 ? image(3_000_000) : text(i % 2 ? 'assistant' : 'user', 'x')
     )
     expect(contextSize(old).images).toBe(0)
+  })
+
+  it('does not count the instructions and documents towards the level', () => {
+    const resume = 'r'.repeat(80_000)
+    expect(contextSize([text('user', 'hi')], resume).level).toBe('light')
+    expect(contextSize([text('user', 'x'.repeat(60_000))]).level).toBe('medium')
   })
 
   it('formats tokens and bytes', () => {

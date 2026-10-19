@@ -49,7 +49,7 @@ export function ContextMeter({
   const images = size.images
     ? ` and ${size.images} image${size.images > 1 ? 's' : ''} (${formatBytes(size.imageBytes)})`
     : ''
-  const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text${images}. ${SPEED[size.level]}`
+  const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text (${formatTokens(size.baseTokens)} of them your assistant's instructions and documents, sent in every chat)${images}. ${SPEED[size.level]}`
   return (
     <span
       role="img"
