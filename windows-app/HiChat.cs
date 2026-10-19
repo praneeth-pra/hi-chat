@@ -699,7 +699,7 @@ sealed class Updater(ChatWindow app)
   {
     if (busy) return;
     string? version = null;
-    Uri? exe = null;
+    Uri? exe = null, sig = null;
     try
     {
       // The Mac app's releases are the repository's "latest"; Windows ones are
@@ -712,15 +712,19 @@ sealed class Updater(ChatWindow app)
         if (!tag.StartsWith("win-") || release.GetProperty("draft").GetBoolean()) continue;
         var candidate = tag["win-".Length..];
         if (version != null && !IsNewer(candidate, version)) continue;
-        Uri? candidateExe = null;
+        Uri? candidateExe = null, candidateSig = null;
         foreach (var asset in release.GetProperty("assets").EnumerateArray())
         {
-          if (asset.GetProperty("name").GetString() == "Hi-chat.exe")
-            Uri.TryCreate(asset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out candidateExe);
+          var name = asset.GetProperty("name").GetString();
+          var link = asset.GetProperty("browser_download_url").GetString();
+          if (name == "Hi-chat.exe") Uri.TryCreate(link, UriKind.Absolute, out candidateExe);
+          if (name == "Hi-chat.exe.sig") Uri.TryCreate(link, UriKind.Absolute, out candidateSig);
         }
-        if (candidateExe == null) continue;
+        // Only signed releases (see UpdateKey)
+        if (candidateExe == null || candidateSig == null) continue;
         version = candidate;
         exe = candidateExe;
+        sig = candidateSig;
       }
     }
     catch (Exception e)
@@ -730,8 +734,8 @@ sealed class Updater(ChatWindow app)
       return;
     }
     // Updates come only from this repository's own releases
-    if (version == null || !IsNewer(version, App.Version) || exe == null || exe.Scheme != "https" ||
-        exe.Host != "github.com" || !exe.AbsolutePath.StartsWith($"/{App.Repo}/releases/download/"))
+    if (version == null || !IsNewer(version, App.Version) || exe == null || sig == null ||
+        !FromThisRepo(exe) || !FromThisRepo(sig))
     {
       if (asked) Tell($"Hi-chat {App.Version} is the newest version.");
       return;
@@ -758,7 +762,7 @@ sealed class Updater(ChatWindow app)
       Buttons = { now, later },
     });
     busy = false;
-    if (answer == now) await Install(exe);
+    if (answer == now) await Install(exe, sig);
     else
     {
       Settings.Current.SkippedVersion = version;
@@ -766,7 +770,25 @@ sealed class Updater(ChatWindow app)
     }
   }
 
-  async Task Install(Uri url)
+  static bool FromThisRepo(Uri url) => url.Scheme == "https" && url.Host == "github.com" &&
+    url.AbsolutePath.StartsWith($"/{App.Repo}/releases/download/");
+
+  /// The public half of the key the release build signs Hi-chat.exe with
+  /// (ECDSA P-256 over its SHA-256). An update installs only when its
+  /// signature checks out, so a release nobody signed with the private key
+  /// (kept in the repository's HICHAT_SIGNING secret) is never installed.
+  const string UpdateKey =
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyE+JOGitQFURJOl2pZ0boLn+4dYTxTcBHck8SX4CgHicwa5FcdGetnQhtPPRTJForzxLZaWVBkd+2CSmFoCltA==";
+
+  public static bool SignedByUs(byte[] file, byte[] signature)
+  {
+    using var key = System.Security.Cryptography.ECDsa.Create();
+    key.ImportSubjectPublicKeyInfo(Convert.FromBase64String(UpdateKey), out _);
+    return key.VerifyData(file, signature, System.Security.Cryptography.HashAlgorithmName.SHA256,
+      System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence);
+  }
+
+  async Task Install(Uri url, Uri sigUrl)
   {
     busy = true;
     try
@@ -774,8 +796,9 @@ sealed class Updater(ChatWindow app)
       var target = Environment.ProcessPath!;
       var fresh = target + ".new";
       var bytes = await http.GetByteArrayAsync(url);
-      // A real Windows program, not an error page
-      if (bytes.Length < 1_000_000 || bytes[0] != 'M' || bytes[1] != 'Z')
+      var signature = await http.GetByteArrayAsync(sigUrl);
+      // A real Windows program, not an error page, and the one we signed
+      if (bytes.Length < 1_000_000 || bytes[0] != 'M' || bytes[1] != 'Z' || !SignedByUs(bytes, signature))
       {
         Tell("The download didn't look right. Try again with Check for updates.");
         return;

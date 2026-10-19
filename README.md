@@ -85,6 +85,15 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
 
+### Signed updates
+
+Both apps install an update only when its download carries a valid signature
+(`Hi-chat.dmg.sig`, `Hi-chat.exe.sig`: ECDSA P-256 over the file's SHA-256)
+from Hi-chat's own key, and the Mac app also only when the new app is signed
+with Hi-chat's own certificate. Both live in the repository secret
+`HICHAT_SIGNING` (a base64 tar of `update.pem`, `mac.p12` and `p12pass`); the
+public halves are in the apps' `Updater`. Releases from main fail without it.
+
 ## Windows app
 
 Hi-chat for Windows (`windows-app/`) is the same app in C# with WebView2,

@@ -33,6 +33,7 @@
 // Build: mac-app/build.sh (GitHub Actions builds the DMG on every change).
 
 import AppKit
+import CryptoKit
 import ImageIO
 import ServiceManagement
 import WebKit
@@ -801,13 +802,13 @@ final class Updater {
       return
     }
     let version = tag.replacingOccurrences(of: "mac-", with: "")
-    let dmg = (release["assets"] as? [[String: Any]] ?? [])
+    let links = (release["assets"] as? [[String: Any]] ?? [])
       .compactMap { $0["browser_download_url"] as? String }
-      .first { $0.hasSuffix(".dmg") }
-    // Updates come only from this repository's own releases
-    guard Updater.isNewer(version, than: current), let dmg, let url = URL(string: dmg),
-          url.scheme == "https", url.host == "github.com",
-          url.path.hasPrefix("/praneeth-pra/hi-chat/releases/download/")
+    let dmg = links.first { $0.hasSuffix("/Hi-chat.dmg") }.flatMap(URL.init(string:))
+    let sig = links.first { $0.hasSuffix("/Hi-chat.dmg.sig") }.flatMap(URL.init(string:))
+    // Updates come only from this repository's own, signed releases
+    guard Updater.isNewer(version, than: current), let url = dmg, let sig,
+          Updater.fromThisRepo(url), Updater.fromThisRepo(sig)
     else {
       if asked { tell("Hi-chat \(current) is the newest version.") }
       return
@@ -832,13 +833,36 @@ final class Updater {
     let answer = await alert.beginSheetModal(for: app.panel)
     busy = false
     if answer == .alertFirstButtonReturn {
-      await install(from: url)
+      await install(from: url, signature: sig)
     } else {
       UserDefaults.standard.set(version, forKey: Updater.skippedKey)
     }
   }
 
-  func install(from url: URL) async {
+  nonisolated static func fromThisRepo(_ url: URL) -> Bool {
+    url.scheme == "https" && url.host == "github.com"
+      && url.path.hasPrefix("/praneeth-pra/hi-chat/releases/download/")
+  }
+
+  /// The public half of the key the release build signs Hi-chat.dmg with
+  /// (ECDSA P-256 over its SHA-256). An update installs only when its
+  /// signature checks out, so a release nobody signed with the private key
+  /// (kept in the repository's HICHAT_SIGNING secret) is never installed.
+  static let updateKey =
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyE+JOGitQFURJOl2pZ0boLn+4dYTxTcBHck8SX4CgHicwa5FcdGetnQhtPPRTJForzxLZaWVBkd+2CSmFoCltA=="
+  /// The certificate the app itself is signed with (its SHA-1); the new app
+  /// must carry it before it replaces this one.
+  static let certificate = "682B9625A09A73286A019832714DCD49A6F2E034"
+
+  nonisolated static func signedByUs(_ file: Data, signature: Data) -> Bool {
+    guard let der = Data(base64Encoded: updateKey),
+          let key = try? P256.Signing.PublicKey(derRepresentation: der),
+          let sig = try? P256.Signing.ECDSASignature(derRepresentation: signature)
+    else { return false }
+    return key.isValidSignature(sig, for: file)
+  }
+
+  func install(from url: URL, signature sigURL: URL) async {
     busy = true
     defer { busy = false }
     let target = Bundle.main.bundleURL
@@ -850,6 +874,13 @@ final class Updater {
           (downloaded.1 as? HTTPURLResponse)?.statusCode == 200
     else {
       tell("The download didn't finish. Try again with Hi-chat > Check for Updates.")
+      return
+    }
+    guard let signature = try? await URLSession.shared.data(from: sigURL).0,
+          let file = try? Data(contentsOf: downloaded.0, options: .mappedIfSafe),
+          Updater.signedByUs(file, signature: signature)
+    else {
+      tell("The download didn't look right. Try again with Hi-chat > Check for Updates.")
       return
     }
     let work = FileManager.default.temporaryDirectory
@@ -865,12 +896,13 @@ final class Updater {
     // Runs on after Hi-chat quits: unpack, check the signature, swap the app
     // (the old one comes back if anything fails) and open it again.
     let script = """
-      pid=$1; dmg=$2; target=$3; work=$4; mnt="$work/mnt"
+      pid=$1; dmg=$2; target=$3; work=$4; cert=$5; mnt="$work/mnt"
       hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" -quiet \\
         && ditto "$mnt/Hi-chat.app" "$work/Hi-chat.app"
       hdiutil detach "$mnt" -quiet
       while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
-      if [ -d "$work/Hi-chat.app" ] && codesign --verify "$work/Hi-chat.app"; then
+      if [ -d "$work/Hi-chat.app" ] && codesign --verify --deep --strict \\
+          -R="identifier \\\"dev.hitechie.hichat\\\" and certificate leaf = H\\\"$cert\\\"" "$work/Hi-chat.app"; then
         mv "$target" "$work/old.app" && { ditto "$work/Hi-chat.app" "$target" || { rm -rf "$target"; mv "$work/old.app" "$target"; }; }
       fi
       open "$target"
@@ -879,7 +911,7 @@ final class Updater {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/sh")
     task.arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier),
-                      dmg.path, target.path, work.path]
+                      dmg.path, target.path, work.path, Updater.certificate]
     do { try task.run() } catch {
       tell("The update couldn't start: \(error.localizedDescription)")
       return
