@@ -9,8 +9,9 @@ on:
     paths: ['mac-app/**', '.github/workflows/mac-app.yml']
   workflow_dispatch:
 
+# Builds can only read the repository; only publishing from main may write
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -23,13 +24,26 @@ jobs:
         with:
           name: Hi-chat-dmg
           path: mac-app/build/Hi-chat.dmg
+
+  publish:
+    needs: build
+    # Releases come only from main: never from a pull request or another branch
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Hi-chat-dmg
+          path: mac-app/build
       # Every build on main becomes the latest release, so this link always
       # gets the newest app:
       # https://github.com/praneeth-pra/hi-chat/releases/latest/download/Hi-chat.dmg
       - name: Publish release
-        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "mac-1.0.${{ github.run_number }}" mac-app/build/Hi-chat.dmg \
             --title "Hi-chat for Mac 1.0.${{ github.run_number }}" \

@@ -3,7 +3,8 @@
 //
 //   tap Left Ctrl                 dictate: tap again to stop and send
 //   tap Right Ctrl                silent screenshot of the screen the pointer
-//                                 is on (Pictures\Screenshots, and copied)
+//                                 is on, sent in Hi-chat (also saved to
+//                                 Pictures\Screenshots and copied)
 //   Escape while dictating        throw the recording away
 //   Z / X                         pointer to Hi-chat's message box (typing on)
 //                                 / pointer and keyboard back to where they were
@@ -36,6 +37,10 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
+
+// Windows' own DLLs (hid.dll, Magnification.dll) only ever come from System32,
+// never from a copy planted next to Hi-chat.exe
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
 
 namespace HiChat;
 
@@ -212,6 +217,7 @@ sealed class ChatWindow : Form
   readonly Mirror mirror;
   readonly Updater updater;
   Shortcuts? keys;
+  readonly TouchpadScroll touchpad;
   bool quitting;
   /// On while Hi-chat has the keyboard from Z or a click in a box,
   /// until it goes back or another window takes it. The page shows it by
@@ -236,6 +242,7 @@ sealed class ChatWindow : Form
 
   public ChatWindow()
   {
+    touchpad = new TouchpadScroll(px => ScrollChatBy(px));
     Text = "Hi-chat";
     Icon = LoadIcon();
     var dark = DarkMode();
@@ -292,12 +299,14 @@ sealed class ChatWindow : Form
       m.Result = (IntPtr)Native.MA_NOACTIVATE;
       return;
     }
+    if (m.Msg == Native.WM_INPUT) touchpad.Input(m.LParam);
     base.WndProc(ref m);
   }
 
   protected override async void OnHandleCreated(EventArgs e)
   {
     base.OnHandleCreated(e);
+    touchpad.Listen(Handle);
     if (DarkMode())
     {
       var on = 1;
@@ -604,7 +613,8 @@ sealed class ChatWindow : Form
   public void HideMirror() => mirror.HideMirror();
 
   /// Right Ctrl: the whole screen the pointer is on, without a sound or a
-  /// flash, saved to Pictures\Screenshots and copied for pasting.
+  /// flash, saved to Pictures\Screenshots, copied for pasting and sent in
+  /// Hi-chat on its own.
   public void Screenshot()
   {
     try
@@ -620,11 +630,30 @@ sealed class ChatWindow : Form
       for (var n = 2; File.Exists(file); n++) file = Path.Combine(folder, $"{name} ({n}).png");
       shot.Save(file, System.Drawing.Imaging.ImageFormat.Png);
       Clipboard.SetImage(shot);
+      SendScreenshot(shot);
     }
     catch (Exception e)
     {
       Debug.WriteLine($"Hi-chat: screenshot failed: {e.Message}");
     }
+  }
+
+  /// The page sends it as a message with no words: a JPEG at most 2560
+  /// pixels across, small enough for the vision model.
+  void SendScreenshot(Bitmap shot)
+  {
+    var scale = Math.Min(1.0, 2560.0 / Math.Max(shot.Width, shot.Height));
+    using var small = new Bitmap(shot, Math.Max(1, (int)(shot.Width * scale)), Math.Max(1, (int)(shot.Height * scale)));
+    var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders()
+      .First(c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+    using var quality = new System.Drawing.Imaging.EncoderParameters(1);
+    quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 75L);
+    using var bytes = new MemoryStream();
+    small.Save(bytes, jpeg, quality);
+    var url = "data:image/jpeg;base64," + Convert.ToBase64String(bytes.ToArray());
+    BringUp();
+    _ = webView.CoreWebView2?.ExecuteScriptAsync(
+      $"window.hiChatScreenshot && window.hiChatScreenshot({JsonSerializer.Serialize(url)})");
   }
 }
 
@@ -676,7 +705,7 @@ sealed class Updater(ChatWindow app)
       // The Mac app's releases are the repository's "latest"; Windows ones are
       // win-*. GitHub doesn't list them in version order, so take the highest.
       using var doc = JsonDocument.Parse(await http.GetStringAsync(
-        $"https://api.github.com/repos/{App.Repo}/releases?per_page=50"));
+        $"https://api.github.com/repos/{App.Repo}/releases?per_page=100"));
       foreach (var release in doc.RootElement.EnumerateArray())
       {
         var tag = release.GetProperty("tag_name").GetString() ?? "";
@@ -962,6 +991,171 @@ sealed class Shortcuts(ChatWindow app)
       default:
         return pass;
     }
+  }
+}
+
+/// Alt + two fingers on the touchpad scrolls Hi-chat from anywhere. Windows
+/// sends touchpad scrolling straight to the window under the pointer, past
+/// the mouse hook, so this reads the fingers from the touchpad itself (raw
+/// input) and scrolls the chat by as much as two fingers moved.
+sealed class TouchpadScroll(Action<int> scroll)
+{
+  /// One touchpad: where each finger's fields are in its reports.
+  sealed class Pad
+  {
+    public IntPtr Parsed;
+    public ushort[] Fingers = [];
+    public double Height = 1;
+  }
+
+  readonly Dictionary<IntPtr, Pad?> pads = [];
+  /// Each finger on the pad, by its contact id: the height last seen.
+  readonly Dictionary<uint, uint> fingers = [];
+  /// Contacts left to read in this frame (a touchpad can split one frame
+  /// over several reports), and how many the frame has.
+  int left, inFrame;
+  double carry;
+  bool masked;
+  /// A full stroke down the pad scrolls this far.
+  const double PadPixels = 1200;
+
+  public void Listen(IntPtr window)
+  {
+    var pad = new Native.RAWINPUTDEVICE
+    {
+      UsagePage = 0x0D, Usage = 0x05, // digitizer: touchpad
+      Flags = Native.RIDEV_INPUTSINK, Target = window,
+    };
+    Native.RegisterRawInputDevices([pad], 1, (uint)Marshal.SizeOf<Native.RAWINPUTDEVICE>());
+  }
+
+  public void Input(IntPtr handle)
+  {
+    var alt = (Native.GetAsyncKeyState((int)Native.VK_MENU) & 0x8000) != 0;
+    if (!alt)
+    {
+      fingers.Clear();
+      masked = false;
+      return;
+    }
+    var header = (uint)Marshal.SizeOf<Native.RAWINPUTHEADER>();
+    uint size = 0;
+    Native.GetRawInputData(handle, Native.RID_INPUT, IntPtr.Zero, ref size, header);
+    if (size == 0) return;
+    var data = Marshal.AllocHGlobal((int)size);
+    try
+    {
+      if (Native.GetRawInputData(handle, Native.RID_INPUT, data, ref size, header) != size) return;
+      var head = Marshal.PtrToStructure<Native.RAWINPUTHEADER>(data);
+      if (head.Type != Native.RIM_TYPEHID || PadFor(head.Device) is not { } pad) return;
+      var hid = data + (int)header;
+      var reportSize = (uint)Marshal.ReadInt32(hid);
+      var count = Marshal.ReadInt32(hid, 4);
+      double moved = 0;
+      for (var i = 0; i < count; i++) moved += Report(pad, hid + 8 + i * (int)reportSize, reportSize);
+      if (moved == 0 || inFrame < 2) return;
+      if (!masked)
+      {
+        // So letting go of Alt afterwards doesn't open the menu of the app in front
+        masked = true;
+        Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true);
+      }
+      // Fingers moving up the pad scroll down the chat, as the pad does
+      carry += -moved / inFrame / pad.Height * PadPixels;
+      var px = (int)carry;
+      carry -= px;
+      if (px != 0) scroll(px);
+    }
+    finally { Marshal.FreeHGlobal(data); }
+  }
+
+  /// Reads one report; returns how far its fingers moved down the pad.
+  double Report(Pad pad, IntPtr report, uint length)
+  {
+    if (Native.HidP_GetUsageValue(0, 0x0D, 0, 0x54, out var contacts, pad.Parsed, report, length) != Native.HIDP_STATUS_SUCCESS)
+    {
+      // No contact count: every finger is in every report
+      left = pad.Fingers.Length;
+      inFrame = Math.Max(fingers.Count, 1);
+    }
+    else if (contacts > 0)
+    {
+      left = (int)contacts;
+      inFrame = (int)contacts;
+    }
+    double moved = 0;
+    var tips = new ushort[16];
+    foreach (var link in pad.Fingers)
+    {
+      if (left <= 0) break;
+      left--;
+      if (Native.HidP_GetUsageValue(0, 0x01, link, 0x31, out var y, pad.Parsed, report, length) != Native.HIDP_STATUS_SUCCESS)
+        continue;
+      var id = Native.HidP_GetUsageValue(0, 0x0D, link, 0x51, out var contact, pad.Parsed, report, length)
+        == Native.HIDP_STATUS_SUCCESS ? contact : link;
+      uint n = (uint)tips.Length;
+      var touching = Native.HidP_GetUsages(0, 0x0D, link, tips, ref n, pad.Parsed, report, length)
+        == Native.HIDP_STATUS_SUCCESS && tips.Take((int)n).Contains((ushort)0x42);
+      if (!touching)
+      {
+        fingers.Remove(id);
+        continue;
+      }
+      if (fingers.TryGetValue(id, out var was)) moved += (double)y - was;
+      fingers[id] = y;
+    }
+    return moved;
+  }
+
+  /// The touchpad's layout, read once per device; null for one without fingers.
+  Pad? PadFor(IntPtr device)
+  {
+    if (pads.TryGetValue(device, out var known)) return known;
+    Pad? pad = null;
+    uint size = 0;
+    Native.GetRawInputDeviceInfo(device, Native.RIDI_PREPARSEDDATA, IntPtr.Zero, ref size);
+    if (size > 0)
+    {
+      var parsed = Marshal.AllocHGlobal((int)size);
+      if (Native.GetRawInputDeviceInfo(device, Native.RIDI_PREPARSEDDATA, parsed, ref size) == size
+          && Fingers(parsed) is { Length: > 0 } found)
+        pad = new Pad { Parsed = parsed, Fingers = found.Select(f => f.link).ToArray(), Height = Math.Max(1, found[0].height) };
+      else Marshal.FreeHGlobal(parsed);
+    }
+    pads[device] = pad;
+    return pad;
+  }
+
+  /// The collections that hold a finger's height (Y), and the pad's height.
+  static (ushort link, double height)[] Fingers(IntPtr parsed)
+  {
+    var caps = Marshal.AllocHGlobal(64);
+    try
+    {
+      if (Native.HidP_GetCaps(parsed, caps) != Native.HIDP_STATUS_SUCCESS) return [];
+      var count = (ushort)Marshal.ReadInt16(caps, 48); // NumberInputValueCaps
+      if (count == 0) return [];
+      const int Each = 72; // HIDP_VALUE_CAPS
+      var values = Marshal.AllocHGlobal(Each * count);
+      try
+      {
+        if (Native.HidP_GetValueCaps(0, values, ref count, parsed) != Native.HIDP_STATUS_SUCCESS) return [];
+        var found = new List<(ushort, double)>();
+        for (var i = 0; i < count; i++)
+        {
+          var at = values + i * Each;
+          var page = (ushort)Marshal.ReadInt16(at, 0);
+          var usage = (ushort)Marshal.ReadInt16(at, 56);
+          if (page != 0x01 || usage != 0x31) continue;
+          var link = (ushort)Marshal.ReadInt16(at, 6);
+          var max = Marshal.ReadInt32(at, 44) - Marshal.ReadInt32(at, 40); // logical max - min
+          if (found.All(f => f.Item1 != link)) found.Add((link, max));
+        }
+        return found.OrderBy(f => f.Item1).ToArray();
+      }
+      finally { Marshal.FreeHGlobal(values); }
+    }
+    finally { Marshal.FreeHGlobal(caps); }
   }
 }
 
@@ -1388,6 +1582,34 @@ static class Native
     BringWindowToTop(hwnd);
     if (joined) AttachThreadInput(me, front, false);
   }
+
+  public const int WM_INPUT = 0x00FF;
+  public const uint RIDEV_INPUTSINK = 0x100, RID_INPUT = 0x10000003, RIDI_PREPARSEDDATA = 0x20000005,
+    RIM_TYPEHID = 2, VK_MENU = 0x12;
+  public const int HIDP_STATUS_SUCCESS = 0x00110000;
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RAWINPUTDEVICE { public ushort UsagePage, Usage; public uint Flags; public IntPtr Target; }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RAWINPUTHEADER { public uint Type, Size; public IntPtr Device, WParam; }
+
+  [DllImport("user32.dll")]
+  public static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] devices, uint count, uint size);
+  [DllImport("user32.dll")]
+  public static extern uint GetRawInputData(IntPtr input, uint command, IntPtr data, ref uint size, uint headerSize);
+  [DllImport("user32.dll")]
+  public static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
+  [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
+  [DllImport("hid.dll")] public static extern int HidP_GetCaps(IntPtr parsed, IntPtr caps);
+  [DllImport("hid.dll")]
+  public static extern int HidP_GetValueCaps(int type, IntPtr caps, ref ushort length, IntPtr parsed);
+  [DllImport("hid.dll")]
+  public static extern int HidP_GetUsageValue(int type, ushort page, ushort link, ushort usage, out uint value,
+    IntPtr parsed, IntPtr report, uint length);
+  [DllImport("hid.dll")]
+  public static extern int HidP_GetUsages(int type, ushort page, ushort link, [Out] ushort[] usages, ref uint length,
+    IntPtr parsed, IntPtr report, uint length2);
 
   [DllImport("user32.dll", SetLastError = true)]
   public static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
