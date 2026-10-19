@@ -1,6 +1,6 @@
 ﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useInterfaceSettings } from '../useInterfaceSettings'
+import { fontSizeOptions, useInterfaceSettings } from '../useInterfaceSettings'
 import { THREAD_SCROLL_BEHAVIOR } from '@/constants/threadScroll'
 
 // Mock constants
@@ -64,6 +64,24 @@ describe('useInterfaceSettings', () => {
     })
 
     expect(result.current.fontSize).toBe('18px')
+  })
+
+  it('offers sizes above Extra Large', () => {
+    const { result } = renderHook(() => useInterfaceSettings())
+
+    act(() => {
+      result.current.setFontSize('22px')
+    })
+
+    expect(result.current.fontSize).toBe('22px')
+    expect(fontSizeOptions.map((o) => o.value)).toEqual([
+      '14px',
+      '15px',
+      '16px',
+      '18px',
+      '20px',
+      '22px',
+    ])
   })
 
   it('should update chat width', () => {
