@@ -1,2 +1,10 @@
-type FontSize = '14px' | '15px' | '16px' | '18px' | '20px' | '22px'
+type FontSize =
+  | '14px'
+  | '15px'
+  | '16px'
+  | '18px'
+  | '20px'
+  | '22px'
+  | '24px'
+  | '26px'
 type AppTheme = 'auto' | 'light' | 'dark'

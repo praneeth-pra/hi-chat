@@ -70,10 +70,10 @@ describe('useInterfaceSettings', () => {
     const { result } = renderHook(() => useInterfaceSettings())
 
     act(() => {
-      result.current.setFontSize('22px')
+      result.current.setFontSize('26px')
     })
 
-    expect(result.current.fontSize).toBe('22px')
+    expect(result.current.fontSize).toBe('26px')
     expect(fontSizeOptions.map((o) => o.value)).toEqual([
       '14px',
       '15px',
@@ -81,6 +81,8 @@ describe('useInterfaceSettings', () => {
       '18px',
       '20px',
       '22px',
+      '24px',
+      '26px',
     ])
   })
 

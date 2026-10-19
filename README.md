@@ -94,7 +94,7 @@ offers each new version itself, and Check for updates is on the tray icon's menu
 Its shortcuts:
 
 - tap **Ctrl**: dictate; tap again to send. **Escape** throws it away.
-- **Z**: the pointer goes to Hi-chat's message box (typing on); **X**: pointer and keyboard back.
+- **Z**: the pointer goes to Hi-chat's message box (typing on), and a lookalike pointer stays where it was; **X**: pointer and keyboard back.
 - **Alt + Z / X** types the letter.
 - **Ctrl + Left**: live mirror window of Hi-chat; again for the screen around the pointer; a third time closes it.
 

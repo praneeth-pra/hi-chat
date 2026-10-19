@@ -13,7 +13,15 @@ import {
   isThreadScrollBehavior,
 } from '@/constants/threadScroll'
 
-export type FontSize = '14px' | '15px' | '16px' | '18px' | '20px' | '22px'
+export type FontSize =
+  | '14px'
+  | '15px'
+  | '16px'
+  | '18px'
+  | '20px'
+  | '22px'
+  | '24px'
+  | '26px'
 export type ChatWidth = 'full' | 'compact'
 
 interface InterfaceSettingsState {
@@ -63,7 +71,9 @@ export const fontSizeOptions = [
   { label: 'Large', value: '16px' as FontSize },
   { label: 'Extra Large', value: '18px' as FontSize },
   { label: 'Huge', value: '20px' as FontSize },
-  { label: 'Largest', value: '22px' as FontSize },
+  { label: 'Very Huge', value: '22px' as FontSize },
+  { label: 'Giant', value: '24px' as FontSize },
+  { label: 'Largest', value: '26px' as FontSize },
 ]
 
 // Helper to determine if blur effects are supported

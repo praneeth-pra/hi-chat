@@ -6,6 +6,8 @@
 //   Z / X                         pointer to Hi-chat's message box (typing on)
 //                                 / pointer and keyboard back to where they were
 //   Alt + Z / X                   types the letter
+//                                 (Z leaves a lookalike of the pointer where
+//                                 it was; X puts the pointer back on it)
 //   Ctrl + Left                   live mirror window: Hi-chat, pressed
 //                                 again the screen around the pointer,
 //                                 a third time closed
@@ -310,6 +312,9 @@ sealed class ChatWindow : Form
     base.OnDeactivate(e);
     Typing = false;
     typingReturnTo = IntPtr.Zero;
+    // The keyboard went elsewhere (a click in another app, say): the
+    // lookalike would only mislead now.
+    PointerForget();
   }
 
   protected override void OnFormClosing(FormClosingEventArgs e)
@@ -541,7 +546,11 @@ sealed class ChatWindow : Form
   {
     if (!Visible || WindowState == FormWindowState.Minimized) return;
     var now = Cursor.Position;
-    if (!Bounds.Contains(now)) pointerHome = now;
+    if (!Bounds.Contains(now) && pointerHome == null)
+    {
+      pointerHome = now;
+      lookalike.ShowAt(now);
+    }
     var target = webView.PointToScreen(new Point(webView.Width / 2, webView.Height - LogicalToDeviceUnits(60)));
     try
     {
@@ -566,9 +575,19 @@ sealed class ChatWindow : Form
   public void PointerBack()
   {
     if (pointerHome is not { } home) return;
-    pointerHome = null;
+    PointerForget();
     Cursor.Position = home;
   }
+  /// The pointer stays where it is now: its lookalike goes away.
+  public void PointerForget()
+  {
+    pointerHome = null;
+    lookalike.HideLookalike();
+  }
+
+  /// A picture of the pointer, left where Z took the real one from.
+  readonly PointerLookalike lookalike = new();
+
 
   public void ToggleMirror() => mirror.Toggle();
   public void HideMirror() => mirror.HideMirror();
@@ -890,6 +909,68 @@ sealed class Shortcuts(ChatWindow app)
 /// live as the real window) or the screen around the pointer (the Windows
 /// Magnifier control at 1x). It never takes the keyboard. Drag the top bar
 /// to move, drag an edge to resize, x closes it.
+/// A picture of the pointer as it looked, left where it was while Z has the
+/// real one in Hi-chat. Clicks go through it and it never takes the keyboard.
+sealed class PointerLookalike : Form
+{
+  /// Drawn where the picture has no pixels; Windows leaves those see-through.
+  static readonly Color Clear = Color.FromArgb(1, 2, 3);
+  IntPtr shape;
+
+  public PointerLookalike()
+  {
+    FormBorderStyle = FormBorderStyle.None;
+    ShowInTaskbar = false;
+    StartPosition = FormStartPosition.Manual;
+    BackColor = Clear;
+    TransparencyKey = Clear;
+    TopMost = true;
+  }
+
+  protected override bool ShowWithoutActivation => true;
+
+  protected override CreateParams CreateParams
+  {
+    get
+    {
+      var p = base.CreateParams;
+      p.ExStyle |= Native.WS_EX_NOACTIVATE | Native.WS_EX_TOOLWINDOW | Native.WS_EX_TOPMOST |
+        Native.WS_EX_LAYERED | Native.WS_EX_TRANSPARENT;
+      return p;
+    }
+  }
+
+  /// at: the pointer's position on the screen.
+  public void ShowAt(Point at)
+  {
+    var info = new Native.CURSORINFO { cbSize = Marshal.SizeOf<Native.CURSORINFO>() };
+    if (!Native.GetCursorInfo(ref info) || info.hCursor == IntPtr.Zero) return;
+    shape = info.hCursor;
+    var cursor = new Cursor(shape);
+    var hot = cursor.HotSpot;
+    // Room for a pointer made bigger in Windows' settings; the rest is see-through
+    var size = Math.Max(Math.Max(cursor.Size.Width, cursor.Size.Height), 128);
+    Bounds = new Rectangle(at.X - hot.X, at.Y - hot.Y, size, size);
+    if (!Visible) Show();
+    Invalidate();
+  }
+
+  public void HideLookalike()
+  {
+    shape = IntPtr.Zero;
+    Hide();
+  }
+
+  protected override void OnPaint(PaintEventArgs e)
+  {
+    base.OnPaint(e);
+    if (shape == IntPtr.Zero) return;
+    var dc = e.Graphics.GetHdc();
+    try { Native.DrawIconEx(dc, 0, 0, shape, 0, 0, 0, IntPtr.Zero, Native.DI_NORMAL); }
+    finally { e.Graphics.ReleaseHdc(dc); }
+  }
+}
+
 sealed class Mirror : Form
 {
   enum Mode { Chat, Pointer }
@@ -1158,7 +1239,11 @@ sealed class Mirror : Form
 static class Native
 {
   public const int WS_EX_NOACTIVATE = 0x08000000, WS_EX_APPWINDOW = 0x00040000, WS_EX_TOOLWINDOW = 0x80,
-    WS_EX_TOPMOST = 0x8, WS_EX_LAYERED = 0x80000;
+    WS_EX_TOPMOST = 0x8, WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
+  public const uint DI_NORMAL = 3;
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public POINT pt; }
   public const uint WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, MS_SHOWMAGNIFIEDCURSOR = 1;
   public const int WM_MOUSEACTIVATE = 0x21, MA_NOACTIVATE = 3, WM_NCHITTEST = 0x84, WM_QUIT = 0x12;
   public const int HTCLIENT = 1, HTCAPTION = 2, HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13,
@@ -1268,6 +1353,8 @@ static class Native
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int w, int h, bool repaint);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+  [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
+  [DllImport("user32.dll")] public static extern bool DrawIconEx(IntPtr dc, int x, int y, IntPtr icon, int w, int h, uint step, IntPtr brush, uint flags);
   [DllImport("user32.dll")] public static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);
   [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte alpha, uint flags);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
