@@ -288,12 +288,15 @@ const ChatInput = ({
   const mcpExtension = extensionManager.get<MCPExtension>(ExtensionTypeEnum.MCP)
   const MCPToolComponent = mcpExtension?.getToolComponent?.()
 
+  // Words, an attachment (a screenshot or an image on its own), or both
+  const canSend = prompt.trim().length > 0 || attachments.length > 0
+
   const handleSendMessage = async (prompt: string) => {
     if (!selectedModel) {
       setMessage('Please select a model to start chatting.')
       return
     }
-    if (!prompt.trim()) {
+    if (!prompt.trim() && !attachments.length) {
       return
     }
     if (ingestingAny) {
@@ -1253,8 +1256,8 @@ const ChatInput = ({
                   // Submit prompt when the following conditions are met:
                   // - Enter is pressed without Shift
                   // - The streaming content has finished
-                  // - Prompt is not empty
-                  if (!streamingContent && prompt.trim() && !ingestingAny) {
+                  // - There are words or an attachment to send
+                  if (!streamingContent && canSend && !ingestingAny) {
                     handleSendMessage(prompt)
                   }
                   // When Shift+Enter is pressed, a new line is added (default behavior)
@@ -1481,15 +1484,15 @@ const ChatInput = ({
               ) : null}
               {!streamingContent && (
                 <Button
-                  variant={!prompt.trim() ? null : 'default'}
+                  variant={!canSend ? null : 'default'}
                   size="icon"
                   className={cn(
                     'rounded-full',
-                    prompt.trim()
+                    canSend
                       ? 'bg-main-view-fg hover:bg-main-view-fg/90'
                       : 'bg-main-view-fg/[0.08]'
                   )}
-                  disabled={!prompt.trim() || ingestingAny}
+                  disabled={!canSend || ingestingAny}
                   data-test-id="send-message-button"
                   aria-label="Send"
                   title="Send"
@@ -1500,9 +1503,7 @@ const ChatInput = ({
                   ) : (
                     <ArrowUp
                       className={cn(
-                        prompt.trim()
-                          ? 'text-main-view'
-                          : 'text-main-view-fg/40'
+                        canSend ? 'text-main-view' : 'text-main-view-fg/40'
                       )}
                     />
                   )}
