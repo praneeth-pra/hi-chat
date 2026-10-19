@@ -35,6 +35,7 @@ import DropdownToolsAvailable from '@/containers/DropdownToolsAvailable'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { useTools } from '@/hooks/useTools'
 import { TokenCounter } from '@/components/TokenCounter'
+import { ContextMeter } from '@/containers/ContextMeter'
 import { useMessages } from '@/hooks/useMessages'
 import { useShallow } from 'zustand/react/shallow'
 import { McpExtensionToolLoader } from './McpExtensionToolLoader'
@@ -162,6 +163,13 @@ const ChatInput = ({
       (state) => state.getAttachments(attachmentsKey),
       [attachmentsKey]
     )
+  )
+  const draftImages = useMemo(
+    () =>
+      attachments
+        .filter((a) => a.type === 'image' && a.dataUrl)
+        .map((a) => a.dataUrl!),
+    [attachments]
   )
   const attachmentsKeyRef = useRef(attachmentsKey)
   const setAttachmentsForThread = useChatAttachments(
@@ -1412,6 +1420,13 @@ const ChatInput = ({
                   variant="plain"
                 />
               </div>
+              {!initialMessage && (
+                <ContextMeter
+                  messages={threadMessages || []}
+                  draft={prompt}
+                  draftImages={draftImages}
+                />
+              )}
               <AppTypingIndicator />
               <DictationButton />
               {selectedProvider === 'llamacpp' &&
