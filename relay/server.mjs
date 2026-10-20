@@ -18,9 +18,11 @@ import {
   grokLive,
   museLive,
 } from './wsProxy.mjs'
-import { handleAuth } from './auth.mjs'
+import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
+import { createMirrorHub } from './mirror.mjs'
+import { createCameraHub } from './camera.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -491,7 +493,8 @@ export function createRelay(options = {}) {
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
       req.url !== '/api/search' &&
-      req.url !== '/api/speech-log'
+      req.url !== '/api/speech-log' &&
+      req.url !== '/api/camera-key'
     )
       return send(res, 404, { error: 'Not found' })
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' })
@@ -524,6 +527,14 @@ export function createRelay(options = {}) {
         res.off('close', disconnect)
       }
       return
+    }
+    // The remote camera's key, for the signed-in /camera page (nginx checks
+    // the login before this)
+    if (req.url === '/api/camera-key') {
+      const key = cameraKey(options.env ?? process.env)
+      return key
+        ? send(res, 200, { key })
+        : send(res, 503, { error: 'Sign-in is not set up' })
     }
     if (req.url === '/api/speech-log') {
       try {
@@ -617,8 +628,35 @@ export function createRelay(options = {}) {
   // Grok and Muse live: the browser's WebSocket is piped to xAI or Meta
   // (see wsProxy.mjs)
   const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
+  // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
+  const mirror = createMirrorHub()
+  // Remote camera (camera.mjs): reached from Meet tabs, so the camera key
+  // stands in for the login cookie
+  const camera = createCameraHub({ env: options.env ?? process.env })
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
+    if (url.pathname === '/api/camera') {
+      if (!cameraKeyOk(url.searchParams.get('key'), options.env ?? process.env))
+        return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      const client = acceptWebSocket(req, socket, head)
+      if (client)
+        camera.join(
+          client,
+          url.searchParams.get('role') === 'send' ? 'send' : 'view'
+        )
+      return
+    }
+    if (url.pathname === '/api/mirror') {
+      if (!sameOriginRequest(req))
+        return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      const client = acceptWebSocket(req, socket, head)
+      if (client)
+        mirror.join(
+          client,
+          url.searchParams.get('role') === 'send' ? 'send' : 'view'
+        )
+      return
+    }
     const engine = LIVE_PATHS[url.pathname]
     if (!engine) return socket.destroy()
     if (!sameOriginRequest(req))

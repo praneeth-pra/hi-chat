@@ -37,6 +37,7 @@ import ErrorDialog from '@/containers/dialogs/ErrorDialog'
 import { ServiceHubProvider } from '@/providers/ServiceHubProvider'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
+import { startRemoteMirror } from '@/lib/remoteMirror'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -52,6 +53,9 @@ const AppLayout = () => {
     setLeftPanelSize,
   } = useLeftPanel()
   const isSmallScreen = useSmallScreen()
+
+  // Show the open conversation on /mirror in another signed-in browser
+  useEffect(() => startRemoteMirror(), [])
 
   // Minimum width threshold for auto-close (10% of screen width)
   const MIN_PANEL_WIDTH_THRESHOLD = 14
@@ -202,7 +206,9 @@ function RootLayout() {
     return (
       pathname === route.localApiServerlogs ||
       pathname === route.systemMonitor ||
-      pathname === route.appLogs
+      pathname === route.appLogs ||
+      pathname === route.mirror ||
+      pathname === route.camera
     )
   }
 

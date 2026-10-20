@@ -134,6 +134,33 @@ for the assessed replacement options; no replacement listener is enabled.
 
 These are the defaults. Each can be changed, turned off or reset in Hi-chat's **Settings > App keys**: press Change, then press the new keys (a key with modifiers, or a modifier tapped on its own). Esc cancels.
 
+## Remote mirror
+
+Open `/mirror` on this site from any other computer (sign in with the
+emailed code) to follow the conversation open in Hi-chat, live: replies show
+as they stream, a fraction of a second behind. Hi-chat sends the text, not
+video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/lib/remoteMirror.ts`),
+and only while a viewer is open. With Hi-chat open in several windows, the
+one in front is shown.
+
+## Remote camera
+
+Lets Google Meet on one computer use the camera and microphone of a laptop
+somewhere else:
+
+- On the remote laptop, open `/camera` in Chrome (signed in) and press Start
+  sending. It can start by itself each time the page opens.
+- On the computer that joins Meet, download the extension from the same page,
+  unzip it, and load it in `chrome://extensions` (Developer mode, Load
+  unpacked). Meet then lists "Hi-chat remote camera" and "Hi-chat remote mic".
+
+The video and sound go directly between the two browsers (WebRTC). The relay
+(`relay/camera.mjs`) only passes the connection setup, checked with a key
+derived from the login secret, because Meet's pages can't send Hi-chat's
+login cookie. Networks that block direct connections need a TURN server, set
+as `CAMERA_ICE_SERVERS` (a JSON list of RTCIceServer objects). The extension
+lives in `web-app/public/hichat-extension/`.
+
 ## Test and build
 
 ```bash

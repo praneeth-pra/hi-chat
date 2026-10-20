@@ -62,6 +62,25 @@ function safeEqual(a, b) {
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
+/**
+ * The remote camera's key (camera.mjs): the /camera page and the Chrome
+ * extension use it instead of the login cookie, which Meet's pages can't send.
+ * It changes with the cookie secret, so rotating AUTH_SECRET revokes it.
+ */
+export function cameraKey(env = process.env) {
+  if (!loginOn(env)) return ''
+  return createHmac('sha256', secret(env))
+    .update(`camera:${loginEmail(env)}`)
+    .digest('hex')
+    .slice(0, 40)
+}
+
+/** Whether `key` is the camera key (compared in constant time). */
+export function cameraKeyOk(key, env = process.env) {
+  const want = cameraKey(env)
+  return want !== '' && typeof key === 'string' && safeEqual(key, want)
+}
+
 /** Whether the request carries a valid, unexpired session cookie. */
 export function signedIn(cookieHeader, env = process.env, now = Date.now()) {
   if (!loginOn(env)) return false
@@ -127,8 +146,7 @@ async function emailCode(env, code, fetchImpl) {
     }),
     signal: AbortSignal.timeout(15_000),
   })
-  if (!res.ok)
-    throw new Error(`Resend HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`Resend HTTP ${res.status}`)
 }
 
 // "Info.hi-techie@gmail.com" shows as "in***@gmail.com"
