@@ -24,7 +24,8 @@
 // keys, which records the next keys you press (see ShortcutStore).
 //
 // With a monitor connected the window goes on it, otherwise on the laptop's
-// own screen (see PlaceOnHomeScreen).
+// own screen (see PlaceOnHomeScreen). Unplugging the monitor hides it until
+// the monitor is back or you open Hi-chat (see MonitorsChanged).
 //
 // A click in Hi-chat doesn't take the keyboard from the app you're in;
 // clicking into a text box (or Z) does. Closing the window
@@ -271,8 +272,9 @@ sealed class ChatWindow : Form
       Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
     }
     PlaceOnHomeScreen();
+    hadMonitor = MonitorConnected();
     // A monitor plugged in or out: wait for Windows to settle the screens first
-    placeTimer.Tick += (_, _) => { placeTimer.Stop(); PlaceOnHomeScreen(); };
+    placeTimer.Tick += (_, _) => { placeTimer.Stop(); MonitorsChanged(); };
     SystemEvents.DisplaySettingsChanged += OnDisplaysChanged;
     Controls.Add(webView);
     mirror = new Mirror(this);
@@ -357,6 +359,37 @@ sealed class ChatWindow : Form
   void OnDisplaysChanged(object? sender, EventArgs e)
   {
     if (IsHandleCreated) BeginInvoke(() => { placeTimer.Stop(); placeTimer.Start(); });
+  }
+
+  /// Whether a monitor was connected at the last check.
+  bool hadMonitor;
+  /// Hidden because its monitor was unplugged; it comes back with the monitor.
+  bool hiddenWithMonitor;
+
+  static bool MonitorConnected()
+  {
+    var builtIn = Displays.BuiltInScreens();
+    return Screen.AllScreens.Any(s => !builtIn.Contains(Displays.Name(s)));
+  }
+
+  /// Plugged in: Hi-chat goes on the monitor (back in view if unplugging hid
+  /// it). Unplugged: Hi-chat hides rather than landing on the laptop's
+  /// screen; opening it from the tray or a shortcut shows it there.
+  void MonitorsChanged()
+  {
+    var monitor = MonitorConnected();
+    var had = hadMonitor;
+    hadMonitor = monitor;
+    if (monitor)
+    {
+      PlaceOnHomeScreen();
+      if (hiddenWithMonitor) BringUp();
+    }
+    else if (had && Visible)
+    {
+      hiddenWithMonitor = true;
+      Hide();
+    }
   }
 
   /// With a monitor connected Hi-chat goes on it, otherwise on the laptop's
@@ -616,6 +649,7 @@ sealed class ChatWindow : Form
   {
     if (!Visible) Show();
     if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+    hiddenWithMonitor = false;
     PlaceOnHomeScreen();
     Native.ForceForeground(Handle);
   }
@@ -624,6 +658,7 @@ sealed class ChatWindow : Form
   /// the app you're in stays active.
   public void BringUp()
   {
+    hiddenWithMonitor = false;
     Native.ShowWindow(Handle, Visible && WindowState != FormWindowState.Minimized
       ? Native.SW_SHOWNA : Native.SW_SHOWNOACTIVATE);
     if (!Visible) Visible = true;
@@ -714,7 +749,14 @@ sealed class ChatWindow : Form
   readonly PointerLookalike lookalike = new();
 
 
-  public void ToggleMirror() => mirror.Toggle();
+  public void ToggleMirror()
+  {
+    // The mirror shows Hi-chat's window, which Windows only draws while it's
+    // open: a minimized Hi-chat, or one closed to the tray, mirrored as a
+    // blank picture.
+    if (!mirror.Visible && (!Visible || WindowState == FormWindowState.Minimized)) BringUp();
+    mirror.Toggle();
+  }
   public void HideMirror() => mirror.HideMirror();
 
   /// Right Ctrl: the whole screen the pointer is on, without a sound or a

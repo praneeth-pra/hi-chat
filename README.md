@@ -84,7 +84,9 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 
 With a monitor connected, Hi-chat's window goes on the monitor; otherwise it
 goes on the laptop's screen. Both apps do this at start, when a monitor is
-plugged in or out, and whenever Hi-chat brings its window up.
+plugged in or out, and whenever Hi-chat brings its window up. Unplugging the
+monitor hides Hi-chat instead of moving it to the laptop's screen; it comes
+back when the monitor is plugged in again, or when you open it yourself.
 
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
