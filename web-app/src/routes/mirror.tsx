@@ -233,7 +233,7 @@ function MirrorViewer() {
           >
             {/* A comfortable reading width; beside a shared screen the half
                 is narrower than this anyway */}
-            <div className="mx-auto flex max-w-2xl flex-col gap-6 text-base">
+            <div className="mx-auto flex max-w-xl flex-col gap-6 text-base">
               {empty && <EmptyState tone={mirror.tone} />}
               {state.msgs.map((m) => (
                 <MirrorMessage
