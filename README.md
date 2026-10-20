@@ -153,6 +153,9 @@ somewhere else:
 - On the computer that joins Meet, download the extension from the same page,
   unzip it, and load it in `chrome://extensions` (Developer mode, Load
   unpacked). Meet then lists "Hi-chat remote camera" and "Hi-chat remote mic".
+  While the remote mic is connected, its sound also plays on this computer, so
+  you hear the remote speaker too (Meet doesn't play your own mic back). It's
+  meant for laptops in different places; in one room it would echo.
 
 The video and sound go directly between the two browsers (WebRTC). The relay
 (`relay/camera.mjs`) only passes the connection setup, checked with a key

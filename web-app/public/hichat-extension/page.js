@@ -40,9 +40,23 @@
     }
   }
 
-  // Remote audio only flows once something plays it; this element is muted
+  // Remote audio only flows once something plays it. This element also lets
+  // you hear the remote speaker on this computer, as Meet never plays your own
+  // mic back to you. (Meant for laptops in different places: in one room the
+  // remote mic would pick this up and echo it into the call.)
   const sink = new Audio()
-  sink.muted = true
+  // Chrome may block sound until the page has been clicked; play on the next
+  // click or key press then
+  const playSink = () =>
+    sink.play().catch(() => {
+      const retry = () => {
+        removeEventListener('pointerdown', retry, true)
+        removeEventListener('keydown', retry, true)
+        sink.play().catch(() => {})
+      }
+      addEventListener('pointerdown', retry, true)
+      addEventListener('keydown', retry, true)
+    })
 
   const send = (m) =>
     document.dispatchEvent(
@@ -72,7 +86,7 @@
         pump(e.track.kind, e.track)
         if (e.track.kind === 'audio') {
           sink.srcObject = new MediaStream([e.track])
-          sink.play().catch(() => {})
+          playSink()
         }
       }
       await peer.setRemoteDescription({ type: 'offer', sdp: m.sdp })
