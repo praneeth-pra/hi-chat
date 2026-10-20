@@ -53,6 +53,20 @@ test('the hub passes connection setup between the camera and each Meet tab', () 
     from: join.from,
   })
 
+  // A presentation starting and stopping reaches the camera page, as a bare on/off
+  viewer.onmessage(JSON.stringify({ t: 'screen', on: true, sdp: 'x' }))
+  assert.deepEqual(camera.got.at(-1), {
+    t: 'screen',
+    on: true,
+    from: join.from,
+  })
+  viewer.onmessage(JSON.stringify({ t: 'screen', on: 'yes' }))
+  assert.deepEqual(camera.got.at(-1), {
+    t: 'screen',
+    on: false,
+    from: join.from,
+  })
+
   // Unknown messages and pings go nowhere
   const seen = camera.got.length
   viewer.onmessage(JSON.stringify({ t: 'ping' }))

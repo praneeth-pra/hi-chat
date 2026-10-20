@@ -3,7 +3,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconArrowDown,
   IconLayoutSidebarRightCollapse,
+  IconMaximize,
   IconMessageCircle,
+  IconScreenShare,
   IconVideo,
 } from '@tabler/icons-react'
 import { route } from '@/constants/routes'
@@ -32,7 +34,8 @@ import { cn } from '@/lib/utils'
 // The remote mirror's viewer: open /mirror on another signed-in computer to
 // follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
-// computer running Hi-chat (see lib/remoteCamera.ts).
+// computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
+// presents in Meet, its shared screen fills the other half of the page.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.mirror as any)({
@@ -184,7 +187,7 @@ function MirrorViewer() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col lg:basis-0">
           {/* On a phone the header has no room for the mirror's status */}
           <div className="flex justify-center border-b border-main-view-fg/5 py-1.5 sm:hidden">
             <StatusPill tone={mirror.tone} label={mirror.label} />
@@ -225,6 +228,9 @@ function MirrorViewer() {
           )}
         </div>
 
+        {/* While the computer in Meet presents, its screen takes the other half */}
+        {cam.screen && <SharedScreen stream={cam.screen} />}
+
         {panelOpen && (
           <aside
             id="mirror-camera-panel"
@@ -236,6 +242,49 @@ function MirrorViewer() {
         )}
       </div>
     </div>
+  )
+}
+
+function SharedScreen({ stream }: { stream: MediaStream }) {
+  const pane = useRef<HTMLDivElement>(null)
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (video.current) video.current.srcObject = stream
+  }, [stream])
+
+  return (
+    <section
+      ref={pane}
+      aria-label="Shared screen"
+      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:order-none lg:aspect-auto lg:min-h-0 lg:flex-1 lg:basis-0 lg:border-b-0 lg:border-l"
+    >
+      <video
+        ref={video}
+        autoPlay
+        muted
+        playsInline
+        className="size-full object-contain"
+      />
+      <StatusPill
+        tone="live"
+        label="Presenting from Meet"
+        icon={<IconScreenShare size={14} />}
+        className="absolute left-3 top-3 border-white/10 bg-black/60 text-white/90 backdrop-blur"
+      />
+      <button
+        type="button"
+        title="Full screen"
+        aria-label="Show the shared screen full screen"
+        onClick={() =>
+          document.fullscreenElement
+            ? document.exitFullscreen().catch(() => {})
+            : pane.current?.requestFullscreen().catch(() => {})
+        }
+        className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full border border-white/10 bg-black/60 text-white/90 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus-visible:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+      >
+        <IconMaximize size={16} />
+      </button>
+    </section>
   )
 }
 

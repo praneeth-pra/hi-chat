@@ -159,6 +159,11 @@ somewhere else:
   While the remote mic is connected, its sound also plays on this computer, so
   you hear the remote speaker too (Meet doesn't play your own mic back). It's
   meant for laptops in different places; in one room it would echo.
+- While this computer presents in Meet (Present now), `/mirror` on the remote
+  laptop splits in half: the conversation on one side, the shared screen on
+  the other (stacked on a phone). It goes back when the presentation stops.
+  This needs the camera sending on `/mirror`, as the screen travels back on
+  the same connection.
 
 The video and sound go directly between the two browsers (WebRTC). The relay
 (`relay/camera.mjs`) only passes the connection setup, checked with a key

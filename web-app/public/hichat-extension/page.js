@@ -1,6 +1,8 @@
 // Runs inside Meet's page. Adds "Hi-chat remote camera" and "Hi-chat remote
 // mic" to the devices Meet can pick, and answers Meet's requests for them
 // with the remote laptop's camera and microphone, received over WebRTC.
+// While this computer presents in Meet, it also sends the shared screen back
+// to the remote laptop's /mirror, which shows it beside the conversation.
 ;(() => {
   const CAM = 'hichat-remote-camera'
   const MIC = 'hichat-remote-mic'
@@ -11,6 +13,7 @@
 
   const realEnumerate = md.enumerateDevices.bind(md)
   const realGetUserMedia = md.getUserMedia.bind(md)
+  const realGetDisplayMedia = md.getDisplayMedia?.bind(md)
 
   // Meet keeps these tracks for the whole call. Frames from whichever remote
   // connection is current are copied into them, so a reconnect doesn't end
@@ -67,9 +70,43 @@
   let ice = []
   let pc = null
 
+  // The screen being presented: Meet's own track, and the copy sent to
+  // /mirror. The offer from /mirror has one video lane coming this way (the
+  // only m-section it receives on); the shared screen goes out on it.
+  let shared = null // { source, copy }
+  let screenSender = null
+
+  /** The mid of the offer's video section that /mirror receives on. */
+  function screenMid(sdp) {
+    for (const section of sdp.split(/\r?\nm=/).slice(1))
+      if (section.startsWith('video') && /\na=recvonly/.test(section))
+        return section.match(/\na=mid:(\S+)/)?.[1] ?? null
+    return null
+  }
+
+  function sendScreen() {
+    const track = shared?.copy ?? null
+    screenSender?.replaceTrack(track).catch(() => {})
+    send({ t: 'screen', on: !!track })
+  }
+
+  function stopSharing() {
+    if (!shared) return
+    shared.copy.stop()
+    shared = null
+    sendScreen()
+  }
+
+  // Meet ends a presentation by stopping its track, which fires no event, and
+  // Chrome's "Stop sharing" ends it at the source; either way it reads ended
+  setInterval(() => {
+    if (shared && shared.source.readyState === 'ended') stopSharing()
+  }, 500)
+
   function closePeer() {
     pc?.close()
     pc = null
+    screenSender = null
   }
 
   async function onSignal(m) {
@@ -81,8 +118,11 @@
       pc = peer
       peer.onicecandidate = (e) =>
         send({ t: 'ice', candidate: e.candidate ? e.candidate.toJSON() : null })
+      const mid = screenMid(m.sdp)
       peer.ontrack = (e) => {
         if (pc !== peer) return
+        // The screen lane brings nothing in; never let it replace the camera
+        if (mid !== null && e.transceiver?.mid === mid) return
         pump(e.track.kind, e.track)
         if (e.track.kind === 'audio') {
           sink.srcObject = new MediaStream([e.track])
@@ -90,9 +130,22 @@
         }
       }
       await peer.setRemoteDescription({ type: 'offer', sdp: m.sdp })
+      const lane =
+        mid === null
+          ? null
+          : peer.getTransceivers().find((t) => t.mid === mid)
+      if (lane) {
+        lane.direction = 'sendonly'
+        screenSender = lane.sender
+      }
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
       send({ t: 'answer', sdp: answer.sdp })
+      // Presenting already: the new connection carries the screen too
+      if (screenSender) {
+        if (shared) sendScreen()
+        else send({ t: 'screen', on: false })
+      }
     } else if (m.t === 'ice' && pc) {
       await pc.addIceCandidate(m.candidate ?? null).catch(() => {})
     }
@@ -151,6 +204,22 @@
     const list = await realEnumerate()
     return [...list, device(MIC, 'audioinput'), device(CAM, 'videoinput')]
   }
+
+  // Presenting: Meet gets the screen as usual, and /mirror gets a copy
+  if (realGetDisplayMedia)
+    md.getDisplayMedia = async function (...args) {
+      const stream = await realGetDisplayMedia(...args)
+      const source = stream.getVideoTracks()[0]
+      if (source) {
+        stopSharing()
+        const copy = source.clone()
+        copy.contentHint = 'detail'
+        shared = { source, copy }
+        start()
+        sendScreen()
+      }
+      return stream
+    }
 
   md.getUserMedia = async function (constraints = {}) {
     const video = asksFor(constraints.video, CAM)

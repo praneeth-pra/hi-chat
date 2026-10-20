@@ -1,6 +1,8 @@
 // Remote camera, sending side (/mirror's camera panel on the remote laptop): offers
 // its camera and microphone to every Meet tab running the Hi-chat extension,
 // over WebRTC. relay/camera.mjs passes the connection setup between them.
+// Each connection also has one video lane the other way: a Meet tab that is
+// presenting sends its shared screen back on it, for /mirror to show.
 
 export type CameraStatus = {
   connected: boolean // to Hi-chat's server
@@ -23,6 +25,7 @@ export function startCameraSender({
   key,
   location = globalThis.location,
   onStatus = () => {},
+  onScreen = () => {},
   WebSocketImpl = globalThis.WebSocket,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
@@ -30,6 +33,8 @@ export function startCameraSender({
   key: string
   location?: Pick<Location, 'protocol' | 'host'>
   onStatus?: (s: CameraStatus) => void
+  /** The screen a Meet tab is presenting, or null when none is. */
+  onScreen?: (screen: MediaStream | null) => void
   WebSocketImpl?: typeof WebSocket
   PeerConnection?: typeof RTCPeerConnection
 }) {
@@ -41,6 +46,18 @@ export function startCameraSender({
   let ice: RTCIceServer[] = []
   const peers = new Map<string, RTCPeerConnection>()
   let queue = Promise.resolve()
+  // Each Meet tab's screen lane, and the tabs presenting, latest last
+  const screens = new Map<string, MediaStream>()
+  let presenting: string[] = []
+  let shown: MediaStream | null = null
+
+  function showScreen() {
+    let next: MediaStream | null = null
+    for (const p of presenting) next = screens.get(p) ?? next
+    if (next === shown) return
+    shown = next
+    onScreen(next)
+  }
 
   const status = () =>
     onStatus({
@@ -56,6 +73,9 @@ export function startCameraSender({
   function drop(id: string) {
     peers.get(id)?.close()
     peers.delete(id)
+    screens.delete(id)
+    presenting = presenting.filter((p) => p !== id)
+    showScreen()
     status()
   }
 
@@ -64,6 +84,13 @@ export function startCameraSender({
     const pc = new PeerConnection({ iceServers: ice })
     peers.set(id, pc)
     for (const track of current.getTracks()) pc.addTrack(track, current)
+    // The lane a presenting Meet tab sends its screen back on
+    const lane = pc.addTransceiver('video', { direction: 'recvonly' })
+    pc.ontrack = (e) => {
+      if (e.transceiver !== lane || peers.get(id) !== pc) return
+      screens.set(id, new MediaStream([e.track]))
+      showScreen()
+    }
     pc.onicecandidate = (e) =>
       send({ t: 'ice', to: id, candidate: e.candidate?.toJSON() ?? null })
     pc.onconnectionstatechange = () => {
@@ -88,11 +115,17 @@ export function startCameraSender({
     sdp?: string
     candidate?: RTCIceCandidateInit | null
     ice?: RTCIceServer[]
+    on?: boolean
   }) {
     if (m.t === 'hello') ice = Array.isArray(m.ice) ? m.ice : []
     else if (m.t === 'join' && m.from) await offer(m.from)
     else if (m.t === 'leave' && m.from) drop(m.from)
-    else if (m.t === 'answer' && m.from && m.sdp)
+    else if (m.t === 'screen' && m.from) {
+      const from = m.from
+      presenting = presenting.filter((p) => p !== from)
+      if (m.on === true && peers.has(from)) presenting.push(from)
+      showScreen()
+    } else if (m.t === 'answer' && m.from && m.sdp)
       await peers
         .get(m.from)
         ?.setRemoteDescription({ type: 'answer', sdp: m.sdp })
