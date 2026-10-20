@@ -13,8 +13,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import CodeEditor from '@uiw/react-textarea-code-editor'
-import '@uiw/react-textarea-code-editor/dist.css'
+import CodeEditor from '@/containers/LazyCodeEditor'
 
 interface MessageMetadataDialogProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -143,7 +143,7 @@ describe('RenderMarkdown', () => {
     expect(container.querySelector('table')?.textContent).toBe('Documentation')
   })
 
-  it('sanitizes external HTML while preserving text and mathematical rendering', () => {
+  it('sanitizes external HTML while preserving text and mathematical rendering', async () => {
     const { container } = render(
       <RenderMarkdown
         enableRawHtml
@@ -157,7 +157,9 @@ describe('RenderMarkdown', () => {
     ).toBeNull()
     expect(container.querySelector('img')?.hasAttribute('onerror')).toBe(false)
     expect(container.textContent).toContain('Safe text')
-    expect(container.querySelector('.katex')).not.toBeNull()
+    await waitFor(() =>
+      expect(container.querySelector('.katex')).not.toBeNull()
+    )
   })
   it('applies raw HTML mode changes when content stays the same', () => {
     const { container, rerender } = render(

@@ -3,17 +3,23 @@ import remarkGfm from 'remark-gfm'
 import remarkEmoji from 'remark-emoji'
 import remarkMath from 'remark-math'
 import remarkBreaks from 'remark-breaks'
-import rehypeKatex from 'rehype-katex'
-import { lazy, Suspense, memo, useState, useMemo, useCallback } from 'react'
+import {
+  lazy,
+  Suspense,
+  memo,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+} from 'react'
 import { getReadableLanguageName } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useCodeblock } from '@/hooks/useCodeblock'
 import { useTheme } from '@/hooks/useTheme'
-import 'katex/dist/katex.min.css'
 import { IconCopy, IconCopyCheck } from '@tabler/icons-react'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
-import type { PluggableList } from 'unified'
+import type { Pluggable, PluggableList } from 'unified'
 import { remarkTablesAsLists } from '@/lib/tablesToLists'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { FlowDiagram, TreeLayout, isDiagramLanguage } from './DiagramBlocks'
@@ -35,12 +41,44 @@ const loadCodeHighlight = () =>
   import('./CodeHighlight').catch(() => ({ default: PlainCode }))
 const CodeHighlight =
   lazy<(typeof import('./CodeHighlight'))['default']>(loadCodeHighlight)
-// Fetch the highlighter while idle, so the first answer's code is coloured
-// from its first line instead of switching over when the answer ends
+/**
+ * KaTeX draws maths. It isn't needed to open Hi-chat, so it loads on its own:
+ * while idle, or as soon as a reply has maths in it, which then redraws.
+ */
+let katexPlugin: Pluggable | undefined
+let katexLoading: Promise<Pluggable | undefined> | undefined
+const loadKatex = () =>
+  (katexLoading ??= import('./katexPlugin')
+    .then((m) => (katexPlugin = m.default as Pluggable))
+    .catch(() => {
+      katexLoading = undefined // try again next time
+      return undefined
+    }))
+/** Maths as remark-math reads it: $…$, $$…$$ (normalizeLatex turns \( \[ into these). */
+const hasMath = (text: string) => text.includes('$')
+function useKatex(needed: boolean): Pluggable | undefined {
+  const [plugin, setPlugin] = useState(() => katexPlugin)
+  useEffect(() => {
+    if (!needed || plugin) return
+    let live = true
+    void loadKatex().then((p) => {
+      if (live && p) setPlugin(() => p)
+    })
+    return () => {
+      live = false
+    }
+  }, [needed, plugin])
+  return plugin
+}
+// Fetch the highlighter and KaTeX while idle, so the first answer's code and
+// maths are drawn right from the start instead of switching over later
 if (typeof window !== 'undefined') {
-  if ('requestIdleCallback' in window)
-    requestIdleCallback(() => void loadCodeHighlight())
-  else setTimeout(() => void loadCodeHighlight(), 1000)
+  const idle = () => {
+    void loadCodeHighlight()
+    void loadKatex()
+  }
+  if ('requestIdleCallback' in window) requestIdleCallback(idle)
+  else setTimeout(idle, 1000)
 }
 
 interface MarkdownProps {
@@ -336,13 +374,16 @@ function RenderMarkdownComponent({
     return plugins
   }, [isUser, enableRawHtml])
 
+  const katex = useKatex(hasMath(normalizedContent))
+
   // Stable rehypePlugins reference
   const rehypePlugins = useMemo<PluggableList>(() => {
+    const maths = katex ? [katex] : []
     // Sanitize external HTML before KaTeX generates its trusted markup.
     return enableRawHtml
-      ? [rehypeRaw, [rehypeSanitize, markdownSchema], rehypeKatex]
-      : [rehypeKatex]
-  }, [enableRawHtml])
+      ? [rehypeRaw, [rehypeSanitize, markdownSchema], ...maths]
+      : maths
+  }, [enableRawHtml, katex])
 
   // Memoized components with stable references
   const markdownComponents: Components = useMemo(
