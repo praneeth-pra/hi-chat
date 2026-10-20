@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useAnalytic } from '@/hooks/useAnalytic'
-import posthog from 'posthog-js'
+import { withPosthog } from '@/lib/posthog'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
 
@@ -40,9 +40,9 @@ function Privacy() {
                       checked={productAnalytic}
                       onCheckedChange={(state) => {
                         if (state) {
-                          posthog.opt_in_capturing()
+                          withPosthog((p) => p.opt_in_capturing())
                         } else {
-                          posthog.opt_out_capturing()
+                          withPosthog((p) => p.opt_out_capturing())
                         }
                         setProductAnalytic(state)
                       }}
