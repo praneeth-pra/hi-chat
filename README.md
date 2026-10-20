@@ -160,8 +160,8 @@ somewhere else:
   you hear the remote speaker too (Meet doesn't play your own mic back). It's
   meant for laptops in different places; in one room it would echo.
 - While this computer presents in Meet (Present now), `/mirror` on the remote
-  laptop splits in half: the shared screen on the left, the conversation on
-  the right (stacked on a phone). It goes back when the presentation stops.
+  laptop shows the shared screen on the left, while the conversation stays in
+  its column in the middle (stacked on a phone). It goes back when the presentation stops.
   This needs the camera sending on `/mirror`, as the screen travels back on
   the same connection.
 
