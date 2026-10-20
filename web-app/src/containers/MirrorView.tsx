@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -14,6 +15,8 @@ import {
   IconMessageCircle,
   IconScreenShare,
   IconVideo,
+  IconVolume,
+  IconVolumeOff,
 } from '@tabler/icons-react'
 import { RenderMarkdown } from '@/containers/RenderMarkdown'
 import {
@@ -185,6 +188,10 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       ? { label: "Hi-chat isn't open", tone: 'off' as const }
       : { label: 'Live', tone: 'live' as const }
   const camera = cameraState(cam)
+  // The Meet call's sound: on unless muted here (remembered)
+  const [callMuted, setCallMuted] = useState(() => stored(CALL_MUTED) === '1')
+  const [callBlocked, setCallBlocked] = useState(false)
+  const blockCall = useCallback(() => setCallBlocked(true), [])
   const empty = state.msgs.length === 0 && !streaming
 
   // On a laptop the shared screen sits left of the text, sized by a divider
@@ -248,6 +255,52 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
           label={mirror.label}
           className="hidden sm:inline-flex"
         />
+        {cam.call &&
+          (callBlocked ? (
+            <button
+              type="button"
+              onClick={() => setCallBlocked(false)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-accent px-3 text-xs font-medium text-accent-fg"
+            >
+              <IconVolume size={16} />
+              Click to hear the call
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                setCallMuted((m) => {
+                  store(CALL_MUTED, m ? null : '1')
+                  return !m
+                })
+              }
+              aria-pressed={!callMuted}
+              title={
+                callMuted ? "Play the call's sound" : "Mute the call's sound"
+              }
+              className={cn(
+                'inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/50',
+                callMuted
+                  ? 'border-main-view-fg/10 text-main-view-fg/50 hover:bg-main-view-fg/[0.04]'
+                  : 'border-main-view-fg/20 bg-main-view-fg/[0.06]'
+              )}
+            >
+              {callMuted ? (
+                <IconVolumeOff size={16} />
+              ) : (
+                <IconVolume size={16} />
+              )}
+              <span className="hidden sm:inline">Call</span>
+            </button>
+          ))}
+        {cam.call && (
+          <CallSound
+            stream={cam.call}
+            muted={callMuted}
+            blocked={callBlocked}
+            onBlocked={blockCall}
+          />
+        )}
         <button
           type="button"
           onClick={togglePanel}
@@ -373,6 +426,39 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       </div>
     </div>
   )
+}
+
+const CALL_MUTED = 'hichat-mirror-call-muted'
+
+/**
+ * Plays the Meet call's sound. If the browser wants a click first, says so
+ * (`onBlocked`), and plays on the next try (`blocked` going false).
+ */
+function CallSound({
+  stream,
+  muted,
+  blocked,
+  onBlocked,
+}: {
+  stream: MediaStream
+  muted: boolean
+  blocked: boolean
+  onBlocked: () => void
+}) {
+  const player = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    const el = player.current
+    if (!el) return
+    if (el.srcObject !== stream) el.srcObject = stream
+    el.muted = muted
+    if (!blocked) el.play().catch(() => onBlocked())
+    // The lane is set up before any sound: play again when it starts
+    const track = stream.getAudioTracks()[0]
+    const again = () => el.play().catch(() => {})
+    track?.addEventListener('unmute', again)
+    return () => track?.removeEventListener('unmute', again)
+  }, [stream, muted, blocked, onBlocked])
+  return <audio ref={player} autoPlay hidden />
 }
 
 const SPLIT = 'hichat-mirror-split' // the screen's share of the width

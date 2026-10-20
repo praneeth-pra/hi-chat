@@ -30,7 +30,7 @@ class FakeSocket {
 class FakePeer {
   static all: FakePeer[] = []
   connectionState = 'new'
-  lanes: { direction: string }[] = []
+  lanes: { kind: string; direction: string }[] = []
   ontrack?: (e: { transceiver: unknown; track: unknown }) => void
   onicecandidate?: () => void
   onconnectionstatechange?: () => void
@@ -39,8 +39,8 @@ class FakePeer {
     FakePeer.all.push(this)
   }
   addTrack() {}
-  addTransceiver(_kind: string, init: { direction: string }) {
-    const lane = { direction: init.direction }
+  addTransceiver(kind: string, init: { direction: string }) {
+    const lane = { kind, direction: init.direction }
     this.lanes.push(lane)
     return lane
   }
@@ -91,6 +91,7 @@ describe('remote camera', () => {
 
   it('shows the screen a Meet tab presents, and drops it when it stops', async () => {
     const onScreen = vi.fn()
+    const onCall = vi.fn()
     const stream = { getTracks: () => [] } as unknown as MediaStream
     globalThis.MediaStream ??= class {
       constructor(public tracks: unknown[]) {}
@@ -100,6 +101,7 @@ describe('remote camera', () => {
       key: 'k',
       location: { protocol: 'https:', host: 'hi.example' },
       onScreen,
+      onCall,
       WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
       PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
     })
@@ -107,8 +109,14 @@ describe('remote camera', () => {
     ws.hear({ t: 'join', from: 'm1' })
     await flush()
     const pc = FakePeer.all.at(-1)!
-    // The offer asks to receive one video lane back
-    expect(pc.lanes).toEqual([{ direction: 'recvonly' }])
+    // The offer asks for two lanes back: the presented screen, the call's sound
+    expect(pc.lanes).toEqual([
+      { kind: 'video', direction: 'recvonly' },
+      { kind: 'audio', direction: 'recvonly' },
+    ])
+    // The call's sound plays as soon as it arrives, presenting or not
+    pc.ontrack?.({ transceiver: pc.lanes[1], track: { kind: 'audio' } })
+    expect(onCall.mock.lastCall?.[0]).not.toBeNull()
     pc.ontrack?.({ transceiver: pc.lanes[0], track: { kind: 'video' } })
     // Connected but not presenting: nothing to show yet
     expect(onScreen).not.toHaveBeenCalled()
@@ -129,6 +137,7 @@ describe('remote camera', () => {
     ws.hear({ t: 'leave', from: 'm1' })
     await flush()
     expect(onScreen).toHaveBeenLastCalledWith(null)
+    expect(onCall).toHaveBeenLastCalledWith(null)
     cam.stop()
   })
 })

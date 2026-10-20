@@ -2,7 +2,8 @@
 // mic" to the devices Meet can pick, and answers Meet's requests for them
 // with the remote laptop's camera and microphone, received over WebRTC.
 // While this computer presents in Meet, it also sends the shared screen back
-// to the remote laptop's /mirror, which shows it beside the conversation.
+// to the remote laptop's /mirror, which shows it beside the conversation,
+// and it always sends the call's sound (the other participants) there too.
 ;(() => {
   // Only one copy may run: with the extension loaded twice, both would answer
   // each other's connections and neither camera nor screen would come through
@@ -82,12 +83,73 @@
   const SCREEN_BITRATE = 2_500_000
   let screenSender = null
 
-  /** The mid of the offer's video section that /mirror receives on. */
-  function screenMid(sdp) {
+  /** The mid of the offer's `kind` section that /mirror receives on. */
+  function laneMid(sdp, kind) {
     for (const section of sdp.split(/\r?\nm=/).slice(1))
-      if (section.startsWith('video') && /\na=recvonly/.test(section))
+      if (section.startsWith(kind) && /\na=recvonly/.test(section))
         return section.match(/\na=mid:(\S+)/)?.[1] ?? null
     return null
+  }
+
+  // The call's sound: every audio track Meet receives (the other
+  // participants) mixed into one, for /mirror. Meet's own connections are
+  // watched by wrapping RTCPeerConnection before Meet's code runs; ours uses
+  // the real one, so the remote mic never comes back in the mix.
+  const RealPeerConnection = window.RTCPeerConnection
+  let mix = null // { ctx, out, sources }
+  let callSender = null
+
+  function callMix() {
+    if (mix) return mix
+    const ctx = new AudioContext()
+    mix = { ctx, out: ctx.createMediaStreamDestination(), sources: new Map() }
+    // Chrome starts audio only after a click on the page
+    const resume = () =>
+      ctx.state === 'suspended' && ctx.resume().catch(() => {})
+    addEventListener('pointerdown', resume, true)
+    addEventListener('keydown', resume, true)
+    resume()
+    return mix
+  }
+
+  function addCallAudio(track) {
+    const m = callMix()
+    if (m.sources.has(track.id)) return
+    const stream = new MediaStream([track])
+    const source = m.ctx.createMediaStreamSource(stream)
+    source.connect(m.out)
+    // Chrome only lets a call's track into Web Audio while something plays
+    // it; a muted element does, without a second copy of the sound here
+    const keep = new Audio()
+    keep.muted = true
+    keep.srcObject = stream
+    keep.play().catch(() => {})
+    m.sources.set(track.id, { source, keep })
+    track.addEventListener('ended', () => {
+      source.disconnect()
+      keep.srcObject = null
+      m.sources.delete(track.id)
+    })
+    sendCall()
+  }
+
+  function sendCall() {
+    if (!callSender || !mix) return
+    callSender.replaceTrack(mix.out.stream.getAudioTracks()[0]).catch(() => {})
+  }
+
+  if (RealPeerConnection) {
+    class WatchedPeerConnection extends RealPeerConnection {
+      constructor(...args) {
+        super(...args)
+        this.addEventListener('track', (e) => {
+          if (e.track.kind === 'audio') addCallAudio(e.track)
+        })
+      }
+    }
+    window.RTCPeerConnection = WatchedPeerConnection
+    if (window.webkitRTCPeerConnection)
+      window.webkitRTCPeerConnection = WatchedPeerConnection
   }
 
   function sendScreen() {
@@ -126,6 +188,7 @@
     pc?.close()
     pc = null
     screenSender = null
+    callSender = null
   }
 
   async function onSignal(m) {
@@ -133,15 +196,18 @@
     else if (m.t === 'sender' && !m.on) closePeer()
     else if (m.t === 'offer') {
       closePeer()
-      const peer = new RTCPeerConnection({ iceServers: ice })
+      const peer = new RealPeerConnection({ iceServers: ice })
       pc = peer
       peer.onicecandidate = (e) =>
         send({ t: 'ice', candidate: e.candidate ? e.candidate.toJSON() : null })
-      const mid = screenMid(m.sdp)
+      const mid = laneMid(m.sdp, 'video')
+      const callMid = laneMid(m.sdp, 'audio')
       peer.ontrack = (e) => {
         if (pc !== peer) return
-        // The screen lane brings nothing in; never let it replace the camera
-        if (mid !== null && e.transceiver?.mid === mid) return
+        // The lanes to /mirror bring nothing in; never let them replace the
+        // remote camera or mic
+        const at = e.transceiver?.mid
+        if (at != null && (at === mid || at === callMid)) return
         pump(e.track.kind, e.track)
         if (e.track.kind === 'audio') {
           sink.srcObject = new MediaStream([e.track])
@@ -155,9 +221,19 @@
         lane.direction = 'sendonly'
         screenSender = lane.sender
       }
+      const call =
+        callMid === null
+          ? null
+          : peer.getTransceivers().find((t) => t.mid === callMid)
+      if (call) {
+        call.direction = 'sendonly'
+        callSender = call.sender
+      }
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
       send({ t: 'answer', sdp: answer.sdp })
+      // The call's sound, if any has arrived yet (more joins the mix later)
+      sendCall()
       // Presenting already: the new connection carries the screen too
       if (screenSender) {
         if (shared) sendScreen()

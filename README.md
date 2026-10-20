@@ -164,6 +164,10 @@ somewhere else:
   its column in the middle (stacked on a phone). It goes back when the presentation stops.
   This needs the camera sending on `/mirror`, as the screen travels back on
   the same connection.
+- The call's sound (the other participants, not your own mic) plays on
+  `/mirror` too, over the same connection; the **Call** button in its
+  header mutes it. Headphones on the remote laptop are best, though the
+  camera's mic has echo cancellation on so the call doesn't loop back.
 
 The video and sound go directly between the two browsers (WebRTC). The relay
 (`relay/camera.mjs`) only passes the connection setup, checked with a key

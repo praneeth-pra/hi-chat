@@ -58,6 +58,8 @@ export function useCameraSender({ link }: { link?: string } = {}) {
   const [status, setStatus] = useState<CameraStatus | null>(null)
   // The screen the computer in Meet is presenting, while it presents
   const [screen, setScreen] = useState<MediaStream | null>(null)
+  // The Meet call's sound (the other participants), while connected
+  const [call, setCall] = useState<MediaStream | null>(null)
   const [autostart, setAutostartState] = useState(
     () => stored(AUTOSTART) === '1'
   )
@@ -78,7 +80,12 @@ export function useCameraSender({ link }: { link?: string } = {}) {
         height: { ideal: 720 },
         frameRate: { ideal: 30 },
       },
-      audio: { deviceId: micId ? { exact: micId } : undefined },
+      // The call's sound plays on this computer now: keep it out of the mic
+      audio: {
+        deviceId: micId ? { exact: micId } : undefined,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
     })
     setDevices(await navigator.mediaDevices.enumerateDevices())
     return media
@@ -98,6 +105,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
         link,
         onStatus: setStatus,
         onScreen: setScreen,
+        onCall: setCall,
       })
       store(AUTOSTART, '1')
       setAutostartState(true)
@@ -119,6 +127,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     setStream(null)
     setStatus(null)
     setScreen(null)
+    setCall(null)
   }, [stream])
 
   const setAutostart = useCallback((on: boolean) => {
@@ -207,6 +216,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     stream,
     status,
     screen,
+    call,
     autostart,
     setAutostart,
     starting,

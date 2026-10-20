@@ -32,6 +32,7 @@ export function startCameraSender({
   location = globalThis.location,
   onStatus = () => {},
   onScreen = () => {},
+  onCall = () => {},
   WebSocketImpl = globalThis.WebSocket,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
@@ -43,6 +44,8 @@ export function startCameraSender({
   onStatus?: (s: CameraStatus) => void
   /** The screen a Meet tab is presenting, or null when none is. */
   onScreen?: (screen: MediaStream | null) => void
+  /** The sound of the Meet call (other participants), or null */
+  onCall?: (call: MediaStream | null) => void
   WebSocketImpl?: typeof WebSocket
   PeerConnection?: typeof RTCPeerConnection
 }) {
@@ -58,6 +61,16 @@ export function startCameraSender({
   const screens = new Map<string, MediaStream>()
   let presenting: string[] = []
   let shown: MediaStream | null = null
+  // Each Meet tab's call sound; the latest tab to connect is heard
+  const calls = new Map<string, MediaStream>()
+  let heard: MediaStream | null = null
+  function hearCall() {
+    let next: MediaStream | null = null
+    for (const c of calls.values()) next = c
+    if (next === heard) return
+    heard = next
+    onCall(next)
+  }
 
   function showScreen() {
     let next: MediaStream | null = null
@@ -84,6 +97,7 @@ export function startCameraSender({
     screens.delete(id)
     presenting = presenting.filter((p) => p !== id)
     showScreen()
+    if (calls.delete(id)) hearCall()
     status()
   }
 
@@ -94,10 +108,18 @@ export function startCameraSender({
     for (const track of current.getTracks()) pc.addTrack(track, current)
     // The lane a presenting Meet tab sends its screen back on
     const lane = pc.addTransceiver('video', { direction: 'recvonly' })
+    // And the lane the Meet call's sound comes back on
+    const callLane = pc.addTransceiver('audio', { direction: 'recvonly' })
     pc.ontrack = (e) => {
-      if (e.transceiver !== lane || peers.get(id) !== pc) return
-      screens.set(id, new MediaStream([e.track]))
-      showScreen()
+      if (peers.get(id) !== pc) return
+      if (e.transceiver === lane) {
+        screens.set(id, new MediaStream([e.track]))
+        showScreen()
+      } else if (e.transceiver === callLane) {
+        calls.delete(id) // the newest connection goes last
+        calls.set(id, new MediaStream([e.track]))
+        hearCall()
+      }
     }
     pc.onicecandidate = (e) =>
       send({ t: 'ice', to: id, candidate: e.candidate?.toJSON() ?? null })
