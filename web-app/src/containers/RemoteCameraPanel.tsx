@@ -123,6 +123,15 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
         </p>
       </div>
 
+      {cam.replaced && !cam.stream && (
+        <p
+          role="status"
+          className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+        >
+          Another page took over the camera. Press Start sending to take it
+          back.
+        </p>
+      )}
       {cam.error && (
         <p
           role="alert"

@@ -2,8 +2,15 @@
 // open, Hi-chat sends it the open conversation over /api/mirror (see
 // relay/mirror.mjs), and a reply as it streams. With no viewer it sends
 // nothing but a ping now and then.
+//
+// Latency first: a reply's text goes out the moment it arrives from the
+// model (mirrorStreamTap), changes to the conversation as soon as they
+// happen (a microtask, not a timer, which a background window slows to once
+// a second), and only what changed.
 
-import type { ThreadMessage } from '@janhq/core'
+import { MessageStatus, type ThreadMessage } from '@janhq/core'
+import type { AccuracyReview } from '@/lib/accuracyReview'
+import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
@@ -19,25 +26,156 @@ export const MIRROR_PATH = '/mirror'
 const NOT_SENDING = [MIRROR_PATH]
 const notSending = (pathname: string) =>
   NOT_SENDING.includes(pathname) || linkFromPath(pathname) !== null
-const PUSH_MS = 40
 const PING_MS = 30_000
 const MAX_MESSAGES = 200
+// Screenshots go to the mirror at most this big (a ~3000px Mac screenshot
+// would be several MB): sharp enough to read, quick to send
+const IMAGE_MAX_PX = 1600
+const IMAGE_MAX_CHARS = 850_000
 
-type MirrorMessage = { id: string; role: 'user' | 'assistant'; text: string }
+/** An Accuracy review as the mirror shows it (as under the answer in Hi-chat). */
+export type MirrorReview = {
+  verdict: string
+  fallback?: string
+  verifier?: string
+  webStatus?: string
+  sources: { title: string; url: string }[]
+}
+
+/** A message as the mirror shows it: what Hi-chat's chat shows for it. */
+export type MirrorMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  /** For a question, its text without attached files; for an answer, its
+   * whole text, thinking included (the mirror folds it as Hi-chat does) */
+  text: string
+  /** Names of files attached to a question */
+  files?: string[]
+  /** Keys of images (screenshots) attached to a question, sent as 'img' */
+  images?: string[]
+  /** An answer stopped before it finished */
+  stopped?: boolean
+  review?: MirrorReview
+  /** Tools an answer used */
+  tools?: { name: string; pending: boolean }[]
+}
 
 export const messageText = (m: ThreadMessage | undefined) =>
   m?.content?.find((c) => c.type === 'text')?.text?.value ?? ''
 
-/** The conversation as the viewer shows it: user and assistant text only. */
+const imageParts = (m: ThreadMessage) =>
+  (m.content ?? []).filter((c) => c.type === 'image_url' && c.image_url?.url)
+
+/** The conversation as the mirror shows it. */
 export function mirrorMessages(messages: ThreadMessage[]): MirrorMessage[] {
   return messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .slice(-MAX_MESSAGES)
-    .map((m) => ({
-      id: m.id,
-      role: m.role === 'user' ? 'user' : 'assistant',
-      text: messageText(m),
-    }))
+    .map((m) => {
+      if (m.role === 'user') {
+        const { cleanPrompt, files } = extractFilesFromPrompt(messageText(m))
+        const msg: MirrorMessage = { id: m.id, role: 'user', text: cleanPrompt }
+        if (files.length) msg.files = files.map((f) => f.name)
+        const images = imageParts(m).map((_, i) => `${m.id}.${i}`)
+        if (images.length) msg.images = images
+        return msg
+      }
+      const msg: MirrorMessage = {
+        id: m.id,
+        role: 'assistant',
+        text: messageText(m),
+      }
+      if (m.status === MessageStatus.Stopped) msg.stopped = true
+      const review = m.metadata?.accuracyReview as AccuracyReview | undefined
+      if (review)
+        msg.review = {
+          verdict: review.verdict,
+          fallback: review.fallback,
+          verifier: review.verifier,
+          webStatus: review.webStatus,
+          sources: (review.sources ?? []).map((s) => ({
+            title: s.title,
+            url: s.url,
+          })),
+        }
+      const calls = m.metadata?.tool_calls
+      if (Array.isArray(calls) && calls.length)
+        msg.tools = (calls as ToolCall[]).map((c) => ({
+          name: c.tool?.function?.name ?? '',
+          pending: (c as { state?: string }).state === 'pending',
+        }))
+      return msg
+    })
+}
+
+/** The images questions show (screenshots), by the keys mirrorMessages uses. */
+export function messageImages(messages: ThreadMessage[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of messages)
+    if (m.role === 'user')
+      imageParts(m).forEach((c, i) => {
+        const url = c.image_url?.url
+        if (url) out.set(`${m.id}.${i}`, url)
+      })
+  return out
+}
+
+/**
+ * What changed between the conversation the viewers have and `msgs`:
+ * messages replaced (`set`) and appended (`add`), or null when it's more than
+ * that (a deleted or reordered message, another chat): send it whole then.
+ */
+export function diffMessages(
+  sentIds: string[],
+  sent: string[],
+  msgs: MirrorMessage[],
+  json: string[]
+): { set: MirrorMessage[]; add: MirrorMessage[] } | null {
+  if (msgs.length < sentIds.length) return null
+  const set: MirrorMessage[] = []
+  for (let i = 0; i < sentIds.length; i++) {
+    if (msgs[i].id !== sentIds[i]) return null
+    if (json[i] !== sent[i]) set.push(msgs[i])
+  }
+  if (set.length > 4) return null
+  return { set, add: msgs.slice(sentIds.length) }
+}
+
+/** A screenshot made small enough to send quickly, as a JPEG data URL. */
+async function shrinkImage(url: string): Promise<string | null> {
+  if (/^https?:\/\//.test(url)) return url
+  if (!url.startsWith('data:image/') || typeof Image === 'undefined')
+    return null
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    const scale = Math.min(
+      1,
+      IMAGE_MAX_PX / Math.max(img.naturalWidth, img.naturalHeight, 1)
+    )
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
+    for (const quality of [0.8, 0.6, 0.4]) {
+      const out = canvas.toDataURL('image/jpeg', quality)
+      if (out.length <= IMAGE_MAX_CHARS) return out
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// useChat hands each piece of a reply to the mirror as it arrives (see
+// mirrorStreamTap), so it goes out at once: not when Hi-chat next draws a
+// frame, which a covered or hidden window barely does
+let tap: ((threadId: string, text: string) => void) | null = null
+
+/** A reply's whole text so far, as it arrives from the model. */
+export function mirrorStreamTap(threadId: string, text: string) {
+  tap?.(threadId, text)
 }
 
 /**
@@ -116,31 +254,85 @@ export function startRemoteMirror({
   let viewers = 0
   let retryMs = 1000
   let retryTimer: ReturnType<typeof setTimeout> | undefined
-  let pushTimer: ReturnType<typeof setTimeout> | undefined
+  let queued = false
   // What the viewers already have
-  let sentSnap = ''
   let snapKey: unknown[] = []
+  let sentThread: string | null | undefined
+  let sentTitle = ''
+  let sentIds: string[] = []
+  let sentJson: string[] = []
+  let sentImages = new Set<string>()
+  let sentPhase: string | null | undefined
   let sentStream: { id: string | null; text: string } = { id: null, text: '' }
   let sentScroll = ''
   let scrollFrame: number | undefined
+  let streamCount = 0
 
+  const open = () => ws?.readyState === WebSocketImpl.OPEN
   const send = (data: unknown) => {
-    if (ws?.readyState === WebSocketImpl.OPEN) ws.send(JSON.stringify(data))
+    if (open()) ws!.send(JSON.stringify(data))
+  }
+  /** Everything again, for a new viewer or a window coming to the front. */
+  const resend = () => {
+    snapKey = []
+    sentThread = undefined
+    sentImages = new Set()
+    sentPhase = undefined
+    sentStream = { id: null, text: '' }
+    sentScroll = ''
+  }
+
+  // The reply being written. The chat gives it a new id on every update (and
+  // the saved reply another), so a reply is followed by its text: text that
+  // carries on from what the viewers have is the same reply, sent as an add
+  function sendStream(text: string | null, liveId?: string) {
+    const id =
+      text === null
+        ? null
+        : sentStream.id !== null && text.startsWith(sentStream.text)
+          ? sentStream.id
+          : (liveId ?? `reply-${++streamCount}`)
+    const update = streamUpdate(sentStream, id, text ?? '')
+    if (update) {
+      send(update)
+      sentStream = { id, text: id === null ? '' : (text ?? '') }
+    }
+  }
+
+  // Each piece of a reply, straight from the model (useChat)
+  tap = (threadId, text) => {
+    if (!viewers || !open() || notSending(location.pathname)) return
+    if (threadId !== useThreads.getState().currentThreadId) return
+    sendStream(text)
+  }
+
+  // Screenshots, sent once each, made small first
+  function sendImages(messages: ThreadMessage[]) {
+    for (const [key, url] of messageImages(messages)) {
+      if (sentImages.has(key)) continue
+      sentImages.add(key)
+      const viewersWere = sentImages
+      shrinkImage(url).then((src) => {
+        // Not if a new viewer started over meanwhile (it gets it again)
+        if (src && sentImages === viewersWere) send({ t: 'img', key, src })
+      })
+    }
   }
 
   function push() {
-    pushTimer = undefined
-    if (!viewers || ws?.readyState !== WebSocketImpl.OPEN) return
+    queued = false
+    if (!viewers || !open()) return
     if (notSending(location.pathname)) return
+    const app = useAppState.getState()
     // With Hi-chat open in several windows, the one in front speaks; one in
     // the background only finishes a reply it is writing
     if (
       globalThis.document?.hidden &&
-      !useAppState.getState().streamingContent &&
+      !app.streamingContent &&
       sentStream.id === null
     )
       return
-    const threadId = useThreads.getState().currentThreadId
+    const threadId = useThreads.getState().currentThreadId ?? null
     const title = threadId
       ? (useThreads.getState().threads[threadId]?.title ?? '')
       : ''
@@ -151,34 +343,48 @@ export function startRemoteMirror({
     const key = [threadId, title, messages]
     if (key.some((v, i) => v !== snapKey[i])) {
       snapKey = key
-      const snap = JSON.stringify({
-        t: 'snap',
-        title,
-        msgs: mirrorMessages(messages ?? []),
-      })
-      if (snap !== sentSnap) {
-        sentSnap = snap
-        ws.send(snap)
-      }
+      const msgs = mirrorMessages(messages ?? [])
+      const json = msgs.map((m) => JSON.stringify(m))
+      const ops =
+        sentThread === threadId
+          ? diffMessages(sentIds, sentJson, msgs, json)
+          : null
+      if (!ops) send({ t: 'snap', title, msgs })
+      else if (ops.set.length || ops.add.length || title !== sentTitle)
+        send({ t: 'ops', title, ...ops })
+      sentThread = threadId
+      sentTitle = title
+      sentIds = msgs.map((m) => m.id)
+      sentJson = json
+      sendImages(messages ?? [])
     }
-    const streaming = useAppState.getState().streamingContent
+    // Accuracy mode's progress, as Hi-chat shows it
+    const phase =
+      threadId && app.accuracyStatus?.threadId === threadId
+        ? app.accuracyStatus.phase
+        : null
+    // (A viewer starts with none, so only a change is worth sending)
+    if (phase !== (sentPhase ?? null)) {
+      send({ t: 'phase', phase })
+      sentPhase = phase
+    }
     const live =
-      streaming && threadId && streaming.thread_id === threadId
-        ? streaming
+      app.streamingContent && threadId
+        ? app.streamingContent.thread_id === threadId
+          ? app.streamingContent
+          : undefined
         : undefined
-    const text = messageText(live)
-    // The chat gives a streaming reply a new id on every update (and the
-    // saved reply another), so a reply is followed by its text: text that
-    // carries on from what the viewers have is the same reply, sent as an add
-    const id = !live
-      ? null
-      : sentStream.id !== null && text.startsWith(sentStream.text)
-        ? sentStream.id
-        : live.id
-    const update = streamUpdate(sentStream, id, text)
-    if (update) {
-      send(update)
-      sentStream = { id, text: id === null ? '' : text }
+    if (!live) sendStream(null)
+    else {
+      const text = messageText(live)
+      // The model's own pieces (tap) are usually ahead of what Hi-chat has
+      // drawn: nothing to send then
+      if (!(
+        sentStream.id !== null &&
+        sentStream.text.startsWith(text) &&
+        sentStream.text.length >= text.length
+      ))
+        sendStream(text, live.id)
     }
     sendScroll()
   }
@@ -186,7 +392,7 @@ export function startRemoteMirror({
   // Where the chat is scrolled to, so the viewer scrolls with it
   function sendScroll() {
     scrollFrame = undefined
-    if (!viewers || ws?.readyState !== WebSocketImpl.OPEN) return
+    if (!viewers || !open()) return
     if (globalThis.document?.hidden) return
     const scroller = globalThis.document?.querySelector<HTMLElement>(
       '[data-thread-scroller]'
@@ -195,12 +401,16 @@ export function startRemoteMirror({
     const scroll = JSON.stringify(readScroll(scroller))
     if (scroll !== sentScroll) {
       sentScroll = scroll
-      ws.send(scroll)
+      ws!.send(scroll)
     }
   }
 
+  // Changes go out together, right after the change that caused them: a
+  // microtask, which (unlike a timer) a background window doesn't slow down
   const schedule = () => {
-    if (viewers && !pushTimer) pushTimer = setTimeout(push, PUSH_MS)
+    if (!viewers || queued) return
+    queued = true
+    queueMicrotask(push)
   }
 
   function connect() {
@@ -225,10 +435,7 @@ export function startRemoteMirror({
       viewers = m.n
       // A new viewer starts from the whole conversation
       if (viewers > had) {
-        sentSnap = ''
-        snapKey = []
-        sentStream = { id: null, text: '' }
-        sentScroll = ''
+        resend()
         schedule()
       }
     }
@@ -245,9 +452,7 @@ export function startRemoteMirror({
   // Coming to the front: send this window's conversation in full
   const onVisible = () => {
     if (globalThis.document?.hidden) return
-    sentSnap = ''
-    snapKey = []
-    sentScroll = ''
+    resend()
     schedule()
   }
   globalThis.document?.addEventListener('visibilitychange', onVisible)
@@ -269,16 +474,20 @@ export function startRemoteMirror({
       globalThis.document?.removeEventListener('visibilitychange', onVisible),
     () => globalThis.document?.removeEventListener('scroll', onScroll, true),
   ]
+  // Connect again at once, for a new link
+  const reconnect = () => {
+    const was = ws
+    ws = null
+    viewers = 0
+    was?.close()
+    clearTimeout(retryTimer)
+    connect()
+  }
   // "New link": end the old one, then send on the new
   unsubscribe.push(
     onMirrorLinkRenewed((old) => {
       send({ t: 'revoke', link: old })
-      const was = ws
-      ws = null
-      viewers = 0
-      was?.close()
-      clearTimeout(retryTimer)
-      connect()
+      reconnect()
     })
   )
   const ping = setInterval(() => send({ t: 'ping' }), PING_MS)
@@ -286,10 +495,10 @@ export function startRemoteMirror({
 
   return () => {
     stopped = true
+    tap = null
     unsubscribe.forEach((u) => u())
     clearInterval(ping)
     clearTimeout(retryTimer)
-    clearTimeout(pushTimer)
     ws?.close()
     ws = null
   }
@@ -305,6 +514,10 @@ export type MirrorState = {
   senderOn: boolean
   /** Where Hi-chat is scrolled to; a new object for each move */
   scroll: { bottom: true } | { id: string; f: number } | null
+  /** Screenshots messages show, by key */
+  images: Record<string, string>
+  /** Accuracy mode's progress, while it runs */
+  phase: 'searching' | 'drafting' | 'verifying' | null
 }
 
 export const emptyMirror: MirrorState = {
@@ -313,7 +526,11 @@ export const emptyMirror: MirrorState = {
   stream: null,
   senderOn: false,
   scroll: null,
+  images: {},
+  phase: null,
 }
+
+const PHASES = ['searching', 'drafting', 'verifying'] as const
 
 /**
  * Whether these messages include the finished reply being streamed: the same
@@ -342,6 +559,31 @@ export function applyMirrorMessage(
       state.stream && endsStream(msgs, state.stream) ? null : state.stream
     return { ...state, title: String(m.title ?? ''), msgs, stream }
   }
+  // Only what changed: messages replaced (set) and appended (add). Messages
+  // that didn't change keep their objects, so they aren't drawn again
+  if (m?.t === 'ops') {
+    const msgs = state.msgs.slice()
+    for (const x of (Array.isArray(m.set) ? m.set : []) as MirrorMessage[]) {
+      const i = msgs.findIndex((y) => y.id === x.id)
+      if (i !== -1) msgs[i] = x
+    }
+    msgs.push(...((Array.isArray(m.add) ? m.add : []) as MirrorMessage[]))
+    const stream =
+      state.stream && endsStream(msgs, state.stream) ? null : state.stream
+    return {
+      ...state,
+      title: typeof m.title === 'string' ? m.title : state.title,
+      msgs,
+      stream,
+    }
+  }
+  if (m?.t === 'img' && typeof m.key === 'string' && typeof m.src === 'string')
+    return { ...state, images: { ...state.images, [m.key]: m.src } }
+  if (m?.t === 'phase')
+    return {
+      ...state,
+      phase: (PHASES as readonly string[]).includes(m.phase) ? m.phase : null,
+    }
   if (m?.t === 'stream') {
     if (m.id === null) return { ...state, stream: null }
     if (typeof m.text === 'string')

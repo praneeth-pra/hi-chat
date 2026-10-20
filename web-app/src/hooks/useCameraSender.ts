@@ -56,6 +56,8 @@ export function useCameraSender({ link }: { link?: string } = {}) {
   const [micId, setMicId] = useState<string>(() => savedChoice().mic ?? '')
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [status, setStatus] = useState<CameraStatus | null>(null)
+  // Another page took the camera over, until this one starts again
+  const [replaced, setReplaced] = useState(false)
   // The screen the computer in Meet is presenting, while it presents
   const [screen, setScreen] = useState<MediaStream | null>(null)
   // The Meet call's sound (the other participants), while connected
@@ -94,6 +96,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
   const start = useCallback(async () => {
     if (!key && !link) return
     setError('')
+    setReplaced(false)
     setStarting(true)
     try {
       const media = await open()
@@ -103,7 +106,10 @@ export function useCameraSender({ link }: { link?: string } = {}) {
         stream: media,
         key,
         link,
-        onStatus: setStatus,
+        onStatus: (s) => {
+          setStatus(s)
+          if (s.replaced) setReplaced(true)
+        },
         onScreen: setScreen,
         onCall: setCall,
       })
@@ -129,6 +135,12 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     setScreen(null)
     setCall(null)
   }, [stream])
+
+  // Taken over by another page: let the camera go here
+  useEffect(() => {
+    if (replaced && sender.current) stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaced])
 
   const setAutostart = useCallback((on: boolean) => {
     setAutostartState(on)
@@ -215,6 +227,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     setMicId,
     stream,
     status,
+    replaced,
     screen,
     call,
     autostart,

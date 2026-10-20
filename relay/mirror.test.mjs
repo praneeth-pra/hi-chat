@@ -265,3 +265,122 @@ test('links must look like secrets', () => {
   assert.equal(hub.isLink(''), false)
   assert.equal(hub.isLink(undefined), false)
 })
+
+test('only what changed goes out, and late viewers still get it all', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(viewer, 'view')
+  app.onmessage(snap([{ id: 'u1', role: 'user', text: 'Hi' }]))
+  app.onmessage(JSON.stringify({ t: 'stream', id: 's', text: 'Hel' }))
+  app.onmessage(
+    JSON.stringify({
+      t: 'ops',
+      title: 'Plans',
+      set: [],
+      add: [{ id: 'a1', role: 'assistant', text: 'Hello', junk: 1 }],
+    })
+  )
+  // The viewer hears just the addition, cleaned
+  assert.deepEqual(viewer.got.at(-1), {
+    t: 'ops',
+    title: 'Plans',
+    set: [],
+    add: [{ id: 'a1', role: 'assistant', text: 'Hello' }],
+  })
+  // A set of a message the hub doesn't have is dropped (the app sends a snap)
+  const seen = viewer.got.length
+  app.onmessage(
+    JSON.stringify({ t: 'ops', set: [{ id: 'nope', role: 'user', text: 'x' }] })
+  )
+  assert.equal(viewer.got.length, seen)
+  // A viewer joining now gets the whole conversation, and no ended stream
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  const lateSnap = late.got.find((m) => m.t === 'snap')
+  assert.deepEqual(
+    lateSnap.msgs.map((m) => m.text),
+    ['Hi', 'Hello']
+  )
+  assert.equal(
+    late.got.some((m) => m.t === 'stream'),
+    false
+  )
+})
+
+test('messages keep what Hi-chat shows, and nothing else', () => {
+  const clean = cleanSnapshot({
+    msgs: [
+      {
+        id: 'a',
+        role: 'assistant',
+        text: 'x',
+        stopped: true,
+        files: ['notes.pdf', 5],
+        images: ['a.0', 'bad key!'],
+        review: {
+          verdict: 'approved',
+          verifier: 'v',
+          sources: [
+            { title: 'Docs', url: 'https://example.com' },
+            { title: 'Bad', url: 'javascript:alert(1)' },
+          ],
+          secret: 'no',
+        },
+        tools: [{ name: 'search', pending: true, args: 'no' }],
+      },
+    ],
+  })
+  assert.deepEqual(clean.msgs[0], {
+    id: 'a',
+    role: 'assistant',
+    text: 'x',
+    files: ['notes.pdf'],
+    images: ['a.0'],
+    stopped: true,
+    review: {
+      verdict: 'approved',
+      fallback: undefined,
+      verifier: 'v',
+      webStatus: undefined,
+      sources: [{ title: 'Docs', url: 'https://example.com' }],
+    },
+    tools: [{ name: 'search', pending: true }],
+  })
+})
+
+test('screenshots and Accuracy progress reach viewers, late ones too', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(viewer, 'view')
+  const src = 'data:image/jpeg;base64,AAAA'
+  app.onmessage(JSON.stringify({ t: 'img', key: 'u1.0', src }))
+  app.onmessage(JSON.stringify({ t: 'img', key: 'u1.1', src: 'javascript:x' }))
+  app.onmessage(JSON.stringify({ t: 'phase', phase: 'drafting' }))
+  assert.deepEqual(
+    viewer.got.filter((m) => m.t === 'img'),
+    [{ t: 'img', key: 'u1.0', src }]
+  )
+  assert.deepEqual(viewer.got.at(-1), { t: 'phase', phase: 'drafting' })
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  assert.ok(late.got.some((m) => m.t === 'img' && m.key === 'u1.0'))
+  assert.ok(late.got.some((m) => m.t === 'phase' && m.phase === 'drafting'))
+  app.onmessage(JSON.stringify({ t: 'phase', phase: 'bogus' }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'phase', phase: null })
+})
+
+test('pings get a pong that echoes their time', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(viewer, 'view')
+  viewer.onmessage(JSON.stringify({ t: 'ping', n: 123.5 }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'pong', n: 123.5 })
+  app.onmessage('{"t":"ping"}')
+  assert.deepEqual(app.got.at(-1), { t: 'pong' })
+})

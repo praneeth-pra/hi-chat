@@ -7,6 +7,8 @@
 export type CameraStatus = {
   connected: boolean // to Hi-chat's server
   viewers: number // Meet tabs receiving the camera
+  /** Another page took the camera over: this one stopped for good */
+  replaced?: boolean
 }
 
 const MAX_VIDEO_BITRATE = 2_500_000
@@ -183,10 +185,18 @@ export function startCameraSender({
       }
       queue = queue.then(() => onSignal(m)).catch(() => {})
     }
-    socket.onclose = () => {
+    socket.onclose = (e?: { code?: number }) => {
       if (ws !== socket) return
       ws = null
       for (const id of [...peers.keys()]) drop(id)
+      // Replaced by a newer camera page (relay/camera.mjs): stop, rather than
+      // reconnect and take the camera back from it, over and over
+      if (e?.code === 4000) {
+        stopped = true
+        clearInterval(ping)
+        onStatus({ connected: false, viewers: 0, replaced: true })
+        return
+      }
       status()
       if (stopped) return
       retry = setTimeout(connect, retryMs)

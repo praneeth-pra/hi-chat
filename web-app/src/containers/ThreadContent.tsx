@@ -30,6 +30,7 @@ import {
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
+import { splitReasoning } from '@/lib/splitReasoning'
 import { createImageAttachment } from '@/types/attachment'
 import {
   Dialog,
@@ -144,40 +145,10 @@ export const ThreadContent = memo(
       }, new Map<string, string>())
     }, [item.metadata])
 
-    const { reasoningSegment, textSegment } = useMemo(() => {
-      // Check for thinking formats
-      const hasThinkTag = text.includes('<think>') && !text.includes('</think>')
-      const hasAnalysisChannel =
-        text.includes('<|channel|>analysis<|message|>') &&
-        !text.includes('<|start|>assistant<|channel|>final<|message|>')
-
-      if (hasThinkTag || hasAnalysisChannel)
-        return { reasoningSegment: text, textSegment: '' }
-
-      // Check for completed think tag format
-      const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/)
-      if (thinkMatch?.index !== undefined) {
-        const splitIndex = thinkMatch.index + thinkMatch[0].length
-        return {
-          reasoningSegment: text.slice(0, splitIndex),
-          textSegment: text.slice(splitIndex),
-        }
-      }
-
-      // Check for completed analysis channel format
-      const analysisMatch = text.match(
-        /<\|channel\|>analysis<\|message\|>([\s\S]*?)<\|start\|>assistant<\|channel\|>final<\|message\|>/
-      )
-      if (analysisMatch?.index !== undefined) {
-        const splitIndex = analysisMatch.index + analysisMatch[0].length
-        return {
-          reasoningSegment: text.slice(0, splitIndex),
-          textSegment: text.slice(splitIndex),
-        }
-      }
-
-      return { reasoningSegment: undefined, textSegment: text }
-    }, [text])
+    const { reasoningSegment, textSegment } = useMemo(
+      () => splitReasoning(text),
+      [text]
+    )
 
     const getMessages = useMessages((state) => state.getMessages)
     const deleteMessage = useMessages((state) => state.deleteMessage)
@@ -254,7 +225,6 @@ export const ThreadContent = memo(
       'tool_calls' in item.metadata &&
       Array.isArray(item.metadata.tool_calls) &&
       item.metadata.tool_calls.length
-
 
     return (
       <Fragment>
@@ -557,7 +527,7 @@ export const ThreadContent = memo(
   }
 )
 
-function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
+export function AccuracyReviewInfo({ review }: { review: AccuracyReview }) {
   return (
     <div className="text-xs text-main-view-fg/50 mt-2">
       {review.verdict === 'unverified' ? (

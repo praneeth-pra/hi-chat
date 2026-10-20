@@ -1,3 +1,4 @@
+import { mirrorStreamTap } from '@/lib/remoteMirror'
 import { raceAutoAnswers } from '@/lib/autoRace'
 import {
   getWebEvidence,
@@ -189,6 +190,13 @@ const processStreamingCompletion = async (
     flushStreamingContent,
     abortController.signal
   )
+  // The mirror gets each piece as it arrives, not when this window next
+  // draws (which a covered window barely does); a continued message is
+  // updated in place instead, and mirrored as that
+  const tapMirror = () => {
+    if (!continueFromMessageId)
+      mirrorStreamTap(activeThread.id, accumulatedTextRef.value)
+  }
   const scheduleFlush = (immediate = false) => scheduler.schedule(immediate)
 
   try {
@@ -239,6 +247,7 @@ const processStreamingCompletion = async (
       const deltaReasoning = reasoningProcessor.processReasoningChunk(part)
       if (deltaReasoning) {
         accumulatedTextRef.value += deltaReasoning
+        tapMirror()
         pendingDeltaCount += 1
         // Schedule flush for reasoning updates
         scheduleFlush()
@@ -248,6 +257,7 @@ const processStreamingCompletion = async (
         const useful = !!deltaContent.trim()
         if (timing && useful) timing.firstAnswerAt ??= Date.now()
         accumulatedTextRef.value += deltaContent
+        tapMirror()
         pendingDeltaCount += 1
         // Show the first useful text immediately; batch later tokens.
         scheduleFlush(useful && !firstAnswerFlushed)
@@ -339,8 +349,7 @@ export const useChat = () => {
 
         // Get project metadata if projectId is provided
         let projectMetadata:
-          | { id: string; name: string; updated_at: number }
-          | undefined
+          { id: string; name: string; updated_at: number } | undefined
         if (projectId) {
           const project = await serviceHub.projects().getProjectById(projectId)
           if (project) {
@@ -922,8 +931,7 @@ export const useChat = () => {
               ? anthropicConfig(useModelProvider.getState().providers)
               : {}
           let claudeDirect:
-            | Awaited<ReturnType<typeof claudeAccuracyAnswer>>
-            | undefined
+            Awaited<ReturnType<typeof claudeAccuracyAnswer>> | undefined
           if (
             claudeKey.apiKey &&
             webEvidence &&
