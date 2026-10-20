@@ -110,6 +110,7 @@ export function startRemoteMirror({
   let snapKey: unknown[] = []
   let sentStream: { id: string | null; text: string } = { id: null, text: '' }
   let sentScroll = ''
+  let scrollFrame: number | undefined
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocketImpl.OPEN) ws.send(JSON.stringify(data))
@@ -167,16 +168,22 @@ export function startRemoteMirror({
       send(update)
       sentStream = { id, text: id === null ? '' : text }
     }
-    // Where the chat is scrolled to, so the viewer scrolls with it
+    sendScroll()
+  }
+
+  // Where the chat is scrolled to, so the viewer scrolls with it
+  function sendScroll() {
+    scrollFrame = undefined
+    if (!viewers || ws?.readyState !== WebSocketImpl.OPEN) return
+    if (globalThis.document?.hidden) return
     const scroller = globalThis.document?.querySelector<HTMLElement>(
       '[data-thread-scroller]'
     )
-    if (scroller && !globalThis.document?.hidden) {
-      const scroll = JSON.stringify(readScroll(scroller))
-      if (scroll !== sentScroll) {
-        sentScroll = scroll
-        ws.send(scroll)
-      }
+    if (!scroller) return
+    const scroll = JSON.stringify(readScroll(scroller))
+    if (scroll !== sentScroll) {
+      sentScroll = scroll
+      ws.send(scroll)
     }
   }
 
@@ -232,7 +239,11 @@ export function startRemoteMirror({
   // Scrolling the chat (scroll events don't bubble, so listen while capturing)
   const onScroll = (e: Event) => {
     const target = e.target as HTMLElement | null
-    if (target?.matches?.('[data-thread-scroller]')) schedule()
+    // Sent on the next frame rather than batched, so the viewer keeps up
+    if (!target?.matches?.('[data-thread-scroller]') || scrollFrame) return
+    scrollFrame = globalThis.requestAnimationFrame
+      ? globalThis.requestAnimationFrame(sendScroll)
+      : (setTimeout(sendScroll, 16) as unknown as number)
   }
   globalThis.document?.addEventListener('scroll', onScroll, true)
   const unsubscribe = [
