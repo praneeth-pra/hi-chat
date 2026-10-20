@@ -3,7 +3,6 @@ export const route = {
   home: '/',
   appLogs: '/logs',
   mirror: '/mirror',
-  camera: '/camera',
   project: '/project',
   projectDetail: '/project/$projectId',
   settings: {

@@ -151,7 +151,7 @@ somewhere else:
 
 - On the remote laptop, open `/mirror` in Chrome (signed in), open the
   **Camera** panel and press Start sending. It can start by itself each time
-  the page opens. `/camera` opens the same page with the panel shown.
+  the page opens.
 - On the computer that joins Meet, download the extension from the panel's
   "Set up Meet on the other computer" section,
   unzip it, and load it in `chrome://extensions` (Developer mode, Load

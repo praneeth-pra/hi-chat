@@ -9,9 +9,9 @@ import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
 
 export const MIRROR_PATH = '/mirror'
-// The remote laptop's pages: they follow the conversation or send the camera,
-// so they never send a conversation of their own over the real one
-const NOT_SENDING = [MIRROR_PATH, '/camera']
+// The remote laptop's page follows the conversation and sends the camera, so
+// it never sends a conversation of its own over the real one
+const NOT_SENDING = [MIRROR_PATH]
 const PUSH_MS = 40
 const PING_MS = 30_000
 const MAX_MESSAGES = 200

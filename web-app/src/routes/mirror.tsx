@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils'
 // The remote mirror's viewer: open /mirror on another signed-in computer to
 // follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
-// computer running Hi-chat (see lib/remoteCamera.ts); /camera opens it.
+// computer running Hi-chat (see lib/remoteCamera.ts).
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.mirror as any)({
