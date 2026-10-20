@@ -1,0 +1,58 @@
+name: Deploy image
+
+# Builds the site's Docker image here on GitHub and pushes it to GitHub's
+# container registry, so Railway only pulls and runs it. A Railway build
+# outage then no longer holds a release back.
+#
+# Railway's service source is the image ghcr.io/praneeth-pra/hi-chat:production.
+# With the RAILWAY_TOKEN secret set (a Railway project token), each push to
+# main redeploys it at once; without it, the image is only pushed.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-image
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub's container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:production
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Redeploy on Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "RAILWAY_TOKEN isn't set: image pushed, Railway not redeployed"
+            exit 0
+          fi
+          npx -y @railway/cli@latest redeploy --service a0341971-2a26-4cf7-b854-2afb1328c628 --yes
