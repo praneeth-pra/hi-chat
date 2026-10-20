@@ -53,3 +53,6 @@ round roving => round robin
 Nokta => Okta
 Elastic Box OS => Elastic Block Storage
 separate the rights => separate the writes
+EK => EKS
+EKs => EKS
+E K S => EKS

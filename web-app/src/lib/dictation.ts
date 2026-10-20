@@ -415,7 +415,18 @@ function ensureMic(): Promise<Mic> {
   return opening
 }
 
+/**
+ * The Mac and Windows apps allow the mic for Hi-chat themselves, without
+ * asking, but their web views still report it as "prompt". Taking that at
+ * its word left the mic shut until the first dictation, which then lost its
+ * first words while the mic opened.
+ */
+const inHiChatApp = () =>
+  typeof navigator !== 'undefined' &&
+  /HiChat(Mac|Windows)/.test(navigator.userAgent)
+
 async function micAllowed(): Promise<boolean> {
+  if (inHiChatApp()) return true
   try {
     const status = await navigator.permissions.query({
       name: 'microphone' as PermissionName,

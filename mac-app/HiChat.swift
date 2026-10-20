@@ -28,7 +28,8 @@
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
 // With a monitor connected the window goes on it, otherwise on the laptop's
-// own screen (see placeOnHomeScreen).
+// own screen (see placeOnHomeScreen). Unplugging the monitor hides it until
+// the monitor is back or you open Hi-chat (see monitorsChanged).
 //
 // Hi-chat sits in the menu bar at the top (its H logo); its Dock icon is off
 // unless "Show in Dock" is ticked in that menu.
@@ -153,6 +154,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    hiddenWithMonitor = false
     placeOnHomeScreen()
     panel.makeKeyAndOrderFront(nil)
     return true
@@ -211,6 +213,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.center()
     panel.setFrameAutosaveName("HiChatWindow")
     placeOnHomeScreen()
+    hadMonitor = AppController.monitorConnected()
     panel.orderFrontRegardless()
     // A monitor plugged in or out: wait for macOS to settle the screens first
     NotificationCenter.default.addObserver(
@@ -220,13 +223,40 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   @objc func screensChanged(_ notification: Notification) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-      self?.placeOnHomeScreen()
+      self?.monitorsChanged()
     }
   }
+
+  /// Whether a monitor was connected at the last check.
+  var hadMonitor = false
+  /// Hidden because its monitor was unplugged; it comes back with the monitor.
+  var hiddenWithMonitor = false
+
+  /// Plugged in: Hi-chat goes on the monitor (back in view if unplugging hid
+  /// it). Unplugged: Hi-chat hides rather than landing on the laptop's
+  /// screen; opening it from the menu bar or a shortcut shows it there.
+  func monitorsChanged() {
+    let monitor = AppController.monitorConnected()
+    let had = hadMonitor
+    hadMonitor = monitor
+    if monitor {
+      placeOnHomeScreen()
+      if hiddenWithMonitor {
+        hiddenWithMonitor = false
+        panel.orderFrontRegardless()
+      }
+    } else if had, panel.isVisible, !panel.styleMask.contains(.fullScreen) {
+      hiddenWithMonitor = true
+      panel.orderOut(nil)
+    }
+  }
+
+  static func monitorConnected() -> Bool { NSScreen.screens.contains { !isBuiltIn($0) } }
 
   @objc func reloadPage(_ sender: Any?) { webView.reload() }
 
   @objc func showChat(_ sender: Any?) {
+    hiddenWithMonitor = false
     placeOnHomeScreen()
     panel.makeKeyAndOrderFront(nil)
   }
@@ -486,6 +516,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   /// activating it, so the app you're in stays active.
   func bringUp() {
     if panel.isMiniaturized { panel.deminiaturize(nil) }
+    hiddenWithMonitor = false
     placeOnHomeScreen()
     panel.orderFrontRegardless()
   }
