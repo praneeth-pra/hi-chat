@@ -35,12 +35,13 @@
 // %LOCALAPPDATA%\Programs\Hi-chat with a Start menu entry. New versions:
 // Hi-chat asks once when one is out, then swaps itself and restarts.
 //
-// Build: .github/workflows/windows-app.yml (dotnet publish, one Hi-chat.exe).
+// Build: .github/workflows/windows-app.yml (dotnet build, one Hi-chat.exe of
+// about 1 MB on .NET Framework 4.8, which Windows 10 and 11 come with; see
+// Compat.cs for what stands in for the .NET 8 parts).
 
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Win32;
@@ -87,6 +88,15 @@ static class App
   [STAThread]
   static void Main(string[] args)
   {
+    // WebView2's DLLs are inside Hi-chat.exe: load them from there. Before
+    // anything that uses them, so Run is its own method.
+    Packed.Use();
+    Run(args);
+  }
+
+  [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+  static void Run(string[] args)
+  {
     // After an update: the old copy is still quitting.
     var after = Array.IndexOf(args, "--after");
     if (after >= 0 && after + 1 < args.Length && int.TryParse(args[after + 1], out var pid))
@@ -111,9 +121,11 @@ static class App
       return;
     }
     if (InstallIfNeeded()) return;
+    // WebView2's loader, packed into Hi-chat.exe, from where Packed wrote it
+    if (Packed.LoaderFolder() is { } loader) CoreWebView2Environment.SetLoaderDllFolderPath(loader);
     try { File.Delete(InstalledExe + ".old"); } catch { }
 
-    Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+    // Per-monitor DPI comes from app.manifest
     Application.EnableVisualStyles();
     Application.SetCompatibleTextRenderingDefault(false);
     var window = new ChatWindow();
@@ -140,14 +152,14 @@ static class App
   /// Start menu entry and start that copy. True when this copy should quit.
   static bool IsInstalledCopy()
   {
-    var here = Environment.ProcessPath;
+    var here = Compat.ExePath;
     return here == null || string.Equals(Path.GetFullPath(here), InstalledExe, StringComparison.OrdinalIgnoreCase);
   }
 
   static bool InstallIfNeeded()
   {
     if (IsInstalledCopy()) return false;
-    var here = Environment.ProcessPath!;
+    var here = Compat.ExePath!;
     try
     {
       Directory.CreateDirectory(InstallDir);
@@ -198,7 +210,7 @@ sealed class Settings
 
   static Settings Load()
   {
-    try { return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new(); }
+    try { return Json.Read<Settings>(File.ReadAllText(FilePath)) ?? new(); }
     catch { return new(); }
   }
 
@@ -207,7 +219,7 @@ sealed class Settings
     try
     {
       Directory.CreateDirectory(App.DataDir);
-      File.WriteAllText(FilePath, JsonSerializer.Serialize(this));
+      File.WriteAllText(FilePath, Json.Write(this));
     }
     catch (Exception e) { Debug.WriteLine($"Hi-chat: settings not saved: {e.Message}"); }
   }
@@ -352,7 +364,7 @@ sealed class ChatWindow : Form
     BeginInvoke(() =>
     {
       Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out var pid);
-      if (pid != Environment.ProcessId) PointerForget();
+      if (pid != Compat.ProcessId) PointerForget();
     });
   }
 
@@ -423,8 +435,8 @@ sealed class ChatWindow : Form
     // Fits the screen: no bigger than it, and wholly on it
     r.Width = Math.Min(r.Width, area.Width);
     r.Height = Math.Min(r.Height, area.Height);
-    r.X = Math.Clamp(r.X, area.Left, area.Right - r.Width);
-    r.Y = Math.Clamp(r.Y, area.Top, area.Bottom - r.Height);
+    r.X = Compat.Clamp(r.X, area.Left, area.Right - r.Width);
+    r.Y = Compat.Clamp(r.Y, area.Top, area.Bottom - r.Height);
     var maximized = WindowState == FormWindowState.Maximized;
     if (maximized) WindowState = FormWindowState.Normal;
     Bounds = r;
@@ -511,7 +523,7 @@ sealed class ChatWindow : Form
   {
     using var key = Registry.CurrentUser.CreateSubKey(RunKey);
     if (OpensAtLogin()) key.DeleteValue("Hi-chat", false);
-    else key.SetValue("Hi-chat", $"\"{Environment.ProcessPath}\"");
+    else key.SetValue("Hi-chat", $"\"{Compat.ExePath}\"");
     loginItem.Checked = OpensAtLogin();
   }
 
@@ -586,26 +598,24 @@ sealed class ChatWindow : Form
     if (!Uri.TryCreate(e.Source, UriKind.Absolute, out var source) || !App.IsOurs(source)) return;
     try
     {
-      using var doc = JsonDocument.Parse(e.WebMessageAsJson);
-      var body = doc.RootElement;
-      if (body.ValueKind != JsonValueKind.Object) return;
-      if (body.TryGetProperty("dictation", out var d) && d.ValueKind == JsonValueKind.String)
+      if (Json.Object(Json.Parse(e.WebMessageAsJson)) is not { } body) return;
+      if (Json.String(body, "dictation") is { } status)
       {
-        var status = d.GetString();
         if (keys != null) keys.Dictating = status is "recording" or "starting";
         // Started from the page's own mic button or a shortcut alike
         if (status is "starting" or "recording" or "transcribing") BringUp();
       }
       // Settings > General > Check for updates
-      if (body.TryGetProperty("checkForUpdates", out var u) && u.ValueKind == JsonValueKind.True)
+      if (Json.True(body, "checkForUpdates"))
         _ = updater.Check(asked: true);
-      if (body.TryGetProperty("keyboard", out var k) && k.ValueKind == JsonValueKind.True && !Typing)
+      if (Json.True(body, "keyboard") && !Typing)
         StartTyping(focusBox: false);
       // Settings > App keys
-      if (body.TryGetProperty("shortcuts", out var c) && c.ValueKind == JsonValueKind.String)
-        ShortcutCommand(c.GetString()!, body.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String ? id.GetString() : null);
+      if (Json.String(body, "shortcuts") is { } command)
+        ShortcutCommand(command, Json.String(body, "id"));
     }
-    catch (JsonException) { }
+    catch (ArgumentException) { } // not JSON
+    catch (InvalidOperationException) { }
   }
 
   /// Settings > App keys: list, record (the next keys pressed), cancel,
@@ -633,7 +643,7 @@ sealed class ChatWindow : Form
     // Dictating or sending is asking a question: bring the window up to show it.
     if (key is "F14" or "F15") BringUp();
     _ = webView.CoreWebView2?.ExecuteScriptAsync(
-      $"window.hiChatRemote && window.hiChatRemote({JsonSerializer.Serialize(key)})");
+      $"window.hiChatRemote && window.hiChatRemote({Json.Write(key)})");
   }
 
   /// A shortcut that waited this long for the window to run it. A long wait
@@ -730,13 +740,12 @@ sealed class ChatWindow : Form
       var json = await webView.ExecuteScriptAsync(
         "(() => { const b = document.querySelector('[data-testid=\"chat-input\"]'); if (!b) return null; " +
         "const r = b.getBoundingClientRect(); return [r.left + Math.min(r.width / 2, 200), r.top + r.height / 2] })()");
-      using var doc = JsonDocument.Parse(json);
-      if (doc.RootElement.ValueKind == JsonValueKind.Array)
+      if (Json.Array(Json.Parse(json)).Select(Json.Number).ToArray() is [{ } left, { } top])
       {
         // CSS pixels to screen pixels
         var scale = webView.DeviceDpi / 96.0 * webView.ZoomFactor;
-        var x = doc.RootElement[0].GetDouble() * scale;
-        var y = doc.RootElement[1].GetDouble() * scale;
+        var x = left * scale;
+        var y = top * scale;
         target = webView.PointToScreen(new Point((int)x, (int)y));
       }
     }
@@ -813,7 +822,7 @@ sealed class ChatWindow : Form
     var url = "data:image/jpeg;base64," + Convert.ToBase64String(bytes.ToArray());
     BringUp();
     _ = webView.CoreWebView2?.ExecuteScriptAsync(
-      $"window.hiChatScreenshot && window.hiChatScreenshot({JsonSerializer.Serialize(url)})");
+      $"window.hiChatScreenshot && window.hiChatScreenshot({Json.Write(url)})");
   }
 }
 
@@ -864,19 +873,19 @@ sealed class Updater(ChatWindow app)
     {
       // The Mac app's releases are the repository's "latest"; Windows ones are
       // win-*. GitHub doesn't list them in version order, so take the highest.
-      using var doc = JsonDocument.Parse(await http.GetStringAsync(
+      var releases = Json.Parse(await http.GetStringAsync(
         $"https://api.github.com/repos/{App.Repo}/releases?per_page=100"));
-      foreach (var release in doc.RootElement.EnumerateArray())
+      foreach (var release in Json.Array(releases).Select(Json.Object))
       {
-        var tag = release.GetProperty("tag_name").GetString() ?? "";
-        if (!tag.StartsWith("win-") || release.GetProperty("draft").GetBoolean()) continue;
+        var tag = Json.String(release, "tag_name") ?? "";
+        if (!tag.StartsWith("win-") || Json.True(release, "draft")) continue;
         var candidate = tag["win-".Length..];
         if (version != null && !IsNewer(candidate, version)) continue;
         Uri? candidateExe = null, candidateSig = null;
-        foreach (var asset in release.GetProperty("assets").EnumerateArray())
+        foreach (var asset in Json.Array(Json.Get(release, "assets")).Select(Json.Object))
         {
-          var name = asset.GetProperty("name").GetString();
-          var link = asset.GetProperty("browser_download_url").GetString();
+          var name = Json.String(asset, "name");
+          var link = Json.String(asset, "browser_download_url");
           if (name == "Hi-chat.exe") Uri.TryCreate(link, UriKind.Absolute, out candidateExe);
           if (name == "Hi-chat.exe.sig") Uri.TryCreate(link, UriKind.Absolute, out candidateSig);
         }
@@ -912,17 +921,12 @@ sealed class Updater(ChatWindow app)
       }
     }
     busy = true; // one dialog at a time
-    var now = new TaskDialogButton("Update Now");
-    var later = new TaskDialogButton("Later");
-    var answer = TaskDialog.ShowDialog(app, new TaskDialogPage
-    {
-      Caption = "Hi-chat",
-      Heading = $"Hi-chat {version} is ready",
-      Text = $"Update Now installs it and restarts Hi-chat, which takes a few seconds. You have {App.Version}.",
-      Buttons = { now, later },
-    });
+    var answer = MessageBox.Show(app,
+      $"Hi-chat {version} is ready.\n\nUpdate now? It installs and restarts Hi-chat, which takes a few seconds. " +
+      $"You have {App.Version}.\n\nYes: update now. No: later.",
+      "Hi-chat", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
     busy = false;
-    if (answer == now) await Install(exe, sig);
+    if (answer == DialogResult.Yes) await Install(exe, sig);
     else
     {
       Settings.Current.SkippedVersion = version;
@@ -942,10 +946,8 @@ sealed class Updater(ChatWindow app)
 
   public static bool SignedByUs(byte[] file, byte[] signature)
   {
-    using var key = System.Security.Cryptography.ECDsa.Create();
-    key.ImportSubjectPublicKeyInfo(Convert.FromBase64String(UpdateKey), out _);
-    return key.VerifyData(file, signature, System.Security.Cryptography.HashAlgorithmName.SHA256,
-      System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence);
+    try { return P256.Verify(Convert.FromBase64String(UpdateKey), file, signature); }
+    catch (System.Security.Cryptography.CryptographicException) { return false; }
   }
 
   async Task Install(Uri url, Uri sigUrl)
@@ -953,17 +955,17 @@ sealed class Updater(ChatWindow app)
     busy = true;
     try
     {
-      var target = Environment.ProcessPath!;
+      var target = Compat.ExePath!;
       var fresh = target + ".new";
       var bytes = await http.GetByteArrayAsync(url);
       var signature = await http.GetByteArrayAsync(sigUrl);
       // A real Windows program, not an error page, and the one we signed
-      if (bytes.Length < 1_000_000 || bytes[0] != 'M' || bytes[1] != 'Z' || !SignedByUs(bytes, signature))
+      if (bytes.Length < 500_000 || bytes[0] != 'M' || bytes[1] != 'Z' || !SignedByUs(bytes, signature))
       {
         Tell("The download didn't look right. Try again with Check for updates.");
         return;
       }
-      await File.WriteAllBytesAsync(fresh, bytes);
+      File.WriteAllBytes(fresh, bytes);
       // A running program can be renamed but not overwritten: move this one
       // aside (the new one deletes it), put the new one in its place.
       var old = target + ".old";
@@ -975,7 +977,7 @@ sealed class Updater(ChatWindow app)
         File.Move(old, target);
         throw;
       }
-      Process.Start(new ProcessStartInfo(target, $"--after {Environment.ProcessId}") { UseShellExecute = false });
+      Process.Start(new ProcessStartInfo(target, $"--after {Compat.ProcessId}") { UseShellExecute = false });
       app.Quit();
     }
     catch (Exception e)
@@ -1018,7 +1020,7 @@ static class Shortcut
       case "hold" when parts.Length == 2:
         return "Hold " + ModNames.GetValueOrDefault(parts[1], parts[1]) + " + scroll";
       case "chord" when parts.Length == 3 && uint.TryParse(parts[2], out var key):
-        var mods = parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(m => ModNames.GetValueOrDefault(m, m));
+        var mods = parts[1].Split([','], StringSplitOptions.RemoveEmptyEntries).Select(m => ModNames.GetValueOrDefault(m, m));
         return string.Join(" + ", mods.Append(KeyName(key)));
       default:
         return shortcut;
@@ -1120,7 +1122,7 @@ sealed class ShortcutStore
   /// The action a tap or key press runs, if any.
   public KeyAction? ActionFor(string pressed)
   {
-    foreach (var a in Enum.GetValues<KeyAction>())
+    foreach (var a in Compat.Values<KeyAction>())
       if (Of(a).Contains(pressed)) return a;
     return null;
   }
@@ -1132,7 +1134,7 @@ sealed class ShortcutStore
   public void Set(KeyAction action, string shortcut)
   {
     var next = new Dictionary<string, string[]>(custom);
-    foreach (var other in Enum.GetValues<KeyAction>())
+    foreach (var other in Compat.Values<KeyAction>())
       if (other != action && Of(other).Contains(shortcut)) next[other.Id()] = Of(other).Where(s => s != shortcut).ToArray();
     next[action.Id()] = [shortcut];
     Save(next);
@@ -1156,12 +1158,12 @@ sealed class ShortcutStore
   }
 
   public static KeyAction? Parse(string? id) =>
-    Enum.GetValues<KeyAction>().Cast<KeyAction?>().FirstOrDefault(a => a!.Value.Id() == id);
+    Compat.Values<KeyAction>().Cast<KeyAction?>().FirstOrDefault(a => a!.Value.Id() == id);
 
   /// For the page: each action with its shortcuts as they read.
-  public string Json(KeyAction? recording) => JsonSerializer.Serialize(new
+  public string Json(KeyAction? recording) => HiChat.Json.Write(new
   {
-    actions = Enum.GetValues<KeyAction>().Select(a => new
+    actions = Compat.Values<KeyAction>().Select(a => new
     {
       id = a.Id(),
       label = a.Label(),
@@ -1248,8 +1250,8 @@ sealed class Shortcuts(ChatWindow app)
 
   void Later(Action<ChatWindow> action)
   {
-    var at = Environment.TickCount64;
-    try { app.BeginInvoke(() => { app.KeyWaited(Environment.TickCount64 - at); action(app); }); }
+    var at = Compat.TickCount64;
+    try { app.BeginInvoke(() => { app.KeyWaited(Compat.TickCount64 - at); action(app); }); }
     catch (InvalidOperationException) { }
   }
 
@@ -1305,7 +1307,7 @@ sealed class Shortcuts(ChatWindow app)
         Recorded(Shortcut.Hold(mod));
         return pass;
       }
-      lone = held.Count == 1 ? (vk, Environment.TickCount64) : null;
+      lone = held.Count == 1 ? (vk, Compat.TickCount64) : null;
       return pass;
     }
     lone = null;
@@ -1342,7 +1344,7 @@ sealed class Shortcuts(ChatWindow app)
     if (ModName(vk) is { } mod && mod == store.ScrollModifier && TouchpadScroll.Scrolling)
       Later(a => a.StopTouchpadScroll());
     if (swallowed.Remove(vk)) return true;
-    if (lone is { } l && l.key == vk && (recording != null || Environment.TickCount64 - l.at < TapMs))
+    if (lone is { } l && l.key == vk && (recording != null || Compat.TickCount64 - l.at < TapMs))
     {
       lone = null;
       if (recording is { } r) { if (r != KeyAction.Scroll) Recorded(Shortcut.Tap(vk)); }

@@ -109,7 +109,10 @@ they build unsigned.
 ## Windows app
 
 Hi-chat for Windows (`windows-app/`) is the same app in C# with WebView2,
-published as one `Hi-chat.exe` in the `win-1.0.N` releases. The first run
+published as one `Hi-chat.exe` (about 1 MB) in the `win-1.0.N` releases. It
+runs on .NET Framework 4.8, which comes with Windows 10 (1903 and later) and 11,
+so there's nothing else to install, and WebView2's DLLs are packed inside it
+(`windows-app/Compat.cs`). The first run
 installs it for your Windows user (Start menu entry, no admin). After that it
 offers each new version itself, and Check for updates is on the tray icon's menu.
 Its shortcuts:
