@@ -35,7 +35,7 @@ import { cn } from '@/lib/utils'
 // follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
 // computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
-// presents in Meet, its shared screen fills the left half of the page.
+// presents in Meet, its shared screen fills the space left of the text.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.mirror as any)({
@@ -213,8 +213,11 @@ function MirrorViewer() {
         </button>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative flex min-h-0 flex-1 flex-col lg:basis-0">
+      {/* On a laptop, three columns: the shared screen, the text, the camera
+          panel. The text sits in the middle column whatever is open; the
+          conversation scrolls across the whole width beneath the side ones */}
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)_minmax(0,1fr)] lg:grid-rows-1">
+        <div className="relative flex min-h-0 flex-1 flex-col lg:col-span-3 lg:col-start-1 lg:row-start-1">
           {/* On a phone the header has no room for the mirror's status */}
           <div className="flex justify-center border-b border-main-view-fg/5 py-1.5 sm:hidden">
             <StatusPill tone={mirror.tone} label={mirror.label} />
@@ -233,7 +236,7 @@ function MirrorViewer() {
           >
             {/* A comfortable reading width; beside a shared screen the half
                 is narrower than this anyway */}
-            <div className="mx-auto flex max-w-2xl flex-col gap-6 text-base">
+            <div className="mx-auto flex max-w-md flex-col gap-6 text-base">
               {empty && <EmptyState tone={mirror.tone} />}
               {state.msgs.map((m) => (
                 <MirrorMessage
@@ -264,14 +267,14 @@ function MirrorViewer() {
           )}
         </div>
 
-        {/* While the computer in Meet presents, its screen takes the left half */}
+        {/* While the computer in Meet presents, its screen fills the left column */}
         {cam.screen && <SharedScreen stream={cam.screen} />}
 
         {panelOpen && (
           <aside
             id="mirror-camera-panel"
             aria-label="Remote camera"
-            className="order-first max-h-[55vh] shrink-0 overflow-y-auto border-b border-main-view-fg/10 bg-main-view-fg/[0.015] p-4 lg:order-last lg:max-h-none lg:w-[360px] lg:border-b-0 lg:border-l lg:p-5"
+            className="order-first max-h-[55vh] shrink-0 overflow-y-auto border-b border-main-view-fg/10 bg-main-view p-4 lg:z-10 lg:col-start-3 lg:row-start-1 lg:max-h-none lg:w-full lg:max-w-[360px] lg:justify-self-end lg:border-b-0 lg:border-l lg:p-5"
           >
             <RemoteCameraPanel cam={cam} />
           </aside>
@@ -303,7 +306,7 @@ function SharedScreen({ stream }: { stream: MediaStream }) {
     <section
       ref={pane}
       aria-label="Shared screen"
-      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:aspect-auto lg:min-h-0 lg:flex-1 lg:basis-0 lg:border-b-0 lg:border-r"
+      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:z-10 lg:col-start-1 lg:row-start-1 lg:aspect-auto lg:min-h-0 lg:border-b-0 lg:border-r"
     >
       <video
         ref={video}
