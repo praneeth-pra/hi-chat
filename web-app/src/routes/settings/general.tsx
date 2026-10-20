@@ -28,7 +28,8 @@ import {
   importData,
   parseDataFile,
 } from '@/lib/dataTransfer'
-import { isDev } from '@/lib/utils'
+import { cn, isDev } from '@/lib/utils'
+import { RETENTION_CHOICES, useChatRetention } from '@/lib/chatRetention'
 import { checkAppForUpdates, useAppTyping } from '@/lib/remoteKeys'
 import { SystemEvent } from '@/types/events'
 import { Input } from '@/components/ui/input'
@@ -99,6 +100,8 @@ export const Route = createFileRoute(route.settings.general as any)({
 })
 
 function General() {
+  const retentionDays = useChatRetention((s) => s.days)
+  const setRetentionDays = useChatRetention((s) => s.setDays)
   const { t } = useTranslation()
   const inApp = useAppTyping((s) => s.inApp)
   const {
@@ -830,6 +833,34 @@ function General() {
 
             {/* Data */}
             <Card title="Your data">
+              <CardItem
+                title="Delete old chats"
+                description="Chats with no new message in this many days are deleted for good. Favourite chats and the open chat are kept."
+                actions={
+                  <div className="flex gap-2">
+                    {RETENTION_CHOICES.map((days) => (
+                      <Button
+                        key={days}
+                        variant="link"
+                        size="sm"
+                        className="p-0"
+                        onClick={() => setRetentionDays(days)}
+                      >
+                        <div
+                          className={cn(
+                            'cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 transition-all duration-200 ease-in-out px-2 py-1 gap-1',
+                            retentionDays === days
+                              ? 'bg-main-view-fg/25 font-medium'
+                              : 'bg-main-view-fg/10'
+                          )}
+                        >
+                          {days ? `${days} days` : 'Never'}
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                }
+              />
               <CardItem
                 title="Move your chats and settings"
                 description="Saves every chat, API key and setting in this browser to a file. Import it in another browser or the Hi-chat Mac app; chats there with the same id are replaced."
