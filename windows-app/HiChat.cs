@@ -1477,7 +1477,7 @@ sealed class TouchpadScroll(Action<int> scroll)
   }
 }
 
-/// A window over all the screens, too faint to see, that catches Windows'
+/// A window over the screen, too faint to see, that catches Windows'
 /// own scrolling of the touchpad while Alt + two fingers scroll Hi-chat.
 /// It never takes the keyboard and is up only while the fingers are down.
 sealed class ScrollShield : Form
@@ -1516,8 +1516,13 @@ sealed class ScrollShield : Form
 
   public void Cover()
   {
-    var all = SystemInformation.VirtualScreen;
-    Native.SetWindowPos(Handle, Native.HWND_TOPMOST, all.X, all.Y, all.Width, all.Height,
+    // The screen under the pointer, above its taskbar and a pixel short of
+    // the whole screen: Windows takes a window covering a whole screen for
+    // a full-screen app and shifts the taskbar out of its way
+    var screen = Screen.FromPoint(Cursor.Position);
+    var area = screen.WorkingArea;
+    if (area == screen.Bounds) area.Height -= 1;
+    Native.SetWindowPos(Handle, Native.HWND_TOPMOST, area.X, area.Y, area.Width, area.Height,
       Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
     Visible = true;
   }
@@ -1601,6 +1606,11 @@ sealed class Mirror : Form
   IntPtr thumb;
   IntPtr magnifier;
   static bool magReady;
+  bool magShown;
+  /// The pointer view's last frame, drawn off screen and then copied in
+  IntPtr frameDc, frameBmp, frameOld;
+  Size frameSize;
+  readonly Dictionary<IntPtr, Point> hotspots = new();
   readonly System.Windows.Forms.Timer tick = new() { Interval = 15 };
   Rectangle? area;
   const float Edge = 0.2f; // the pointer view pans only once the pointer is this close to its edge
@@ -1742,7 +1752,8 @@ sealed class Mirror : Form
   {
     tick.Stop();
     Unthumb();
-    if (magnifier != IntPtr.Zero) Native.ShowWindow(magnifier, Native.SW_HIDE);
+    ShowMagnifier(false);
+    FreeFrame();
     Hide();
   }
 
@@ -1751,7 +1762,8 @@ sealed class Mirror : Form
     area = null;
     if (mode == Mode.Chat)
     {
-      if (magnifier != IntPtr.Zero) Native.ShowWindow(magnifier, Native.SW_HIDE);
+      ShowMagnifier(false);
+      Invalidate(); // clears the pointer view's last frame
       Unthumb();
       if (Native.DwmRegisterThumbnail(Handle, chat.Handle, out thumb) != 0) thumb = IntPtr.Zero;
       UpdateThumb();
@@ -1759,8 +1771,6 @@ sealed class Mirror : Form
     else
     {
       Unthumb();
-      if (!StartMagnifier()) return;
-      Native.ShowWindow(magnifier, Native.SW_SHOWNA);
       Follow();
     }
     tick.Start(); // also follows the Hi-chat window's size
@@ -1847,8 +1857,80 @@ sealed class Mirror : Form
     a.X = Math.Max(full.Left, Math.Min(a.X, full.Right - w));
     a.Y = Math.Max(full.Top, Math.Min(a.Y, full.Bottom - h));
     area = a;
+    // Copying the screen keeps up with the pointer; the Magnifier, much
+    // slower, only for when the view would take in this window itself
+    if (!a.IntersectsWith(Bounds))
+    {
+      ShowMagnifier(false);
+      Blit(a, pic);
+      return;
+    }
+    if (!ShowMagnifier(true)) return;
     Native.MagSetWindowSource(magnifier, new Native.RECT { Left = a.Left, Top = a.Top, Right = a.Right, Bottom = a.Bottom });
     Native.InvalidateRect(magnifier, IntPtr.Zero, true); // redraw: the screen behind keeps changing
+  }
+
+  bool ShowMagnifier(bool show)
+  {
+    if (show && !StartMagnifier()) return false;
+    if (magnifier == IntPtr.Zero || magShown == show) return true;
+    magShown = show;
+    Native.ShowWindow(magnifier, show ? Native.SW_SHOWNA : Native.SW_HIDE);
+    return true;
+  }
+
+  /// The screen at a, with the pointer drawn on it, into the picture.
+  void Blit(Rectangle a, Rectangle pic)
+  {
+    var screen = Native.GetDC(IntPtr.Zero);
+    var dc = Native.GetDC(Handle);
+    try
+    {
+      if (frameDc == IntPtr.Zero || frameSize != a.Size)
+      {
+        FreeFrame();
+        frameDc = Native.CreateCompatibleDC(dc);
+        frameBmp = Native.CreateCompatibleBitmap(dc, a.Width, a.Height);
+        frameOld = Native.SelectObject(frameDc, frameBmp);
+        frameSize = a.Size;
+      }
+      Native.BitBlt(frameDc, 0, 0, a.Width, a.Height, screen, a.X, a.Y, Native.SRCCOPY);
+      var info = new Native.CURSORINFO { cbSize = Marshal.SizeOf<Native.CURSORINFO>() };
+      if (Native.GetCursorInfo(ref info) && (info.flags & Native.CURSOR_SHOWING) != 0 && info.hCursor != IntPtr.Zero)
+      {
+        var hot = HotSpot(info.hCursor);
+        Native.DrawIconEx(frameDc, info.pt.X - a.X - hot.X, info.pt.Y - a.Y - hot.Y, info.hCursor,
+          0, 0, 0, IntPtr.Zero, Native.DI_NORMAL);
+      }
+      Native.BitBlt(dc, pic.X, pic.Y, a.Width, a.Height, frameDc, 0, 0, Native.SRCCOPY);
+    }
+    finally
+    {
+      Native.ReleaseDC(Handle, dc);
+      Native.ReleaseDC(IntPtr.Zero, screen);
+    }
+  }
+
+  Point HotSpot(IntPtr cursor)
+  {
+    if (hotspots.TryGetValue(cursor, out var known)) return known;
+    var hot = Point.Empty;
+    if (Native.GetIconInfo(cursor, out var icon))
+    {
+      hot = new Point(icon.xHotspot, icon.yHotspot);
+      if (icon.hbmMask != IntPtr.Zero) Native.DeleteObject(icon.hbmMask);
+      if (icon.hbmColor != IntPtr.Zero) Native.DeleteObject(icon.hbmColor);
+    }
+    return hotspots[cursor] = hot;
+  }
+
+  void FreeFrame()
+  {
+    if (frameDc == IntPtr.Zero) return;
+    Native.SelectObject(frameDc, frameOld);
+    Native.DeleteObject(frameBmp);
+    Native.DeleteDC(frameDc);
+    frameDc = frameBmp = frameOld = IntPtr.Zero;
   }
 }
 
@@ -1890,6 +1972,18 @@ static class Native
 
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT { public int X, Y; }
+  public struct ICONINFO { public bool fIcon; public int xHotspot, yHotspot; public IntPtr hbmMask, hbmColor; }
+  public const uint SRCCOPY = 0x00CC0020;
+  public const int CURSOR_SHOWING = 1;
+  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+  [DllImport("user32.dll")] public static extern bool GetIconInfo(IntPtr icon, out ICONINFO info);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
+  [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
 
   [StructLayout(LayoutKind.Sequential)]
   public struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public IntPtr dwExtraInfo; }
