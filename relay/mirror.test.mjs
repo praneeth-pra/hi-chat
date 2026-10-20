@@ -221,7 +221,21 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
   }
   hub.join(viaLink, 'view', { link })
   hub.join(signedIn, 'view')
-  assert.deepEqual(viaLink.got.at(-1), { t: 'sender', on: true })
+  assert.deepEqual(viaLink.got.filter((m) => m.t === 'sender').at(-1), {
+    t: 'sender',
+    on: true,
+  })
+  // Watch-only unless the app allows the camera on its link
+  assert.deepEqual(viaLink.got.filter((m) => m.t === 'link').at(-1), {
+    t: 'link',
+    camera: false,
+  })
+  assert.equal(hub.linkCamera(link), false)
+  assert.equal(
+    signedIn.got.some((m) => m.t === 'link'),
+    false,
+    'the signed-in mirror hears nothing about links'
+  )
 
   appA.onmessage(snap([{ id: 'a', role: 'user', text: 'from A' }]))
   appB.onmessage(snap([{ id: 'b', role: 'user', text: 'from B' }]))
@@ -264,4 +278,36 @@ test('links must look like secrets', () => {
   assert.equal(hub.isLink('short'), false)
   assert.equal(hub.isLink(''), false)
   assert.equal(hub.isLink(undefined), false)
+})
+
+test("the camera on a link is the app's choice, and ends with it", () => {
+  const off = []
+  const hub = createMirrorHub({ onLinkCameraOff: (l) => off.push(l) })
+  const link = 'C'.repeat(22)
+  const app = fakeSocket()
+  hub.join(app, 'send', { link, camera: true })
+  assert.equal(hub.linkCamera(link), true)
+  // The app reconnects with the camera turned off: a link camera must end
+  app.onclose()
+  const again = fakeSocket()
+  hub.join(again, 'send', { link, camera: false })
+  assert.equal(hub.linkCamera(link), false)
+  assert.deepEqual(off, [link])
+  // Replacing the link ends its camera too
+  hub.join(fakeSocket(), 'send', { link, camera: true })
+  again.onmessage(JSON.stringify({ t: 'revoke', link }))
+  assert.deepEqual(off, [link, link])
+  assert.equal(hub.linkCamera(link), false)
+})
+
+test('pings get a pong, so idle sockets stay open', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(viewer, 'view')
+  app.onmessage('{"t":"ping"}')
+  viewer.onmessage('{"t":"ping"}')
+  assert.deepEqual(app.got.at(-1), { t: 'pong' })
+  assert.deepEqual(viewer.got.at(-1), { t: 'pong' })
 })

@@ -31,7 +31,10 @@ export function iceServers(env = process.env) {
 
 export function createCameraHub({ env = process.env, log = console.log } = {}) {
   let sender = null
+  // How the sender got in: { link } for a mirror link page, else the key
+  let senderVia = null
   const viewers = new Map() // id → socket
+  const pong = (ws, m) => m?.t === 'ping' && ws.send('{"t":"pong"}')
 
   const hello = (ws, extra) =>
     ws.send(JSON.stringify({ t: 'hello', ice: iceServers(env), ...extra }))
@@ -59,10 +62,17 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
     return null
   }
 
-  function joinSender(ws) {
-    // A newer camera page replaces the old one
+  function joinSender(ws, via) {
+    // A mirror link (no login) never takes the camera from a page with the
+    // key: it could put someone else's camera into your Meet call
+    if (sender && senderVia === null && via?.link) {
+      log('camera: link refused, a signed-in camera is sending')
+      return ws.close(4003)
+    }
+    // A newer camera page replaces the old one; it hears 4000 and stays off
     if (sender) sender.close(4000)
     sender = ws
+    senderVia = via?.link ? { link: via.link } : null
     log(`camera: sender on, ${viewers.size} viewer(s)`)
     hello(ws)
     for (const id of viewers.keys())
@@ -71,6 +81,7 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
       v.send(JSON.stringify({ t: 'sender', on: true }))
     ws.onmessage = (raw) => {
       const m = parse(raw)
+      pong(ws, m)
       const out = m && signal(m)
       const to = m && viewers.get(m.to)
       if (out && to) to.send(JSON.stringify(out))
@@ -78,6 +89,7 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
     ws.onclose = () => {
       if (sender !== ws) return
       sender = null
+      senderVia = null
       log('camera: sender off')
       for (const v of viewers.values())
         v.send(JSON.stringify({ t: 'sender', on: false }))
@@ -91,6 +103,7 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
     sender?.send(JSON.stringify({ t: 'join', from: id }))
     ws.onmessage = (raw) => {
       const m = parse(raw)
+      pong(ws, m)
       const out = m && signal(m)
       if (out && sender) sender.send(JSON.stringify({ ...out, from: id }))
     }
@@ -101,9 +114,17 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
   }
 
   return {
-    join(ws, role) {
-      if (role === 'send') joinSender(ws)
+    /** `via.link`: a sender let in by a mirror link rather than the key. */
+    join(ws, role, via) {
+      if (role === 'send') joinSender(ws, via)
       else joinViewer(ws)
+    },
+    /** Ends a camera sending through `link` (replaced, or camera turned off). */
+    dropLink(link) {
+      if (sender && senderVia?.link === link) {
+        log('camera: link camera ended')
+        sender.close(4001)
+      }
     },
     get counts() {
       return { sender: sender !== null, viewers: viewers.size }

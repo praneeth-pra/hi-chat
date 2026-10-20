@@ -91,18 +91,31 @@ jobs:
           # A mirror link's page opens without login; its socket only for a link
           # an app keeps, and so does the camera sending through it
           L=AAAAAAAAAAAAAAAAAAAAAAAA
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/m/$L)" = 200
-          curl -s http://localhost:8081/m/$L | grep -qi '<div id="root"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/m)" = 200
+          curl -s http://localhost:8081/m | grep -qi '<div id="root"'
+          # Only that page: nothing else under /m opens without login
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/m/x)" = 302
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/mirror-link?link=$L")" = 404
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/camera?role=send&link=$L")" = 401
           # The app's code loads without login; pages and APIs still don't
           test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8081/assets/$asset")" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = 302
-          # Once a signed-in app sends with the link, the link opens
-          (curl -s -o /dev/null --max-time 8 -b "$C" $WS "http://localhost:8081/api/mirror?role=send&link=$L" || true) &
+          # Once a signed-in app sends with the link, the link opens, watch-only
+          (curl -s -o /dev/null --max-time 6 -b "$C" $WS "http://localhost:8081/api/mirror?role=send&link=$L" || true) &
           sleep 2
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/mirror-link?link=$L" || true)" = 101
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/camera?role=send&link=$L")" = 401
+          wait
+          # The camera goes through a link only when its app allows it
+          (curl -s -o /dev/null --max-time 6 -b "$C" $WS "http://localhost:8081/api/mirror?role=send&link=$L&camera=1" || true) &
+          sleep 2
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=send&link=$L" || true)" = 101
+          wait
+          # Secrets in socket URLs never reach the logs
+          sleep 1
+          if docker logs jan-web-key 2>&1 | grep -q "$key"; then echo 'camera key in logs'; exit 1; fi
+          if docker logs jan-web-key 2>&1 | grep -q "$L"; then echo 'link secret in logs'; exit 1; fi
+          docker logs jan-web-key 2>&1 | grep -q 'GET /api/camera HTTP'
           # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac

@@ -144,6 +144,28 @@ and only while a viewer is open. With Hi-chat open in several windows, the
 one in front is shown. The same page has the remote camera (below): the
 **Camera** button in its header opens the panel.
 
+### Mirror links (no login)
+
+Each copy of Hi-chat (the Mac app, the Windows app, each browser) has its own
+link, from the 🔗 button in the chat header: `/m#<secret>`. It opens that
+app's conversation live on any computer without login, so treat it like a
+password. The secret is in the URL's fragment, which browsers never send, so
+it never reaches the server's logs. **New link** replaces it, ending the old
+one at once; it otherwise keeps working for 12 hours after its app closes.
+
+A link is **watch-only** unless **Camera through this link** is on in that
+popover: only then can a page opened from it send its camera and mic into
+Meet, and even then it never takes the camera from a signed-in `/mirror`.
+
+### Security notes
+
+- Set `AUTH_SECRET` in Railway to a long random value. Without it the login
+  cookie and camera key derive from `RESEND_API_KEY`. Changing it signs every
+  browser out and changes the camera key (download the extension again).
+- nginx logs paths without query strings, so the camera key in socket URLs
+  stays out of the logs; CI checks this.
+- `SPEECH_LOG_TEXT=1` writes dictated text to the logs; leave it unset.
+
 ## Remote camera
 
 Lets Google Meet on one computer use the camera and microphone of a laptop

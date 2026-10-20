@@ -8,8 +8,10 @@ import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
 import {
-  linkFromPath,
+  isLinkPath,
+  mirrorLinkCamera,
   mirrorLinkSecret,
+  onMirrorLinkCameraChanged,
   onMirrorLinkRenewed,
 } from '@/lib/mirrorLink'
 
@@ -18,7 +20,7 @@ export const MIRROR_PATH = '/mirror'
 // it never sends a conversation of its own over the real one
 const NOT_SENDING = [MIRROR_PATH]
 const notSending = (pathname: string) =>
-  NOT_SENDING.includes(pathname) || linkFromPath(pathname) !== null
+  NOT_SENDING.includes(pathname) || isLinkPath(pathname)
 const PUSH_MS = 40
 const PING_MS = 30_000
 const MAX_MESSAGES = 200
@@ -85,14 +87,17 @@ export function streamUpdate(
 export function mirrorSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
   role: 'send' | 'view',
-  link?: string
+  link?: string,
+  /** A sender's choice: may a page opened from its link send the camera */
+  camera = false
 ) {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const base = `${scheme}//${location.host}`
   const secret = link ? encodeURIComponent(link) : ''
   // A link's viewer has no login: it watches through the link's own socket
   if (role === 'view' && link) return `${base}/api/mirror-link?link=${secret}`
-  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}`
+  const own = link ? `&link=${secret}${camera ? '&camera=1' : ''}` : ''
+  return `${base}/api/mirror?role=${role}${own}`
 }
 
 /** Starts sending; returns a function that stops it. */
@@ -207,7 +212,7 @@ export function startRemoteMirror({
     if (stopped) return
     // Signed in, so it also sends to this app's own link
     const socket = new WebSocketImpl(
-      mirrorSocketUrl(location, 'send', mirrorLinkSecret())
+      mirrorSocketUrl(location, 'send', mirrorLinkSecret(), mirrorLinkCamera())
     )
     ws = socket
     socket.onopen = () => {
@@ -269,17 +274,22 @@ export function startRemoteMirror({
       globalThis.document?.removeEventListener('visibilitychange', onVisible),
     () => globalThis.document?.removeEventListener('scroll', onScroll, true),
   ]
+  // Connect again at once, for a new link or a new camera choice
+  const reconnect = () => {
+    const was = ws
+    ws = null
+    viewers = 0
+    was?.close()
+    clearTimeout(retryTimer)
+    connect()
+  }
   // "New link": end the old one, then send on the new
   unsubscribe.push(
     onMirrorLinkRenewed((old) => {
       send({ t: 'revoke', link: old })
-      const was = ws
-      ws = null
-      viewers = 0
-      was?.close()
-      clearTimeout(retryTimer)
-      connect()
-    })
+      reconnect()
+    }),
+    onMirrorLinkCameraChanged(reconnect)
   )
   const ping = setInterval(() => send({ t: 'ping' }), PING_MS)
   connect()
@@ -305,6 +315,8 @@ export type MirrorState = {
   senderOn: boolean
   /** Where Hi-chat is scrolled to; a new object for each move */
   scroll: { bottom: true } | { id: string; f: number } | null
+  /** On a link: whether its app lets this page send the camera */
+  linkCamera: boolean | null
 }
 
 export const emptyMirror: MirrorState = {
@@ -313,6 +325,7 @@ export const emptyMirror: MirrorState = {
   stream: null,
   senderOn: false,
   scroll: null,
+  linkCamera: null,
 }
 
 /**
@@ -352,6 +365,7 @@ export function applyMirrorMessage(
     return state
   }
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
+  if (m?.t === 'link') return { ...state, linkCamera: m.camera === true }
   if (m?.t === 'scroll') {
     if (m.bottom === true) return { ...state, scroll: { bottom: true } }
     if (typeof m.id === 'string' && typeof m.f === 'number')

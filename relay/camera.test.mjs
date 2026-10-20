@@ -145,3 +145,38 @@ test('the relay accepts /api/camera only with the key', async () => {
     await new Promise((r) => server.close(r))
   }
 })
+
+test('a link camera never displaces a camera with the key', () => {
+  const hub = createCameraHub(quiet)
+  const keyed = fakeSocket()
+  hub.join(keyed, 'send')
+  const viaLink = fakeSocket()
+  hub.join(viaLink, 'send', { link: 'L'.repeat(22) })
+  assert.equal(viaLink.closed, 4003)
+  assert.equal(keyed.closed, null)
+  // Once the keyed camera is gone, a link camera may send, and dropLink ends it
+  keyed.onclose()
+  const later = fakeSocket()
+  hub.join(later, 'send', { link: 'L'.repeat(22) })
+  assert.equal(later.closed, null)
+  hub.dropLink('M'.repeat(22))
+  assert.equal(later.closed, null, 'another link leaves it alone')
+  hub.dropLink('L'.repeat(22))
+  assert.equal(later.closed, 4001)
+})
+
+test('a newer camera page replaces the old one with 4000', () => {
+  const hub = createCameraHub(quiet)
+  const first = fakeSocket()
+  hub.join(first, 'send')
+  hub.join(fakeSocket(), 'send')
+  assert.equal(first.closed, 4000)
+})
+
+test('camera pings get a pong', () => {
+  const hub = createCameraHub(quiet)
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  viewer.onmessage('{"t":"ping"}')
+  assert.deepEqual(viewer.got.at(-1), { t: 'pong' })
+})

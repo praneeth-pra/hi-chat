@@ -48,7 +48,14 @@ const savedChoice = (): { cam?: string; mic?: string } => {
 
 export type CameraSender = ReturnType<typeof useCameraSender>
 
-export function useCameraSender({ link }: { link?: string } = {}) {
+export function useCameraSender({
+  link,
+  allowed = true,
+}: {
+  link?: string
+  /** On a link: whether its app lets this page send the camera */
+  allowed?: boolean
+} = {}) {
   const [key, setKey] = useState('')
   const [error, setError] = useState('')
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
@@ -56,6 +63,8 @@ export function useCameraSender({ link }: { link?: string } = {}) {
   const [micId, setMicId] = useState<string>(() => savedChoice().mic ?? '')
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [status, setStatus] = useState<CameraStatus | null>(null)
+  // Why sending stopped for good, until it's started again
+  const [ended, setEnded] = useState<CameraStatus['ended']>()
   // The screen the computer in Meet is presenting, while it presents
   const [screen, setScreen] = useState<MediaStream | null>(null)
   // The Meet call's sound (the other participants), while connected
@@ -91,9 +100,13 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     return media
   }, [camId, micId])
 
+  // A key, or a link whose app allows the camera on it
+  const ready = !!key || (!!link && allowed)
+
   const start = useCallback(async () => {
-    if (!key && !link) return
+    if (!ready) return
     setError('')
+    setEnded(undefined)
     setStarting(true)
     try {
       const media = await open()
@@ -103,7 +116,10 @@ export function useCameraSender({ link }: { link?: string } = {}) {
         stream: media,
         key,
         link,
-        onStatus: setStatus,
+        onStatus: (s) => {
+          setStatus(s)
+          if (s.ended) setEnded(s.ended)
+        },
         onScreen: setScreen,
         onCall: setCall,
       })
@@ -118,7 +134,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     } finally {
       setStarting(false)
     }
-  }, [key, link, open])
+  }, [ready, key, link, open])
 
   const stop = useCallback(() => {
     sender.current?.stop()
@@ -130,6 +146,12 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     setCall(null)
   }, [stream])
 
+  // Ended for good (taken over, or the link's camera off): let the camera go
+  useEffect(() => {
+    if (ended && sender.current) stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ended])
+
   const setAutostart = useCallback((on: boolean) => {
     setAutostartState(on)
     store(AUTOSTART, on ? '1' : null)
@@ -137,7 +159,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
 
   // Start by itself when this computer has sent before and may still use the camera
   useEffect(() => {
-    if ((!key && !link) || !autostart || sender.current) return
+    if (!ready || !autostart || sender.current) return
     navigator.permissions
       ?.query({ name: 'camera' as PermissionName })
       .then((p) => {
@@ -145,7 +167,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, link])
+  }, [ready])
 
   // A different camera or mic: swap it in without dropping Meet
   useEffect(() => {
@@ -206,7 +228,8 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     key,
     link,
     /** Whether it can send: a key, or a link to send through */
-    ready: !!(key || link),
+    ready,
+    ended,
     error,
     devices,
     camId,

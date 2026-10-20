@@ -53,6 +53,9 @@ const withoutThinking = (text: string) =>
 function useMirror(link?: string) {
   const [state, setState] = useState<MirrorState>(emptyMirror)
   const [connected, setConnected] = useState(false)
+  // A link that was replaced ("New link"), or never opened since: no use
+  // retrying the first; the second may come back when its app does
+  const [linkGone, setLinkGone] = useState<'replaced' | 'inactive' | null>(null)
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -76,9 +79,21 @@ function useMirror(link?: string) {
           // not a mirror message
         }
       }
-      socket.onclose = () => {
+      let opened = false
+      socket.addEventListener('open', () => {
+        opened = true
+        setLinkGone(null)
+      })
+      socket.onclose = (e: CloseEvent) => {
         if (ws !== socket) return
         setConnected(false)
+        if (link && e.code === 4001) {
+          setLinkGone('replaced')
+          stopped = true
+          return
+        }
+        // Refused before opening: the link isn't one an app keeps (yet)
+        if (link && !opened) setLinkGone('inactive')
         if (stopped) return
         retry = setTimeout(connect, retryMs)
         retryMs = Math.min(retryMs * 2, 15_000)
@@ -96,7 +111,7 @@ function useMirror(link?: string) {
     }
   }, [link])
 
-  return { state, connected }
+  return { state, connected, linkGone }
 }
 
 /**
@@ -104,8 +119,9 @@ function useMirror(link?: string) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected } = useMirror(link)
-  const cam = useCameraSender({ link })
+  const { state, connected, linkGone } = useMirror(link)
+  // On a link, the camera only once its app allows it (state.linkCamera)
+  const cam = useCameraSender({ link, allowed: state.linkCamera === true })
   // Open as last left; at first, open on a computer that sends its camera
   const [panelOpen, setPanelOpen] = useState(() => {
     const saved = stored(CAMERA_PANEL)
@@ -182,11 +198,16 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
     state.stream && !state.msgs.some((m) => m.id === state.stream?.id)
       ? state.stream
       : null
-  const mirror = !connected
-    ? { label: 'Reconnecting…', tone: 'waiting' as const }
-    : !state.senderOn
-      ? { label: "Hi-chat isn't open", tone: 'off' as const }
-      : { label: 'Live', tone: 'live' as const }
+  const mirror =
+    linkGone === 'replaced'
+      ? { label: 'Link replaced', tone: 'off' as const }
+      : linkGone === 'inactive'
+        ? { label: 'Link not active', tone: 'off' as const }
+        : !connected
+          ? { label: 'Reconnecting…', tone: 'waiting' as const }
+          : !state.senderOn
+            ? { label: "Hi-chat isn't open", tone: 'off' as const }
+            : { label: 'Live', tone: 'live' as const }
   const camera = cameraState(cam)
   // The Meet call's sound: on unless muted here (remembered)
   const [callMuted, setCallMuted] = useState(() => stored(CALL_MUTED) === '1')
@@ -354,7 +375,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
               style={text}
               className="mx-auto flex max-w-md flex-col gap-6 text-base lg:mx-0 lg:max-w-none"
             >
-              {empty && <EmptyState tone={mirror.tone} />}
+              {empty && <EmptyState tone={mirror.tone} gone={linkGone} />}
               {state.msgs.map((m) => (
                 <MirrorMessage
                   key={m.id}
@@ -621,13 +642,23 @@ function SharedScreen({
   )
 }
 
-function EmptyState({ tone }: { tone: 'off' | 'waiting' | 'live' }) {
+function EmptyState({
+  tone,
+  gone,
+}: {
+  tone: 'off' | 'waiting' | 'live'
+  gone?: 'replaced' | 'inactive' | null
+}) {
   const text =
-    tone === 'live'
-      ? 'No messages yet. The conversation open in Hi-chat shows here as it happens.'
-      : tone === 'off'
-        ? 'Open Hi-chat on your other computer, and its open conversation shows here live.'
-        : 'Connecting to Hi-chat…'
+    gone === 'replaced'
+      ? 'This link was replaced by a new one. Copy the new link from Hi-chat.'
+      : gone === 'inactive'
+        ? "This link isn't active. Open Hi-chat on its computer; it works again once that app is running (unless it was replaced)."
+        : tone === 'live'
+          ? 'No messages yet. The conversation open in Hi-chat shows here as it happens.'
+          : tone === 'off'
+            ? 'Open Hi-chat on your other computer, and its open conversation shows here live.'
+            : 'Connecting to Hi-chat…'
   return (
     <div className="flex flex-col items-center gap-3 py-24 text-center">
       <div className="flex size-12 items-center justify-center rounded-2xl border border-main-view-fg/10 bg-main-view-fg/[0.03] text-main-view-fg/50">

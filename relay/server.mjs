@@ -629,7 +629,10 @@ export function createRelay(options = {}) {
   // (see wsProxy.mjs)
   const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
   // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
-  const mirror = createMirrorHub()
+  // A link's camera ends when the link is replaced or its camera turned off
+  const mirror = createMirrorHub({
+    onLinkCameraOff: (link) => camera.dropLink(link),
+  })
   // Remote camera (camera.mjs): reached from Meet tabs, so the camera key
   // stands in for the login cookie
   const camera = createCameraHub({ env: options.env ?? process.env })
@@ -639,12 +642,17 @@ export function createRelay(options = {}) {
       const role = url.searchParams.get('role') === 'send' ? 'send' : 'view'
       // The camera key, or for sending from a mirror link (no login there),
       // the link itself while its app keeps it
-      const allowed =
-        cameraKeyOk(url.searchParams.get('key'), options.env ?? process.env) ||
-        (role === 'send' && mirror.isLink(url.searchParams.get('link')))
-      if (!allowed) return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      const withKey = cameraKeyOk(
+        url.searchParams.get('key'),
+        options.env ?? process.env
+      )
+      // Through a link only when its app allows the camera on it
+      const link = url.searchParams.get('link')
+      const withLink = role === 'send' && mirror.linkCamera(link)
+      if (!withKey && !withLink)
+        return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client) camera.join(client, role)
+      if (client) camera.join(client, role, withKey ? undefined : { link })
       return
     }
     // A mirror link, opened without login: it watches one app only, and only
@@ -667,9 +675,13 @@ export function createRelay(options = {}) {
         mirror.join(
           client,
           url.searchParams.get('role') === 'send' ? 'send' : 'view',
-          // A sender may name its app's link, for that link's viewers
+          // A sender may name its app's link, for that link's viewers, and
+          // whether a page opened from it may send the camera
           url.searchParams.get('role') === 'send'
-            ? { link: url.searchParams.get('link') ?? undefined }
+            ? {
+                link: url.searchParams.get('link') ?? undefined,
+                camera: url.searchParams.get('camera') === '1',
+              }
             : {}
         )
       return

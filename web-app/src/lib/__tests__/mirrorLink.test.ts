@@ -25,14 +25,21 @@ describe('mirror link', () => {
     expect(again.mirrorLinkSecret()).toBe(next)
   })
 
-  it('builds and reads link addresses', async () => {
+  it('builds and reads link addresses, the secret in the fragment', async () => {
     const m = await import('../mirrorLink')
     const secret = 'A'.repeat(24)
     expect(m.mirrorLinkUrl({ origin: 'https://hi.example' }, secret)).toBe(
-      `https://hi.example/m/${secret}`
+      `https://hi.example/m#${secret}`
     )
-    expect(m.linkFromPath(`/m/${secret}`)).toBe(secret)
-    expect(m.linkFromPath('/m/short')).toBeNull()
-    expect(m.linkFromPath('/mirror')).toBeNull()
+    expect(m.linkFromLocation({ pathname: '/m', hash: `#${secret}` })).toBe(
+      secret
+    )
+    expect(m.linkFromLocation({ pathname: '/m', hash: '#short' })).toBeNull()
+    expect(m.linkFromLocation({ pathname: '/m', hash: '' })).toBeNull()
+    expect(
+      m.linkFromLocation({ pathname: '/mirror', hash: `#${secret}` })
+    ).toBeNull()
+    expect(m.isLinkPath('/m')).toBe(true)
+    expect(m.isLinkPath('/mirror')).toBe(false)
   })
 })

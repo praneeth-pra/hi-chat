@@ -209,7 +209,8 @@ function RootLayout() {
       pathname === route.appLogs ||
       pathname === route.mirror ||
       // An app's own mirror link (lib/mirrorLink.ts)
-      pathname.startsWith('/m/')
+      pathname === '/m' ||
+      pathname === '/m/'
     )
   }
 

@@ -7,6 +7,20 @@
 export type CameraStatus = {
   connected: boolean // to Hi-chat's server
   viewers: number // Meet tabs receiving the camera
+  /**
+   * Why sending stopped for good, if it did: another page took the camera
+   * over, the link's camera was turned off or replaced, or a signed-in page
+   * is sending (a link never takes over from one)
+   */
+  ended?: 'replaced' | 'link-off' | 'in-use'
+}
+
+// Close codes from relay/camera.mjs that mean "stop", not "reconnect": two
+// pages that kept reconnecting would take the camera from each other forever
+const ENDED: Record<number, CameraStatus['ended']> = {
+  4000: 'replaced',
+  4001: 'link-off',
+  4003: 'in-use',
 }
 
 const MAX_VIDEO_BITRATE = 2_500_000
@@ -183,10 +197,17 @@ export function startCameraSender({
       }
       queue = queue.then(() => onSignal(m)).catch(() => {})
     }
-    socket.onclose = () => {
+    socket.onclose = (e?: { code?: number }) => {
       if (ws !== socket) return
       ws = null
       for (const id of [...peers.keys()]) drop(id)
+      const ended = ENDED[e?.code ?? 0]
+      if (ended) {
+        stopped = true
+        clearInterval(ping)
+        onStatus({ connected: false, viewers: 0, ended })
+        return
+      }
       status()
       if (stopped) return
       retry = setTimeout(connect, retryMs)

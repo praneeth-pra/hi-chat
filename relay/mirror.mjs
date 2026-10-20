@@ -37,11 +37,16 @@ export const LINK_RE = /^[A-Za-z0-9_-]{22,64}$/
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
 
-export function createMirrorHub({ now = Date.now } = {}) {
+export function createMirrorHub({
+  now = Date.now,
+  onLinkCameraOff = () => {},
+} = {}) {
   // '' is the signed-in /mirror, where every app sends; a link's secret
   // names its own channel, where only that app sends
   const channels = new Map()
-  const links = new Map() // secret -> { live, until }
+  // secret -> { live, until, camera }: camera is whether a page opened from
+  // the link may send its camera (off unless the app turns it on)
+  const links = new Map()
   const senderChannels = new Map() // sender socket -> its channels
 
   const channel = (name) => {
@@ -71,6 +76,9 @@ export function createMirrorHub({ now = Date.now } = {}) {
       const ch = channels.get(name)
       if (!ch) continue
       toViewers(ch, JSON.stringify({ t: 'sender', on: ch.senders.size > 0 }))
+      // A link's page hears whether it may send the camera
+      if (name)
+        toViewers(ch, JSON.stringify({ t: 'link', camera: linkCamera(name) }))
       for (const s of ch.senders) sendCount(s)
     }
   }
@@ -91,12 +99,21 @@ export function createMirrorHub({ now = Date.now } = {}) {
     return false
   }
 
+  /** Whether a page opened from `secret` may send its camera. */
+  function linkCamera(secret) {
+    return isLink(secret) && links.get(secret).camera === true
+  }
+
   function revoke(secret) {
     if (!LINK_RE.test(secret ?? '')) return
     links.delete(secret)
+    onLinkCameraOff(secret)
     const ch = channels.get(secret)
     if (!ch) return
     for (const v of [...ch.viewers]) v.close(4001)
+    // And forget what it showed
+    ch.snap = ch.stream = ch.scroll = null
+    tidy(secret)
   }
 
   function onSnap(ch, m) {
@@ -168,6 +185,7 @@ export function createMirrorHub({ now = Date.now } = {}) {
     }
     // "New link": the app's old link stops working now
     if (m?.t === 'revoke') return revoke(m.link)
+    if (m?.t === 'ping') return ws.send('{"t":"pong"}')
     const handle =
       m?.t === 'snap'
         ? onSnap
@@ -180,13 +198,16 @@ export function createMirrorHub({ now = Date.now } = {}) {
     for (const name of senderChannels.get(ws) ?? []) handle(channel(name), m)
   }
 
-  function joinSender(ws, link) {
+  function joinSender(ws, link, camera) {
     const names = [''].concat(LINK_RE.test(link ?? '') ? [link] : [])
     senderChannels.set(ws, names)
     for (const name of names) channel(name).senders.add(ws)
     if (names[1]) {
-      const l = links.get(link) ?? { live: 0, until: 0 }
+      const l = links.get(link) ?? { live: 0, until: 0, camera: false }
       l.live += 1
+      // The app's latest choice; turning it off ends a camera already on it
+      if (l.camera && !camera) onLinkCameraOff(link)
+      l.camera = camera === true
       links.set(link, l)
     }
     ws.onmessage = (data) => fromSender(ws, data)
@@ -208,7 +229,12 @@ export function createMirrorHub({ now = Date.now } = {}) {
     const name = link ?? ''
     const ch = channel(name)
     ch.viewers.add(ws)
-    ws.onmessage = () => {} // pings; viewers only listen
+    // Viewers only listen; their pings get a pong, so an idle socket stays
+    // open (nginx closes one that hears nothing for 120 s)
+    ws.onmessage = (raw) => {
+      if (typeof raw === 'string' && raw.includes('"ping"'))
+        ws.send('{"t":"pong"}')
+    }
     ws.onclose = () => {
       ch.viewers.delete(ws)
       status([name])
@@ -227,11 +253,12 @@ export function createMirrorHub({ now = Date.now } = {}) {
      * watches the signed-in /mirror, or with `link` (checked with isLink
      * first) only that app.
      */
-    join(ws, role, { link } = {}) {
-      if (role === 'send') joinSender(ws, link)
+    join(ws, role, { link, camera } = {}) {
+      if (role === 'send') joinSender(ws, link, camera)
       else joinViewer(ws, link)
     },
     isLink,
+    linkCamera,
     get counts() {
       const ch = channels.get('')
       let senders = ch?.senders.size ?? 0

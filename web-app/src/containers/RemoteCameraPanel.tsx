@@ -123,6 +123,24 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
         </p>
       </div>
 
+      {cam.link && !cam.ready && (
+        <p className="rounded-md border border-main-view-fg/10 bg-main-view-fg/[0.03] px-3 py-2 text-sm text-main-view-fg/70">
+          This link is watch-only. To send this computer's camera through it,
+          turn on <b>Camera through this link</b> in Hi-chat's link button.
+        </p>
+      )}
+      {cam.ended && !cam.stream && (
+        <p
+          role="status"
+          className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+        >
+          {cam.ended === 'replaced'
+            ? 'Another page took over the camera. Press Start sending to take it back.'
+            : cam.ended === 'in-use'
+              ? "A signed-in /mirror page is sending the camera, so this link can't."
+              : 'Hi-chat turned the camera off for this link, or gave it a new link.'}
+        </p>
+      )}
       {cam.error && (
         <p
           role="alert"

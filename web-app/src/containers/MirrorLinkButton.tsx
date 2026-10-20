@@ -5,7 +5,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { copyText, mirrorLinkUrl, renewMirrorLink } from '@/lib/mirrorLink'
+import { Switch } from '@/components/ui/switch'
+import {
+  copyText,
+  mirrorLinkCamera,
+  mirrorLinkUrl,
+  renewMirrorLink,
+  setMirrorLinkCamera,
+} from '@/lib/mirrorLink'
 import { cn } from '@/lib/utils'
 
 // This app's mirror link, in the chat header: copy it to follow this app's
@@ -16,6 +23,7 @@ export function MirrorLinkButton() {
   const [url, setUrl] = useState(() => mirrorLinkUrl(window.location))
   const [copied, setCopied] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [camera, setCamera] = useState(mirrorLinkCamera)
 
   const copy = async () => {
     if (await copyText(url)) {
@@ -55,9 +63,28 @@ export function MirrorLinkButton() {
             </span>
           </div>
           <p className="text-xs leading-relaxed text-main-view-fg/60">
-            Opens this app's conversation live, with the remote camera, on any
-            computer. No login needed, so share it only with yourself.
+            Opens this app's conversation live on any computer, without login.
+            Anyone with the link can watch it, so keep it to yourself.
           </p>
+          <label className="flex items-start justify-between gap-3 rounded-md bg-main-view-fg/[0.03] px-2.5 py-2 text-xs">
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium text-main-view-fg/80">
+                Camera through this link
+              </span>
+              <span className="text-main-view-fg/55">
+                Lets the link's page send its camera and mic into Meet as you.
+                Off: watch only.
+              </span>
+            </span>
+            <Switch
+              checked={camera}
+              onCheckedChange={(on) => {
+                setCamera(on)
+                setMirrorLinkCamera(on)
+              }}
+              aria-label="Camera through this link"
+            />
+          </label>
           <div className="flex gap-1.5">
             <input
               readOnly
