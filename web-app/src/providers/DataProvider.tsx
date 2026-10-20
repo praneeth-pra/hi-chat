@@ -14,6 +14,7 @@ import { AppEvent, events } from '@janhq/core'
 import { SystemEvent } from '@/types/events'
 import { getModelToStart } from '@/utils/getModelToStart'
 import { tidyThreads, useEmptyThreadCleanup } from '@/hooks/useThreadHygiene'
+import { deleteOldChats } from '@/lib/chatRetention'
 
 export function DataProvider() {
   const { setProviders, selectedModel, selectedProvider, getProviderByName } =
@@ -93,8 +94,15 @@ export function DataProvider() {
         setThreads(threads)
         // Name, count and drop empty chats (reads storage once per chat)
         tidyThreads()
+        deleteOldChats()
       })
   }, [serviceHub, setThreads])
+
+  // Settings > General > Delete old chats, checked again every hour
+  useEffect(() => {
+    const every = setInterval(() => deleteOldChats(), 60 * 60 * 1000)
+    return () => clearInterval(every)
+  }, [])
 
   useEmptyThreadCleanup()
 
