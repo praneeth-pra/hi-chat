@@ -1477,7 +1477,7 @@ sealed class TouchpadScroll(Action<int> scroll)
   }
 }
 
-/// A window over all the screens, too faint to see, that catches Windows'
+/// A window over the screen, too faint to see, that catches Windows'
 /// own scrolling of the touchpad while Alt + two fingers scroll Hi-chat.
 /// It never takes the keyboard and is up only while the fingers are down.
 sealed class ScrollShield : Form
@@ -1516,8 +1516,13 @@ sealed class ScrollShield : Form
 
   public void Cover()
   {
-    var all = SystemInformation.VirtualScreen;
-    Native.SetWindowPos(Handle, Native.HWND_TOPMOST, all.X, all.Y, all.Width, all.Height,
+    // The screen under the pointer, above its taskbar and a pixel short of
+    // the whole screen: Windows takes a window covering a whole screen for
+    // a full-screen app and shifts the taskbar out of its way
+    var screen = Screen.FromPoint(Cursor.Position);
+    var area = screen.WorkingArea;
+    if (area == screen.Bounds) area.Height -= 1;
+    Native.SetWindowPos(Handle, Native.HWND_TOPMOST, area.X, area.Y, area.Width, area.Height,
       Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
     Visible = true;
   }
