@@ -5,6 +5,7 @@ import {
   emptyMirror,
   mirrorMessages,
   mirrorSocketUrl,
+  readScroll,
   startRemoteMirror,
   streamUpdate,
 } from '../remoteMirror'
@@ -83,6 +84,39 @@ describe('remote mirror', () => {
     expect(streamUpdate({ id: 'a', text: 'He' }, null, '')).toEqual({
       t: 'stream',
       id: null,
+    })
+  })
+
+  it('reads where the chat is scrolled to, by message', () => {
+    const el = document.createElement('div')
+    const box = (top: number, height: number) =>
+      ({ top, bottom: top + height, height }) as DOMRect
+    el.getBoundingClientRect = () => box(100, 500)
+    Object.defineProperties(el, {
+      scrollHeight: { value: 3000 },
+      clientHeight: { value: 500 },
+      scrollTop: { value: 1000, writable: true },
+    })
+    const tops = { u1: -300, a1: 0, u2: 400 } as Record<string, number>
+    for (const [id, top] of Object.entries(tops)) {
+      const m = document.createElement('div')
+      m.dataset.testId = `message-${id[0] === 'u' ? 'user' : 'assistant'}-${id}`
+      m.getBoundingClientRect = () => box(top, 400)
+      el.append(m)
+    }
+    // a1 runs from 0 to 400, and the view's top is at 100: a quarter in
+    expect(readScroll(el)).toEqual({ t: 'scroll', id: 'a1', f: 0.25 })
+    el.scrollTop = 2490
+    expect(readScroll(el)).toEqual({ t: 'scroll', bottom: true })
+  })
+
+  it('viewer state keeps where Hi-chat is scrolled to', () => {
+    let s = applyMirrorMessage(emptyMirror, { t: 'scroll', id: 'a1', f: 2 })
+    expect(s.scroll).toEqual({ id: 'a1', f: 1 })
+    s = applyMirrorMessage(s, { t: 'scroll', bottom: true })
+    expect(s.scroll).toEqual({ bottom: true })
+    expect(applyMirrorMessage(s, { t: 'scroll', id: 5 }).scroll).toEqual({
+      bottom: true,
     })
   })
 
