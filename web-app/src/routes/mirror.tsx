@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconArrowDown,
   IconLayoutSidebarRightCollapse,
@@ -359,7 +359,9 @@ function EmptyState({ tone }: { tone: 'off' | 'waiting' | 'live' }) {
   )
 }
 
-function MirrorMessage({
+// Re-rendered only when its own text changes, not on every scroll or word
+// elsewhere: rendering a long chat's markdown again would lag the scroll
+const MirrorMessage = memo(function MirrorMessage({
   id,
   role,
   text,
@@ -400,4 +402,4 @@ function MirrorMessage({
       )}
     </div>
   )
-}
+})
