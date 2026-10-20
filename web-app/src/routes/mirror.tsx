@@ -35,7 +35,7 @@ import { cn } from '@/lib/utils'
 // follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
 // computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
-// presents in Meet, its shared screen fills the other half of the page.
+// presents in Meet, its shared screen fills the left half of the page.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.mirror as any)({
@@ -231,7 +231,9 @@ function MirrorViewer() {
               if (atBottom.current) setShowJump(false)
             }}
           >
-            <div className="mx-auto flex max-w-3xl flex-col gap-6 text-base">
+            {/* A comfortable reading width; beside a shared screen the half
+                is narrower than this anyway */}
+            <div className="mx-auto flex max-w-2xl flex-col gap-6 text-base">
               {empty && <EmptyState tone={mirror.tone} />}
               {state.msgs.map((m) => (
                 <MirrorMessage
@@ -262,7 +264,7 @@ function MirrorViewer() {
           )}
         </div>
 
-        {/* While the computer in Meet presents, its screen takes the other half */}
+        {/* While the computer in Meet presents, its screen takes the left half */}
         {cam.screen && <SharedScreen stream={cam.screen} />}
 
         {panelOpen && (
@@ -301,7 +303,7 @@ function SharedScreen({ stream }: { stream: MediaStream }) {
     <section
       ref={pane}
       aria-label="Shared screen"
-      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:order-none lg:aspect-auto lg:min-h-0 lg:flex-1 lg:basis-0 lg:border-b-0 lg:border-l"
+      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:aspect-auto lg:min-h-0 lg:flex-1 lg:basis-0 lg:border-b-0 lg:border-r"
     >
       <video
         ref={video}
