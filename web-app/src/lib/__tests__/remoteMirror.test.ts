@@ -192,7 +192,10 @@ describe('remote mirror', () => {
 
     it('sends nothing until someone is watching', () => {
       const ws = start()
-      expect(ws.url).toBe('wss://hi.example/api/mirror?role=send')
+      // Signed in, it also sends to this app's own mirror link
+      expect(ws.url).toMatch(
+        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}$/
+      )
       useMessages.setState({
         messages: { t1: [msg('u', 'user', 'Hi again')] },
       })
