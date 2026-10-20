@@ -33,6 +33,9 @@ CERT=682B9625A09A73286A019832714DCD49A6F2E034
 if [ -n "${HICHAT_SIGNING:-}" ]; then
   KEYS=$(mktemp -d)
   echo "$HICHAT_SIGNING" | base64 --decode | tar -xzf - -C "$KEYS"
+  # Building needs only the app certificate; the update key signs releases
+  # in the publish job alone
+  find "$KEYS" -name update.pem -delete
   KEYCHAIN="$KEYS/signing.keychain-db"
   KEYPASS=$(openssl rand -hex 16)
   security create-keychain -p "$KEYPASS" "$KEYCHAIN"

@@ -16,11 +16,16 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
+    # Pull requests build without the signing keys: their code is unreviewed,
+    # and the update key in HICHAT_SIGNING is what every installed app trusts.
+    # Keep HICHAT_SIGNING as a secret of the "release" environment, limited
+    # to main, so even a pull request that edits this file can't read it.
+    environment: ${{ github.event_name != 'pull_request' && 'release' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Build app and DMG
         env:
-          HICHAT_SIGNING: ${{ secrets.HICHAT_SIGNING }}
+          HICHAT_SIGNING: ${{ github.event_name != 'pull_request' && secrets.HICHAT_SIGNING || '' }}
         run: VERSION=1.0.${{ github.run_number }} mac-app/build.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -32,6 +37,7 @@ jobs:
     # Releases come only from main: never from a pull request or another branch
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:

@@ -23,6 +23,9 @@
 // Those are the defaults: each can be changed in Hi-chat's Settings > App
 // keys, which records the next keys you press (see ShortcutStore).
 //
+// With a monitor connected the window goes on it, otherwise on the laptop's
+// own screen (see PlaceOnHomeScreen).
+//
 // A click in Hi-chat doesn't take the keyboard from the app you're in;
 // clicking into a text box (or Z) does. Closing the window
 // keeps Hi-chat running beside the clock, so the shortcuts keep working.
@@ -179,6 +182,9 @@ static class App
 sealed class Settings
 {
   public int[]? Window { get; set; }
+  /// Where the window last was on a monitor, and on the laptop's own screen
+  public int[]? WindowOnMonitor { get; set; }
+  public int[]? WindowOnLaptop { get; set; }
   public int[]? Mirror { get; set; }
   public string? SkippedVersion { get; set; }
   /// Settings > App keys: the shortcuts changed there, by action
@@ -264,6 +270,10 @@ sealed class ChatWindow : Form
       Size = new Size(Math.Min(1000, area.Width), Math.Min(800, area.Height));
       Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
     }
+    PlaceOnHomeScreen();
+    // A monitor plugged in or out: wait for Windows to settle the screens first
+    placeTimer.Tick += (_, _) => { placeTimer.Stop(); PlaceOnHomeScreen(); };
+    SystemEvents.DisplaySettingsChanged += OnDisplaysChanged;
     Controls.Add(webView);
     mirror = new Mirror(this);
     updater = new Updater(this);
@@ -342,13 +352,77 @@ sealed class ChatWindow : Form
     });
   }
 
+  readonly System.Windows.Forms.Timer placeTimer = new() { Interval = 700 };
+
+  void OnDisplaysChanged(object? sender, EventArgs e)
+  {
+    if (IsHandleCreated) BeginInvoke(() => { placeTimer.Stop(); placeTimer.Start(); });
+  }
+
+  /// With a monitor connected Hi-chat goes on it, otherwise on the laptop's
+  /// own screen, back where it last was there. Run at start, when a monitor
+  /// is plugged in or out, and whenever Hi-chat brings its window up; a
+  /// window already on the right kind of screen stays where it is.
+  public void PlaceOnHomeScreen()
+  {
+    if (WindowState == FormWindowState.Minimized) return;
+    var builtIn = Displays.BuiltInScreens();
+    bool inside(Screen s) => builtIn.Contains(Displays.Name(s));
+    var screens = Screen.AllScreens;
+    var target = screens.Where(s => !inside(s))
+      .OrderByDescending(s => (long)s.Bounds.Width * s.Bounds.Height)
+      .FirstOrDefault() ?? screens.FirstOrDefault(inside) ?? Screen.PrimaryScreen;
+    if (target == null) return;
+    var onMonitor = !inside(target);
+    var place = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+    var now = Screen.FromRectangle(place);
+    if (now.WorkingArea.IntersectsWith(place) && inside(now) != onMonitor) return;
+
+    var area = target.WorkingArea;
+    var saved = Settings.Unpack(onMonitor ? Settings.Current.WindowOnMonitor : Settings.Current.WindowOnLaptop);
+    var r = saved is { } s && area.IntersectsWith(s)
+      ? s
+      : new Rectangle(area.X + (area.Width - place.Width) / 2, area.Y + (area.Height - place.Height) / 2,
+          place.Width, place.Height);
+    // Fits the screen: no bigger than it, and wholly on it
+    r.Width = Math.Min(r.Width, area.Width);
+    r.Height = Math.Min(r.Height, area.Height);
+    r.X = Math.Clamp(r.X, area.Left, area.Right - r.Width);
+    r.Y = Math.Clamp(r.Y, area.Top, area.Bottom - r.Height);
+    var maximized = WindowState == FormWindowState.Maximized;
+    if (maximized) WindowState = FormWindowState.Normal;
+    Bounds = r;
+    if (maximized) WindowState = FormWindowState.Maximized;
+  }
+
+  /// Keeps where the window is, for the kind of screen it's on.
+  void RememberPlace()
+  {
+    if (WindowState != FormWindowState.Normal) return;
+    var packed = Settings.Pack(Bounds);
+    Settings.Current.Window = packed;
+    if (Displays.BuiltInScreens().Contains(Displays.Name(Screen.FromControl(this))))
+      Settings.Current.WindowOnLaptop = packed;
+    else
+      Settings.Current.WindowOnMonitor = packed;
+    Settings.Current.Save();
+  }
+
+  protected override void OnResizeEnd(EventArgs e)
+  {
+    base.OnResizeEnd(e);
+    RememberPlace();
+  }
+
+  protected override void OnFormClosed(FormClosedEventArgs e)
+  {
+    SystemEvents.DisplaySettingsChanged -= OnDisplaysChanged;
+    base.OnFormClosed(e);
+  }
+
   protected override void OnFormClosing(FormClosingEventArgs e)
   {
-    if (WindowState == FormWindowState.Normal)
-    {
-      Settings.Current.Window = Settings.Pack(Bounds);
-      Settings.Current.Save();
-    }
+    RememberPlace();
     // Closing the window keeps Hi-chat running for the shortcuts; Quit ends it.
     if (!quitting && e.CloseReason == CloseReason.UserClosing)
     {
@@ -542,6 +616,7 @@ sealed class ChatWindow : Form
   {
     if (!Visible) Show();
     if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+    PlaceOnHomeScreen();
     Native.ForceForeground(Handle);
   }
 
@@ -552,6 +627,7 @@ sealed class ChatWindow : Form
     Native.ShowWindow(Handle, Visible && WindowState != FormWindowState.Minimized
       ? Native.SW_SHOWNA : Native.SW_SHOWNOACTIVATE);
     if (!Visible) Visible = true;
+    PlaceOnHomeScreen();
     const uint flags = Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW;
     Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, flags);
     Native.SetWindowPos(Handle, Native.HWND_NOTOPMOST, 0, 0, 0, 0, flags);
@@ -1060,6 +1136,9 @@ sealed class Shortcuts(ChatWindow app)
   const long TapMs = 500;
   /// Alt + scroll already sent the key that keeps Alt from opening menus.
   bool altMasked;
+  /// Alt + Z / X let go of Alt for the app in front while it's still held,
+  /// so Windows reads it as up until it really is.
+  bool altLetGoByUs;
   readonly ShortcutStore store = ShortcutStore.Current;
   /// Settings is waiting for the keys to use for this action; meanwhile no
   /// shortcut runs and the keys pressed go nowhere else. Set from the window.
@@ -1145,14 +1224,25 @@ sealed class Shortcuts(ChatWindow app)
     return down ? KeyDown(vk) : KeyUp(vk);
   }
 
+  /// Forgets keys let go of where the hook couldn't see it: Win + L and
+  /// Ctrl + Alt + Delete are let go on the lock screen. Left in held, they
+  /// made every later tap a chord (tapping Left Ctrl no longer dictated) and
+  /// joined every chord (Ctrl + ← read as Ctrl + Win + ←, so no mirror).
+  /// Keys whose press was swallowed never reach Windows, so they stay.
+  void ForgetLetGo(uint pressed) => held.RemoveWhere(k =>
+    k != pressed && !swallowed.Contains(k) &&
+    !(altLetGoByUs && k is Native.VK_LMENU or Native.VK_RMENU) &&
+    (Native.GetAsyncKeyState((int)k) & 0x8000) == 0);
+
   bool KeyDown(uint vk)
   {
     const bool pass = false;
+    ForgetLetGo(vk);
     var repeating = !held.Add(vk);
     if (IsModifier(vk))
     {
       if (repeating) return pass;
-      if (vk is Native.VK_LMENU or Native.VK_RMENU) altMasked = false;
+      if (vk is Native.VK_LMENU or Native.VK_RMENU) altMasked = altLetGoByUs = false;
       if (recording == KeyAction.Scroll && ModName(vk) is { } mod)
       {
         Recorded(Shortcut.Hold(mod));
@@ -1177,6 +1267,7 @@ sealed class Shortcuts(ChatWindow app)
     if (Alt && !Ctrl && !Shift && !Win && store.ActionFor(Shortcut.Chord(vk)) != null)
     {
       swallowed.Add(vk);
+      altLetGoByUs = true;
       // The app in front gets the plain letter: Alt let go first, with an
       // unused key in between so that doesn't open its menu
       Native.SendKeys(Native.VK_MASK, false, Native.VK_MASK, true,
@@ -1190,6 +1281,7 @@ sealed class Shortcuts(ChatWindow app)
   {
     const bool pass = false;
     held.Remove(vk);
+    if (vk is Native.VK_LMENU or Native.VK_RMENU) altLetGoByUs = false;
     if (ModName(vk) is { } mod && mod == store.ScrollModifier && TouchpadScroll.Scrolling)
       Later(a => a.StopTouchpadScroll());
     if (swallowed.Remove(vk)) return true;
@@ -1984,6 +2076,94 @@ sealed class Mirror : Form
     Native.DeleteDC(frameDc);
     frameDc = frameBmp = frameOld = IntPtr.Zero;
   }
+}
+
+/// Which screens are the laptop's own panel and which are monitors plugged
+/// into it, from Windows' display paths (the output each screen goes to).
+static class Displays
+{
+  const uint QDC_ONLY_ACTIVE_PATHS = 2, GET_SOURCE_NAME = 1;
+  const int ERROR_INSUFFICIENT_BUFFER = 122;
+
+  public static string Name(Screen s) => s.DeviceName.TrimEnd('\0');
+
+  /// The device names (\\.\DISPLAY1 …) of the screens shown only on a
+  /// built-in panel. Empty when Windows can't say, so nothing moves.
+  public static HashSet<string> BuiltInScreens()
+  {
+    var builtIn = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var external = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    try
+    {
+      PathInfo[] paths = [];
+      uint pathCount = 0;
+      for (var attempt = 0; attempt < 3; attempt++)
+      {
+        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out pathCount, out var modeCount) != 0) return builtIn;
+        paths = new PathInfo[pathCount];
+        var modes = new ModeInfo[modeCount];
+        var result = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+        if (result == 0) break;
+        if (result != ERROR_INSUFFICIENT_BUFFER || attempt == 2) return builtIn;
+      }
+      for (var i = 0; i < pathCount; i++)
+      {
+        var path = paths[i];
+        var source = new SourceName
+        {
+          Type = GET_SOURCE_NAME,
+          Size = (uint)Marshal.SizeOf<SourceName>(),
+          AdapterLow = path.SourceAdapterLow,
+          AdapterHigh = path.SourceAdapterHigh,
+          Id = path.SourceId,
+          GdiName = "",
+        };
+        if (DisplayConfigGetDeviceInfo(ref source) != 0) continue;
+        // Internal, embedded DisplayPort or embedded UDI: a laptop's own panel
+        var panel = path.OutputTechnology is 0x80000000 or 11 or 13;
+        (panel ? builtIn : external).Add(source.GdiName.TrimEnd('\0'));
+      }
+    }
+    catch (Exception e) { Debug.WriteLine($"Hi-chat: displays not read: {e.Message}"); }
+    // A screen duplicated onto a monitor counts as the monitor
+    builtIn.ExceptWith(external);
+    return builtIn;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  struct PathInfo
+  {
+    public uint SourceAdapterLow;
+    public int SourceAdapterHigh;
+    public uint SourceId, SourceModeIndex, SourceFlags;
+    public uint TargetAdapterLow;
+    public int TargetAdapterHigh;
+    public uint TargetId, TargetModeIndex, OutputTechnology, Rotation, Scaling,
+      RefreshNumerator, RefreshDenominator, ScanLineOrdering;
+    public int TargetAvailable;
+    public uint TargetFlags, Flags;
+  }
+
+  // Only passed through: 64 bytes, as Windows lays it out
+  [StructLayout(LayoutKind.Sequential, Size = 64)]
+  struct ModeInfo { public uint InfoType; }
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct SourceName
+  {
+    public uint Type, Size, AdapterLow;
+    public int AdapterHigh;
+    public uint Id;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string GdiName;
+  }
+
+  [DllImport("user32.dll")]
+  static extern int GetDisplayConfigBufferSizes(uint flags, out uint pathCount, out uint modeCount);
+  [DllImport("user32.dll")]
+  static extern int QueryDisplayConfig(uint flags, ref uint pathCount, [Out] PathInfo[] paths,
+    ref uint modeCount, [Out] ModeInfo[] modes, IntPtr topology);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  static extern int DisplayConfigGetDeviceInfo(ref SourceName request);
 }
 
 static class Native
