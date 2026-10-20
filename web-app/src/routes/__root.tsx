@@ -207,7 +207,8 @@ function RootLayout() {
       pathname === route.localApiServerlogs ||
       pathname === route.systemMonitor ||
       pathname === route.appLogs ||
-      pathname === route.mirror
+      pathname === route.mirror ||
+      pathname === route.camera
     )
   }
 

@@ -83,6 +83,11 @@ jobs:
           WS='-H Connection:Upgrade -H Upgrade:websocket -H Sec-WebSocket-Version:13 -H Sec-WebSocket-Key:dGhlIHNhbXBsZSBub25jZQ=='
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS 'http://localhost:8081/api/mirror?role=view')" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -b "$C" $WS 'http://localhost:8081/api/mirror?role=view' || true)" = 101
+          # The remote camera's socket needs the camera key; its key needs login
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS 'http://localhost:8081/api/camera?role=view&key=wrong')" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/camera-key)" = 401
+          key=$(curl -sf -X POST -b "$C" -H 'Origin: http://localhost:8081' http://localhost:8081/api/camera-key | sed -n 's/.*"key":"\([0-9a-f]*\)".*/\1/p')
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=view&key=$key" || true)" = 101
           # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac
