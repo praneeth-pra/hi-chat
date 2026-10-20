@@ -248,8 +248,19 @@ function MirrorViewer() {
 function SharedScreen({ stream }: { stream: MediaStream }) {
   const pane = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
+  const [picture, setPicture] = useState(false)
   useEffect(() => {
-    if (video.current) video.current.srcObject = stream
+    const el = video.current
+    if (!el) return
+    setPicture(false)
+    el.srcObject = stream
+    el.play().catch(() => {})
+    // The lane is set up before anything is presented: play again once
+    // frames start
+    const track = stream.getVideoTracks()[0]
+    const again = () => el.play().catch(() => {})
+    track?.addEventListener('unmute', again)
+    return () => track?.removeEventListener('unmute', again)
   }, [stream])
 
   return (
@@ -263,8 +274,15 @@ function SharedScreen({ stream }: { stream: MediaStream }) {
         autoPlay
         muted
         playsInline
+        onResize={() => setPicture(true)}
+        onPlaying={() => setPicture(true)}
         className="size-full object-contain"
       />
+      {!picture && (
+        <span className="absolute inset-0 flex items-center justify-center text-sm text-white/60">
+          Waiting for the picture…
+        </span>
+      )}
       <StatusPill
         tone="live"
         label="Presenting from Meet"

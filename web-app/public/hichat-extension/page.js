@@ -4,6 +4,11 @@
 // While this computer presents in Meet, it also sends the shared screen back
 // to the remote laptop's /mirror, which shows it beside the conversation.
 ;(() => {
+  // Only one copy may run: with the extension loaded twice, both would answer
+  // each other's connections and neither camera nor screen would come through
+  const root = document.documentElement
+  if (root.dataset.hichatCameraPage) return
+  root.dataset.hichatCameraPage = '1'
   const CAM = 'hichat-remote-camera'
   const MIC = 'hichat-remote-mic'
   const GROUP = 'hichat-remote'
@@ -74,6 +79,7 @@
   // /mirror. The offer from /mirror has one video lane coming this way (the
   // only m-section it receives on); the shared screen goes out on it.
   let shared = null // { source, copy }
+  const SCREEN_BITRATE = 2_500_000
   let screenSender = null
 
   /** The mid of the offer's video section that /mirror receives on. */
@@ -86,8 +92,21 @@
 
   function sendScreen() {
     const track = shared?.copy ?? null
-    screenSender?.replaceTrack(track).catch(() => {})
+    const lane = screenSender
     send({ t: 'screen', on: !!track })
+    if (!lane) return
+    lane
+      .replaceTrack(track)
+      .then(() => {
+        if (!track) return
+        // A steady bitrate from the start, so the first picture isn't starved
+        const params = lane.getParameters()
+        params.encodings = params.encodings?.length ? params.encodings : [{}]
+        params.encodings[0].maxBitrate = SCREEN_BITRATE
+        params.degradationPreference = 'maintain-resolution'
+        return lane.setParameters(params)
+      })
+      .catch(() => {})
   }
 
   function stopSharing() {
@@ -131,9 +150,7 @@
       }
       await peer.setRemoteDescription({ type: 'offer', sdp: m.sdp })
       const lane =
-        mid === null
-          ? null
-          : peer.getTransceivers().find((t) => t.mid === mid)
+        mid === null ? null : peer.getTransceivers().find((t) => t.mid === mid)
       if (lane) {
         lane.direction = 'sendonly'
         screenSender = lane.sender
@@ -214,6 +231,15 @@
         stopSharing()
         const copy = source.clone()
         copy.contentHint = 'detail'
+        // A whole Mac screen is ~3000px wide: too much to start a fresh
+        // connection with. 1080p at 15 fps reads well on /mirror
+        await copy
+          .applyConstraints({
+            width: { max: 1920 },
+            height: { max: 1080 },
+            frameRate: { max: 15 },
+          })
+          .catch(() => {})
         shared = { source, copy }
         start()
         sendScreen()
