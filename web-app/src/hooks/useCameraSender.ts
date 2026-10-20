@@ -48,7 +48,7 @@ const savedChoice = (): { cam?: string; mic?: string } => {
 
 export type CameraSender = ReturnType<typeof useCameraSender>
 
-export function useCameraSender() {
+export function useCameraSender({ link }: { link?: string } = {}) {
   const [key, setKey] = useState('')
   const [error, setError] = useState('')
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
@@ -65,8 +65,10 @@ export function useCameraSender() {
   const sender = useRef<ReturnType<typeof startCameraSender> | null>(null)
 
   useEffect(() => {
+    // A mirror link has no login, so no key: the link itself lets it send
+    if (link) return
     fetchKey().then(setKey, (e) => setError(String(e.message ?? e)))
-  }, [])
+  }, [link])
 
   const open = useCallback(async () => {
     const media = await navigator.mediaDevices.getUserMedia({
@@ -83,7 +85,7 @@ export function useCameraSender() {
   }, [camId, micId])
 
   const start = useCallback(async () => {
-    if (!key) return
+    if (!key && !link) return
     setError('')
     setStarting(true)
     try {
@@ -93,6 +95,7 @@ export function useCameraSender() {
       sender.current = startCameraSender({
         stream: media,
         key,
+        link,
         onStatus: setStatus,
         onScreen: setScreen,
       })
@@ -107,7 +110,7 @@ export function useCameraSender() {
     } finally {
       setStarting(false)
     }
-  }, [key, open])
+  }, [key, link, open])
 
   const stop = useCallback(() => {
     sender.current?.stop()
@@ -125,7 +128,7 @@ export function useCameraSender() {
 
   // Start by itself when this computer has sent before and may still use the camera
   useEffect(() => {
-    if (!key || !autostart || sender.current) return
+    if ((!key && !link) || !autostart || sender.current) return
     navigator.permissions
       ?.query({ name: 'camera' as PermissionName })
       .then((p) => {
@@ -133,7 +136,7 @@ export function useCameraSender() {
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, link])
 
   // A different camera or mic: swap it in without dropping Meet
   useEffect(() => {
@@ -192,6 +195,9 @@ export function useCameraSender() {
 
   return {
     key,
+    link,
+    /** Whether it can send: a key, or a link to send through */
+    ready: !!(key || link),
     error,
     devices,
     camId,

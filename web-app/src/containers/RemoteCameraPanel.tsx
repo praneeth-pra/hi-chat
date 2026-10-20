@@ -171,7 +171,7 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           size="lg"
           className="w-full"
           onClick={cam.start}
-          disabled={!cam.key || cam.starting}
+          disabled={!cam.ready || cam.starting}
         >
           {cam.starting ? (
             <IconLoader2 className="animate-spin" />
@@ -217,15 +217,23 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           />
         </summary>
         <div className="flex flex-col gap-3 border-t border-main-view-fg/10 px-3 py-3 text-sm text-main-view-fg/70">
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={cam.downloadExtension}
-            disabled={!cam.key}
-          >
-            <IconDownload />
-            Download the camera extension
-          </Button>
+          {cam.link ? (
+            // The extension holds the camera key, which needs a login
+            <p className="rounded-md bg-main-view-fg/[0.04] px-3 py-2 text-xs">
+              The extension's download needs a login: get it from the signed-in{' '}
+              <code>/mirror</code> page.
+            </p>
+          ) : (
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={cam.downloadExtension}
+              disabled={!cam.key}
+            >
+              <IconDownload />
+              Download the camera extension
+            </Button>
+          )}
           <ol className="list-decimal space-y-1.5 pl-5 leading-relaxed">
             <li>Unzip it.</li>
             <li>

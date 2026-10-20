@@ -636,14 +636,27 @@ export function createRelay(options = {}) {
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
     if (url.pathname === '/api/camera') {
-      if (!cameraKeyOk(url.searchParams.get('key'), options.env ?? process.env))
-        return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      const role = url.searchParams.get('role') === 'send' ? 'send' : 'view'
+      // The camera key, or for sending from a mirror link (no login there),
+      // the link itself while its app keeps it
+      const allowed =
+        cameraKeyOk(url.searchParams.get('key'), options.env ?? process.env) ||
+        (role === 'send' && mirror.isLink(url.searchParams.get('link')))
+      if (!allowed) return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client)
-        camera.join(
-          client,
-          url.searchParams.get('role') === 'send' ? 'send' : 'view'
-        )
+      if (client) camera.join(client, role)
+      return
+    }
+    // A mirror link, opened without login: it watches one app only, and only
+    // while that app keeps the link
+    if (url.pathname === '/api/mirror-link') {
+      if (!sameOriginRequest(req))
+        return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      const link = url.searchParams.get('link')
+      if (!mirror.isLink(link))
+        return socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
+      const client = acceptWebSocket(req, socket, head)
+      if (client) mirror.join(client, 'view', { link })
       return
     }
     if (url.pathname === '/api/mirror') {
@@ -653,7 +666,11 @@ export function createRelay(options = {}) {
       if (client)
         mirror.join(
           client,
-          url.searchParams.get('role') === 'send' ? 'send' : 'view'
+          url.searchParams.get('role') === 'send' ? 'send' : 'view',
+          // A sender may name its app's link, for that link's viewers
+          url.searchParams.get('role') === 'send'
+            ? { link: url.searchParams.get('link') ?? undefined }
+            : {}
         )
       return
     }

@@ -127,6 +127,14 @@ describe('remote mirror', () => {
     expect(
       mirrorSocketUrl({ protocol: 'http:', host: 'localhost:1420' }, 'send')
     ).toBe('ws://localhost:1420/api/mirror?role=send')
+    // An app sends to its own link too; a link's viewer has its own socket
+    const link = 'L'.repeat(24)
+    expect(
+      mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'send', link)
+    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}`)
+    expect(
+      mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'view', link)
+    ).toBe(`wss://hi.example/api/mirror-link?link=${link}`)
   })
 
   it('viewer state follows snapshots and streams', () => {
@@ -184,7 +192,10 @@ describe('remote mirror', () => {
 
     it('sends nothing until someone is watching', () => {
       const ws = start()
-      expect(ws.url).toBe('wss://hi.example/api/mirror?role=send')
+      // Signed in, it also sends to this app's own mirror link
+      expect(ws.url).toMatch(
+        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}$/
+      )
       useMessages.setState({
         messages: { t1: [msg('u', 'user', 'Hi again')] },
       })
