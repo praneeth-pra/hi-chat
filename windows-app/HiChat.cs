@@ -2,8 +2,9 @@
 // global shortcuts:
 //
 //   tap Left Ctrl                 dictate: tap again to stop and send
-//   tap Right Ctrl                silent screenshot of the screen the pointer
-//                                 is on, sent in Hi-chat (also saved to
+//   tap Right Ctrl                silent screenshot of the laptop's own screen
+//                                 (or, with none, the one the pointer is on),
+//                                 sent in Hi-chat (also saved to
 //                                 Pictures\Screenshots and copied)
 //   Escape while dictating        throw the recording away
 //   Z / X                         pointer to Hi-chat's message box (typing on)
@@ -781,14 +782,18 @@ sealed class ChatWindow : Form
   }
   public void HideMirror() => mirror.HideMirror();
 
-  /// Right Ctrl: the whole screen the pointer is on, without a sound or a
-  /// flash, saved to Pictures\Screenshots, copied for pasting and sent in
-  /// Hi-chat on its own.
+  /// Right Ctrl: the laptop's own screen, wherever the pointer is (a PC with
+  /// no built-in screen, or its lid closed: the screen the pointer is on),
+  /// without a sound or a flash, saved to Pictures\Screenshots, copied for
+  /// pasting and sent in Hi-chat on its own.
   public void Screenshot()
   {
     try
     {
-      var bounds = Screen.FromPoint(Cursor.Position).Bounds;
+      var builtIn = Displays.BuiltInScreens();
+      var screen = Screen.AllScreens.FirstOrDefault(s => builtIn.Contains(Displays.Name(s)))
+        ?? Screen.FromPoint(Cursor.Position);
+      var bounds = screen.Bounds;
       using var shot = new Bitmap(bounds.Width, bounds.Height);
       using (var g = Graphics.FromImage(shot))
         g.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
@@ -1055,7 +1060,7 @@ static class KeyActions
   public static string Label(this KeyAction a) => a switch
   {
     KeyAction.Dictate => "Dictate (again to stop and send)",
-    KeyAction.Screenshot => "Screenshot of the screen under the pointer",
+    KeyAction.Screenshot => "Screenshot of the laptop's screen",
     KeyAction.ToChat => "Pointer and keyboard into Hi-chat",
     KeyAction.Back => "Pointer and keyboard back",
     KeyAction.Send => "Send what's typed",

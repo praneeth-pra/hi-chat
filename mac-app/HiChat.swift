@@ -4,8 +4,9 @@
 //
 //   tap Left Control        dictate: tap again to stop and send
 //   Escape while dictating  throw the recording away
-//   tap Left Option         silent screenshot of the screen the pointer is
-//                           on, put in Hi-chat's message box (also saved where the Mac
+//   tap Left Option         silent screenshot of the laptop's own screen
+//                           (the screen the pointer is on when there is no
+//                           built-in one), put in Hi-chat's message box (also saved where the Mac
 //                           saves screenshots and copied; needs Screen
 //                           Recording)
 //   fn + Right              send what's typed in the box
@@ -679,16 +680,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   // MARK: Screenshot
 
-  /// Left Option: the whole screen the pointer is on, without a sound, saved
-  /// where the Mac saves screenshots (the Desktop unless that was changed),
-  /// copied for pasting and sent in Hi-chat on its own.
+  /// Left Option: the laptop's own screen, wherever the pointer is (a Mac
+  /// with no built-in screen, or its lid closed: the screen the pointer is
+  /// on), without a sound, saved where the Mac saves screenshots (the
+  /// Desktop unless that was changed), copied for pasting and sent in
+  /// Hi-chat on its own.
   func screenshot() {
-    var display = CGMainDisplayID()
-    var found: UInt32 = 0
-    CGGetDisplaysWithPoint(pointerNow(), 1, &display, &found)
     var displays = [CGDirectDisplayID](repeating: 0, count: 16)
     var count: UInt32 = 0
     CGGetActiveDisplayList(16, &displays, &count)
+    var display = CGMainDisplayID()
+    if let laptop = displays.prefix(Int(count)).first(where: { CGDisplayIsBuiltin($0) != 0 }) {
+      display = laptop
+    } else {
+      var found: UInt32 = 0
+      CGGetDisplaysWithPoint(pointerNow(), 1, &display, &found)
+    }
     // screencapture numbers the screens from 1, in this same order
     let number = (displays.prefix(Int(count)).firstIndex(of: display) ?? 0) + 1
     let saved = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location")
@@ -1134,7 +1141,7 @@ enum Action: String, CaseIterable {
   var label: String {
     switch self {
     case .dictate: "Dictate (again to stop and send)"
-    case .screenshot: "Screenshot of the screen under the pointer"
+    case .screenshot: "Screenshot of the laptop's screen"
     case .toChat: "Pointer and keyboard into Hi-chat"
     case .back: "Pointer and keyboard back"
     case .send: "Send what's typed"
