@@ -79,6 +79,10 @@ jobs:
           # Search stays behind login, and an unset Exa key is explicitly reported.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/search)" = 401
           curl -sf -b "$C" -H 'Content-Type: application/json' --data '{"query":"What is AWS ECS?"}' http://localhost:8081/api/search | grep -q '"status":"unconfigured"'
+          # The remote mirror's WebSocket stays behind login and upgrades once signed in
+          WS='-H Connection:Upgrade -H Upgrade:websocket -H Sec-WebSocket-Version:13 -H Sec-WebSocket-Key:dGhlIHNhbXBsZSBub25jZQ=='
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS 'http://localhost:8081/api/mirror?role=view')" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -b "$C" $WS 'http://localhost:8081/api/mirror?role=view' || true)" = 101
           # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac
