@@ -9,6 +9,9 @@ import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
 
 export const MIRROR_PATH = '/mirror'
+// The remote laptop's pages: they follow the conversation or send the camera,
+// so they never send a conversation of their own over the real one
+const NOT_SENDING = [MIRROR_PATH, '/camera']
 const PUSH_MS = 40
 const PING_MS = 30_000
 const MAX_MESSAGES = 200
@@ -64,7 +67,7 @@ export function startRemoteMirror({
     !WebSocketImpl ||
     !location ||
     !/^https?:$/.test(location.protocol) ||
-    location.pathname === MIRROR_PATH
+    NOT_SENDING.includes(location.pathname)
   )
     return () => {}
 
@@ -86,6 +89,7 @@ export function startRemoteMirror({
   function push() {
     pushTimer = undefined
     if (!viewers || ws?.readyState !== WebSocketImpl.OPEN) return
+    if (NOT_SENDING.includes(location.pathname)) return
     // With Hi-chat open in several windows, the one in front speaks; one in
     // the background only finishes a reply it is writing
     if (
