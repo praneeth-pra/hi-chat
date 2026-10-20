@@ -233,11 +233,9 @@ export function applyMirrorMessage(
     if (m.id === null) return { ...state, stream: null }
     if (typeof m.text === 'string')
       return { ...state, stream: { id: m.id, text: m.text } }
-    if (typeof m.add === 'string' && state.stream?.id === m.id)
-      return {
-        ...state,
-        stream: { id: m.id, text: state.stream.text + m.add },
-      }
+    const stream = state.stream
+    if (typeof m.add === 'string' && stream && stream.id === m.id)
+      return { ...state, stream: { id: m.id, text: stream.text + m.add } }
     return state
   }
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
