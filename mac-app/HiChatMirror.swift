@@ -150,7 +150,77 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { _ in
       MainActor.assumeIsolated { self.followPointer() }
     }
+    // Its place on a monitor and on the laptop's screen (see screensChanged)
+    for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(moved(_:)), name: name, object: panel)
+    }
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(screensChanged(_:)),
+      name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    hadMonitor = Mirror.monitorConnected()
     say("ready")
+  }
+
+  // MARK: Monitor
+
+  static func isBuiltIn(_ screen: NSScreen) -> Bool {
+    guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    else { return false }
+    return CGDisplayIsBuiltin(id.uint32Value) != 0
+  }
+
+  static func monitorConnected() -> Bool { NSScreen.screens.contains { !isBuiltIn($0) } }
+
+  static func frameKey(onMonitor: Bool) -> String {
+    onMonitor ? "MirrorOnMonitor" : "MirrorOnLaptop"
+  }
+
+  /// Whether a monitor was connected at the last check, whether the mirror
+  /// was last on a monitor, and whether unplugging that monitor hid it.
+  var hadMonitor = false
+  var onMonitor = false
+  var hiddenWithMonitor = false
+
+  /// Keeps where the mirror is for the kind of screen it's on.
+  func rememberPlace() {
+    guard let screen = panel.screen else { return }
+    onMonitor = !Mirror.isBuiltIn(screen)
+    UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Mirror.frameKey(onMonitor: onMonitor))
+  }
+
+  /// Only your own drags count: macOS moving the mirror off an unplugged
+  /// monitor must not overwrite its place there.
+  @objc func moved(_ notification: Notification) {
+    if NSEvent.pressedMouseButtons != 0 { rememberPlace() }
+  }
+
+  @objc func screensChanged(_ notification: Notification) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.monitorsChanged()
+    }
+  }
+
+  /// Unplugged while the mirror was on the monitor: it hides rather than
+  /// landing on the laptop's screen. Plugged in again: it comes back exactly
+  /// where it was.
+  func monitorsChanged() {
+    let monitor = Mirror.monitorConnected()
+    let had = hadMonitor
+    hadMonitor = monitor
+    if monitor, hiddenWithMonitor {
+      hiddenWithMonitor = false
+      let saved = NSRectFromString(
+        UserDefaults.standard.string(forKey: Mirror.frameKey(onMonitor: true)) ?? "")
+      if !saved.isEmpty, NSScreen.screens.contains(where: { $0.visibleFrame.intersects(saved) }) {
+        panel.setFrame(saved, display: true)
+      }
+      panel.orderFrontRegardless()
+      restart()
+    } else if !monitor, had, onMonitor, panel.isVisible {
+      hide()
+      hiddenWithMonitor = true
+    }
   }
 
   func handle(_ command: String, window: CGWindowID?) {
@@ -159,7 +229,9 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     case "toggle":
       if !panel.isVisible {
         mode = .jan
+        hiddenWithMonitor = false
         panel.orderFrontRegardless()
+        rememberPlace()
       } else {
         mode = mode == .jan ? .pointer : .jan
       }

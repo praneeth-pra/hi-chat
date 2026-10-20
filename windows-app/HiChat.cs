@@ -186,6 +186,8 @@ sealed class Settings
   /// Where the window last was on a monitor, and on the laptop's own screen
   public int[]? WindowOnMonitor { get; set; }
   public int[]? WindowOnLaptop { get; set; }
+  public int[]? MirrorOnMonitor { get; set; }
+  public int[]? MirrorOnLaptop { get; set; }
   public int[]? Mirror { get; set; }
   public string? SkippedVersion { get; set; }
   /// Settings > App keys: the shortcuts changed there, by action
@@ -390,6 +392,7 @@ sealed class ChatWindow : Form
       hiddenWithMonitor = true;
       Hide();
     }
+    mirror.MonitorsChanged(monitor, had);
   }
 
   /// With a monitor connected Hi-chat goes on it, otherwise on the laptop's
@@ -1887,8 +1890,44 @@ sealed class Mirror : Form
   protected override void OnResizeEnd(EventArgs e)
   {
     base.OnResizeEnd(e);
-    Settings.Current.Mirror = Settings.Pack(Bounds);
+    RememberPlace();
+  }
+
+  /// Whether the mirror was last on a monitor, and whether unplugging that
+  /// monitor hid it.
+  bool onMonitor, hiddenWithMonitor;
+
+  /// Keeps where the mirror is for the kind of screen it's on. Only on your
+  /// own drags and when it opens: Windows moving it off an unplugged monitor
+  /// must not overwrite its place there.
+  void RememberPlace()
+  {
+    var packed = Settings.Pack(Bounds);
+    onMonitor = !Displays.BuiltInScreens().Contains(Displays.Name(Screen.FromControl(this)));
+    Settings.Current.Mirror = packed;
+    if (onMonitor) Settings.Current.MirrorOnMonitor = packed;
+    else Settings.Current.MirrorOnLaptop = packed;
     Settings.Current.Save();
+  }
+
+  /// Unplugged while the mirror was on the monitor: it hides rather than
+  /// landing on the laptop's screen. Plugged in again: it comes back exactly
+  /// where it was, showing what it showed.
+  public void MonitorsChanged(bool monitor, bool hadMonitor)
+  {
+    if (monitor && hiddenWithMonitor)
+    {
+      hiddenWithMonitor = false;
+      if (Settings.Unpack(Settings.Current.MirrorOnMonitor) is { } r) Bounds = r;
+      Native.ShowWindow(Handle, Native.SW_SHOWNOACTIVATE);
+      Visible = true;
+      Restart();
+    }
+    else if (!monitor && hadMonitor && onMonitor && Visible)
+    {
+      HideMirror();
+      hiddenWithMonitor = true;
+    }
   }
 
   /// Hidden -> shows Hi-chat; Hi-chat -> the screen around the pointer; and back.
@@ -1897,8 +1936,10 @@ sealed class Mirror : Form
     if (!Visible)
     {
       mode = Mode.Chat;
+      hiddenWithMonitor = false;
       Native.ShowWindow(Handle, Native.SW_SHOWNOACTIVATE);
       Visible = true;
+      RememberPlace();
     }
     else mode = mode == Mode.Chat ? Mode.Pointer : Mode.Chat;
     Restart();
