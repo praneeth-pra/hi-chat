@@ -58,8 +58,16 @@ export function createMirrorHub() {
       const clean = cleanSnapshot(m)
       if (!clean) return
       snap = JSON.stringify(clean)
-      // A finished reply arrives as a message, so the stream ends with it
-      if (stream && clean.msgs.some((x) => x.id === stream.id)) stream = null
+      // A finished reply arrives as a message, so the stream ends with it. It
+      // is saved under a new id, so a last reply carrying on from the
+      // streamed text counts too
+      const last = clean.msgs[clean.msgs.length - 1]
+      if (
+        stream &&
+        (clean.msgs.some((x) => x.id === stream.id) ||
+          (last?.role === 'assistant' && last.text.startsWith(stream.text)))
+      )
+        stream = null
       toViewers(snap)
     } else if (m?.t === 'stream') {
       if (m.id === null) {

@@ -76,6 +76,25 @@ test('viewers get the conversation and the reply as it streams', () => {
   assert.deepEqual(hub.counts, { senders: 0, viewers: 0 })
 })
 
+test('a reply saved under a new id still ends the stream', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(fakeSocket(), 'view')
+  sender.onmessage(snap([{ id: 'u1', role: 'user', text: 'Hi' }]))
+  sender.onmessage(JSON.stringify({ t: 'stream', id: 's1', text: 'Hel' }))
+  // The chat saves the finished reply with an id the stream never had
+  sender.onmessage(
+    snap([
+      { id: 'u1', role: 'user', text: 'Hi' },
+      { id: 'a7', role: 'assistant', text: 'Hello' },
+    ])
+  )
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  assert.equal(late.got.filter((m) => m.t === 'stream').length, 0)
+})
+
 test('viewers cannot send, and bad messages are dropped', () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()

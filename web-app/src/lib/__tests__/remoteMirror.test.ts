@@ -199,6 +199,52 @@ describe('remote mirror', () => {
       ])
     })
 
+    it('follows a reply whose id changes on every update, as the chat does', () => {
+      const ws = start()
+      ws.hear({ t: 'viewers', n: 1 })
+      vi.advanceTimersByTime(100)
+      // useChat builds each streamed update, and the saved reply, with a new id
+      useAppState.setState({ streamingContent: msg('a1', 'assistant', 'He') })
+      vi.advanceTimersByTime(100)
+      useAppState.setState({
+        streamingContent: msg('a2', 'assistant', 'Hello'),
+      })
+      vi.advanceTimersByTime(100)
+      useAppState.setState({
+        streamingContent: msg('a3', 'assistant', 'Hello there'),
+      })
+      vi.advanceTimersByTime(100)
+      expect(ws.sent.slice(1)).toEqual([
+        { t: 'stream', id: 'a1', text: 'He' },
+        { t: 'stream', id: 'a1', add: 'llo' },
+        { t: 'stream', id: 'a1', add: ' there' },
+      ])
+      useMessages.setState({
+        messages: {
+          t1: [msg('u', 'user', 'Hi'), msg('a9', 'assistant', 'Hello there')],
+        },
+      })
+      useAppState.setState({ streamingContent: undefined })
+      vi.advanceTimersByTime(100)
+      expect(ws.sent.slice(4)).toEqual([
+        {
+          t: 'snap',
+          title: 'Plans',
+          msgs: [
+            { id: 'u', role: 'user', text: 'Hi' },
+            { id: 'a9', role: 'assistant', text: 'Hello there' },
+          ],
+        },
+        { t: 'stream', id: null },
+      ])
+
+      // The viewer shows the reply once, never both the stream and the reply
+      let s = emptyMirror
+      for (const m of ws.sent.slice(0, 5)) s = applyMirrorMessage(s, m)
+      expect(s.stream).toBeNull()
+      expect(s.msgs.map((m) => m.text)).toEqual(['Hi', 'Hello there'])
+    })
+
     it('does not run on the viewer page itself', () => {
       const before = FakeSocket.last
       stop = startRemoteMirror({

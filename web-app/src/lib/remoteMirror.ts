@@ -120,8 +120,15 @@ export function startRemoteMirror({
       streaming && threadId && streaming.thread_id === threadId
         ? streaming
         : undefined
-    const id = live ? live.id : null
     const text = messageText(live)
+    // The chat gives a streaming reply a new id on every update (and the
+    // saved reply another), so a reply is followed by its text: text that
+    // carries on from what the viewers have is the same reply, sent as an add
+    const id = !live
+      ? null
+      : sentStream.id !== null && text.startsWith(sentStream.text)
+        ? sentStream.id
+        : live.id
     const update = streamUpdate(sentStream, id, text)
     if (update) {
       send(update)
@@ -214,6 +221,20 @@ export const emptyMirror: MirrorState = {
   senderOn: false,
 }
 
+/**
+ * Whether these messages include the finished reply being streamed: the same
+ * id, or (as the saved reply gets a new id) a last reply that carries on from
+ * the streamed text. Keeps the viewer from showing the answer twice.
+ */
+export function endsStream(
+  msgs: { id: string; role: string; text: string }[],
+  stream: { id: string; text: string }
+) {
+  if (msgs.some((x) => x.id === stream.id)) return true
+  const last = msgs[msgs.length - 1]
+  return last?.role === 'assistant' && last.text.startsWith(stream.text)
+}
+
 /** Applies one message from the relay to what the viewer shows. */
 export function applyMirrorMessage(
   state: MirrorState,
@@ -224,9 +245,7 @@ export function applyMirrorMessage(
     const msgs = m.msgs as MirrorMessage[]
     // A finished reply arrives as a message, ending its stream
     const stream =
-      state.stream && msgs.some((x) => x.id === state.stream?.id)
-        ? null
-        : state.stream
+      state.stream && endsStream(msgs, state.stream) ? null : state.stream
     return { ...state, title: String(m.title ?? ''), msgs, stream }
   }
   if (m?.t === 'stream') {
