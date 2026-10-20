@@ -1773,6 +1773,7 @@ sealed class Mirror : Form
   public void HideMirror()
   {
     tick.Stop();
+    StopFrames();
     Unthumb();
     ShowMagnifier(false);
     FreeFrame();
@@ -1784,18 +1785,48 @@ sealed class Mirror : Form
     area = null;
     if (mode == Mode.Chat)
     {
+      StopFrames();
       ShowMagnifier(false);
       Invalidate(); // clears the pointer view's last frame
       Unthumb();
       if (Native.DwmRegisterThumbnail(Handle, chat.Handle, out thumb) != 0) thumb = IntPtr.Zero;
       UpdateThumb();
+      tick.Start(); // follows the Hi-chat window's size
     }
     else
     {
+      tick.Stop();
       Unthumb();
       Follow();
+      StartFrames();
     }
-    tick.Start(); // also follows the Hi-chat window's size
+  }
+  /// Pointer view: one new frame per screen refresh (DwmFlush waits for the
+  /// next one), instead of the timer's ~16-30 ms that left it lagging behind
+  /// the pointer. A frame is only asked for once the last one is drawn.
+  int frameGen, frameWanted;
+  void StartFrames()
+  {
+    var gen = ++frameGen;
+    var thread = new Thread(() =>
+    {
+      var clock = new Stopwatch();
+      while (Volatile.Read(ref frameGen) == gen)
+      {
+        clock.Restart();
+        if (Native.DwmFlush() != 0 || clock.ElapsedMilliseconds < 2) Thread.Sleep(4);
+        if (Volatile.Read(ref frameGen) != gen) break;
+        if (Interlocked.Exchange(ref frameWanted, 1) == 1) continue;
+        try { BeginInvoke(new Action(() => { Volatile.Write(ref frameWanted, 0); if (frameGen == gen) Follow(); })); }
+        catch (Exception e) when (e is InvalidOperationException or ObjectDisposedException) { break; } // the window is gone
+      }
+    }) { IsBackground = true, Name = "Hi-chat mirror frames" };
+    thread.Start();
+  }
+  void StopFrames()
+  {
+    Interlocked.Increment(ref frameGen);
+    Volatile.Write(ref frameWanted, 0);
   }
 
   void Unthumb()
@@ -2126,6 +2157,7 @@ static class Native
   [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
   [DllImport("dwmapi.dll")] public static extern int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
   [DllImport("dwmapi.dll")] public static extern int DwmUnregisterThumbnail(IntPtr thumb);
+  [DllImport("dwmapi.dll")] public static extern int DwmFlush();
   [DllImport("dwmapi.dll")] public static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES props);
   [DllImport("magnification.dll")] public static extern bool MagInitialize();
   [DllImport("magnification.dll")] public static extern bool MagSetWindowSource(IntPtr hwnd, RECT rect);
