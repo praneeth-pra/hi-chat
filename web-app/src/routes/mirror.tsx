@@ -1,7 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react'
 import {
   IconArrowDown,
+  IconGripVertical,
   IconLayoutSidebarRightCollapse,
   IconMaximize,
   IconMessageCircle,
@@ -108,8 +116,22 @@ function MirrorViewer() {
     })
 
   const scroller = useRef<HTMLDivElement>(null)
+  const end = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
   const [showJump, setShowJump] = useState(false)
+
+  // The scroll position that shows the end of the conversation at the bottom
+  // of the view. Blank room follows it, so the last answer can be scrolled up
+  // further, but following the end stops here rather than in the blank
+  const endScroll = (el: HTMLElement) => {
+    const mark = end.current
+    if (!mark) return el.scrollHeight
+    const top =
+      mark.getBoundingClientRect().top -
+      el.getBoundingClientRect().top +
+      el.scrollTop
+    return Math.max(0, top + 24 - el.clientHeight)
+  }
 
   // Scrolling here yourself takes over until Hi-chat scrolls again
   const following = useRef(true)
@@ -139,7 +161,7 @@ function MirrorViewer() {
       }
     }
     if ((following.current && at) || atBottom.current) {
-      el.scrollTop = el.scrollHeight
+      el.scrollTop = endScroll(el)
       placed.current = el.scrollTop
       atBottom.current = true
       setShowJump(false)
@@ -149,7 +171,7 @@ function MirrorViewer() {
   const jumpToLatest = () => {
     const el = scroller.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    el.scrollTo({ top: endScroll(el), behavior: 'smooth' })
     atBottom.current = true
     setShowJump(false)
   }
@@ -165,6 +187,46 @@ function MirrorViewer() {
       : { label: 'Live', tone: 'live' as const }
   const camera = cameraState(cam)
   const empty = state.msgs.length === 0 && !streaming
+
+  // On a laptop the shared screen sits left of the text, sized by a divider
+  // you can drag; the text stays centred unless the screen would cover it
+  const body = useRef<HTMLDivElement>(null)
+  const wide = useWide()
+  const [bodyWidth, setBodyWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = body.current
+    if (!el) return
+    const watch = new ResizeObserver(() => setBodyWidth(el.clientWidth))
+    watch.observe(el)
+    setBodyWidth(el.clientWidth)
+    return () => watch.disconnect()
+  }, [])
+  const [split, setSplit] = useState<number | null>(() => {
+    const saved = Number(stored(SPLIT))
+    return saved > 0 && saved < 1 ? saved : null
+  })
+  const right = panelOpen ? PANEL_WIDTH : 0
+  const screenWidth = cam.screen
+    ? clampScreen(
+        split === null ? (bodyWidth - TEXT_WIDTH) / 2 - GAP : split * bodyWidth,
+        bodyWidth,
+        right
+      )
+    : 0
+  const textLeft = Math.max(
+    screenWidth ? screenWidth + GAP : 0,
+    (bodyWidth - TEXT_WIDTH) / 2
+  )
+  const text =
+    wide && bodyWidth
+      ? {
+          width: Math.max(
+            MIN_TEXT,
+            Math.min(TEXT_WIDTH, bodyWidth - right - GAP - textLeft)
+          ),
+          marginLeft: textLeft,
+        }
+      : undefined
 
   return (
     <div className="flex h-full flex-col bg-main-view text-main-view-fg">
@@ -213,30 +275,33 @@ function MirrorViewer() {
         </button>
       </header>
 
-      {/* On a laptop, three columns: the shared screen, the text, the camera
-          panel. The text sits in the middle column whatever is open; the
-          conversation scrolls across the whole width beneath the side ones */}
-      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)_minmax(0,1fr)] lg:grid-rows-1">
-        <div className="relative flex min-h-0 flex-1 flex-col lg:col-span-3 lg:col-start-1 lg:row-start-1">
+      {/* On a laptop: the shared screen on the left (with its divider), the
+          text centred, the camera panel on the right. The conversation scrolls
+          across the whole width beneath them; on a phone they stack */}
+      <div ref={body} className="relative flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {/* On a phone the header has no room for the mirror's status */}
           <div className="flex justify-center border-b border-main-view-fg/5 py-1.5 sm:hidden">
             <StatusPill tone={mirror.tone} label={mirror.label} />
           </div>
           <div
             ref={scroller}
-            className="flex-1 overflow-y-auto px-4 py-6"
+            className="flex-1 overflow-y-auto px-4 py-6 lg:px-0"
             onScroll={(e) => {
               const el = e.currentTarget
               if (Math.abs(el.scrollTop - placed.current) > 2)
                 following.current = false
-              atBottom.current =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 40
+              // At the end, or past it in the blank room
+              atBottom.current = el.scrollTop >= endScroll(el) - 40
               if (atBottom.current) setShowJump(false)
             }}
           >
             {/* A comfortable reading width; beside a shared screen the half
                 is narrower than this anyway */}
-            <div className="mx-auto flex max-w-md flex-col gap-6 text-base">
+            <div
+              style={text}
+              className="mx-auto flex max-w-md flex-col gap-6 text-base lg:mx-0 lg:max-w-none"
+            >
               {empty && <EmptyState tone={mirror.tone} />}
               {state.msgs.map((m) => (
                 <MirrorMessage
@@ -253,6 +318,9 @@ function MirrorViewer() {
                   streaming
                 />
               )}
+              <div ref={end} aria-hidden />
+              {/* Room to scroll the last answer up the page */}
+              <div aria-hidden className="h-[60vh] shrink-0" />
             </div>
           </div>
           {showJump && (
@@ -267,14 +335,38 @@ function MirrorViewer() {
           )}
         </div>
 
-        {/* While the computer in Meet presents, its screen fills the left column */}
-        {cam.screen && <SharedScreen stream={cam.screen} />}
+        {/* While the computer in Meet presents, its screen fills the left */}
+        {cam.screen && (
+          <SharedScreen
+            stream={cam.screen}
+            width={wide ? screenWidth : undefined}
+          />
+        )}
+        {cam.screen && wide && bodyWidth > 0 && (
+          <Divider
+            at={screenWidth}
+            onMove={(x) =>
+              setSplit(clampScreen(x, bodyWidth, right) / bodyWidth)
+            }
+            onDone={() =>
+              setSplit((v) => {
+                store(SPLIT, v === null ? null : String(v))
+                return v
+              })
+            }
+            onReset={() => {
+              store(SPLIT, null)
+              setSplit(null)
+            }}
+            container={body}
+          />
+        )}
 
         {panelOpen && (
           <aside
             id="mirror-camera-panel"
             aria-label="Remote camera"
-            className="order-first max-h-[55vh] shrink-0 overflow-y-auto border-b border-main-view-fg/10 bg-main-view p-4 lg:z-10 lg:col-start-3 lg:row-start-1 lg:max-h-none lg:w-full lg:max-w-[360px] lg:justify-self-end lg:border-b-0 lg:border-l lg:p-5"
+            className="order-first max-h-[55vh] shrink-0 overflow-y-auto border-b border-main-view-fg/10 bg-main-view p-4 lg:absolute lg:inset-y-0 lg:right-0 lg:z-10 lg:max-h-none lg:w-[360px] lg:border-b-0 lg:border-l lg:p-5"
           >
             <RemoteCameraPanel cam={cam} />
           </aside>
@@ -284,7 +376,105 @@ function MirrorViewer() {
   )
 }
 
-function SharedScreen({ stream }: { stream: MediaStream }) {
+const SPLIT = 'hichat-mirror-split' // the screen's share of the width
+const TEXT_WIDTH = 448 // the reading column, like Hi-chat's own window
+const MIN_TEXT = 300
+const PANEL_WIDTH = 360
+const GAP = 24
+const MIN_SCREEN = 200
+
+/** The screen's width, leaving room for the text and the camera panel. */
+function clampScreen(px: number, total: number, right: number) {
+  const max = total - right - MIN_TEXT - GAP * 2
+  return Math.max(MIN_SCREEN, Math.min(px, Math.max(MIN_SCREEN, max)))
+}
+
+/** Whether the page is laid out side by side (Tailwind's lg). */
+function useWide() {
+  const query = '(min-width: 1024px)'
+  const [wide, setWide] = useState(() => matchMedia(query).matches)
+  useEffect(() => {
+    const list = matchMedia(query)
+    const on = () => setWide(list.matches)
+    list.addEventListener('change', on)
+    return () => list.removeEventListener('change', on)
+  }, [])
+  return wide
+}
+
+/** The bar between the shared screen and the text: drag it left or right. */
+function Divider({
+  at,
+  onMove,
+  onDone,
+  onReset,
+  container,
+}: {
+  at: number
+  onMove: (x: number) => void
+  onDone: () => void
+  onReset: () => void
+  container: RefObject<HTMLDivElement | null>
+}) {
+  const [dragging, setDragging] = useState(false)
+  const x = (e: { clientX: number }) =>
+    e.clientX - (container.current?.getBoundingClientRect().left ?? 0)
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the shared screen"
+      aria-valuenow={Math.round(at)}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={(e) => {
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDragging(true)
+      }}
+      onPointerMove={(e) => dragging && onMove(x(e))}
+      onPointerUp={(e) => {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+        setDragging(false)
+        onDone()
+      }}
+      onDoubleClick={onReset}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 96 : 24
+        if (e.key === 'ArrowLeft') onMove(at - step)
+        else if (e.key === 'ArrowRight') onMove(at + step)
+        else return
+        e.preventDefault()
+        onDone()
+      }}
+      style={{ left: at }}
+      className="group absolute inset-y-0 z-20 flex w-4 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center outline-none"
+    >
+      <span
+        className={cn(
+          'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-main-view-fg/15 transition-colors group-hover:bg-accent group-focus-visible:bg-accent',
+          dragging && 'bg-accent'
+        )}
+      />
+      <span
+        className={cn(
+          'relative flex h-10 w-4 items-center justify-center rounded-full border border-main-view-fg/15 bg-main-view text-main-view-fg/60 shadow-sm transition-colors group-hover:border-accent group-hover:text-main-view-fg group-focus-visible:border-accent',
+          dragging && 'border-accent text-main-view-fg'
+        )}
+      >
+        <IconGripVertical size={12} />
+      </span>
+    </div>
+  )
+}
+
+function SharedScreen({
+  stream,
+  width,
+}: {
+  stream: MediaStream
+  width?: number
+}) {
   const pane = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
   const [picture, setPicture] = useState(false)
@@ -305,8 +495,9 @@ function SharedScreen({ stream }: { stream: MediaStream }) {
   return (
     <section
       ref={pane}
+      style={width === undefined ? undefined : { width }}
       aria-label="Shared screen"
-      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:z-10 lg:col-start-1 lg:row-start-1 lg:aspect-auto lg:min-h-0 lg:border-b-0 lg:border-r"
+      className="group relative order-first flex aspect-video shrink-0 items-center justify-center border-b border-main-view-fg/10 bg-neutral-950 lg:absolute lg:inset-y-0 lg:left-0 lg:z-10 lg:aspect-auto lg:border-b-0"
     >
       <video
         ref={video}
