@@ -404,7 +404,7 @@ export function speechLogLine(body, includeText = false) {
   )
   // Speed replies: timings only, every field known.
   const speed = line.match(
-    /^speed: model=(?:(?:openai_)?gpt-oss-(?:20|120)b|qwen_qwen3\.8-27b|qwen-3\.8-27b|claude-[a-z0-9.-]{1,40}|none) total=(?:\d{1,9}ms|none) first_byte=(?:\d{1,9}ms|none) first_words=(?:\d{1,9}ms|none) answer=(?:\d{1,9}ms|none) tokens=\d{1,7} route=(?:direct|server|none) hidden=(?:yes|no)$/
+    /^speed: model=(?:(?:openai_)?gpt-oss-(?:20|120)b|qwen_qwen3\.8-27b|qwen-3\.8-27b|claude-[a-z0-9.-]{1,40}|none) total=(?:\d{1,9}ms|none) first_byte=(?:\d{1,9}ms|none) first_words=(?:\d{1,9}ms|none) answer=(?:\d{1,9}ms|none) tokens=\d{1,7}(?: prompt_tokens=\d{1,7}(?: cached=\d{1,7})? queue=(?:\d{1,9}ms|none) prompt=(?:\d{1,9}ms|none) request=\d{1,7}KB)? route=(?:direct|server|none) hidden=(?:yes|no)$/
   )
   if (speed) return speed[0]
   // The Windows app: a shortcut that waited for its window to run it.
@@ -644,7 +644,10 @@ export function createRelay(options = {}) {
         (role === 'send' && mirror.isLink(url.searchParams.get('link')))
       if (!allowed) return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client) camera.join(client, role)
+      if (client)
+        camera.join(client, role, {
+          vid: url.searchParams.get('vid') ?? undefined,
+        })
       return
     }
     // A mirror link, opened without login: it watches one app only, and only

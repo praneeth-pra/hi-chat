@@ -40,3 +40,17 @@ export function chatThinkingParams(
     ? { reasoning_effort: getChatThinking() }
     : {}
 }
+
+/**
+ * Cerebras keeps a cached prompt in one data centre: the same key sends a
+ * thread's next question back to the server that holds its history, so only
+ * the new part is read. Groq caches by prefix on its own and needs no key.
+ */
+export function chatCacheParams(
+  provider: string,
+  threadId: string | undefined
+): { prompt_cache_key?: string } {
+  return provider === 'cerebras' && threadId
+    ? { prompt_cache_key: threadId.slice(0, 64) }
+    : {}
+}

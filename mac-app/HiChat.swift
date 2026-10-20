@@ -144,8 +144,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   static let showInDockKey = "showInDock"
   /// The app that was in front when Z started typing.
   var typingReturnTo: NSRunningApplication?
+  /// Keeps App Nap off, so the mirror stays live while Hi-chat is hidden.
+  var awake: NSObjectProtocol?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // App Nap would throttle Hi-chat's timers and network when it is hidden;
+    // the Mac can still sleep when idle.
+    awake = ProcessInfo.processInfo.beginActivity(
+      options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+      reason: "Hi-chat mirrors replies live to another screen")
     buildMenu()
     buildStatusItem()
     buildWindow()
@@ -174,6 +181,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     config.mediaTypesRequiringUserActionForPlayback = []
     config.preferences.setValue(true, forKey: "developerExtrasEnabled")
     config.userContentController.add(self, name: "hiChat")
+    // Keep the page running at full speed while the window is hidden or
+    // behind other windows: a reply being mirrored to /mirror otherwise
+    // reaches the other screen in bursts, as WebKit slows hidden pages down.
+    config.preferences.inactiveSchedulingPolicy = .none
 
     webView = WKWebView(frame: .zero, configuration: config)
     webView.uiDelegate = self

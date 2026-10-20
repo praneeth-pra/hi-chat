@@ -759,6 +759,12 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   const line =
     'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 route=direct hidden=no'
   assert.equal(speechLogLine(body(line)), line)
+  // Today's line, with the provider's own times and the cached part of the prompt
+  const full =
+    'speed: model=openai_gpt-oss-120b total=900ms first_byte=200ms first_words=300ms answer=600ms tokens=80 prompt_tokens=9100 cached=8960 queue=12ms prompt=45ms request=39KB route=server hidden=no'
+  assert.equal(speechLogLine(body(full)), full)
+  const noCache = full.replace(' cached=8960', '')
+  assert.equal(speechLogLine(body(noCache)), noCache)
   assert.equal(
     speechLogLine(body(line.replace('hidden=no', 'hidden=no question=secret'))),
     'speech diagnostic text omitted'

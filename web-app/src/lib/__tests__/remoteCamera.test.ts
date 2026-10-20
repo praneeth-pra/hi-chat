@@ -140,4 +140,52 @@ describe('remote camera', () => {
     expect(onCall).toHaveBeenLastCalledWith(null)
     cam.stop()
   })
+
+  it('keeps a live camera connection through a blip in the server connection', async () => {
+    const stream = { getTracks: () => [] } as unknown as MediaStream
+    const cam = startCameraSender({
+      stream,
+      key: 'k',
+      location: { protocol: 'https:', host: 'hi.example' },
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
+    })
+    const first = FakeSocket.last
+    first.hear({ t: 'join', from: 'tab-1' })
+    first.hear({ t: 'join', from: 'tab-2' })
+    await flush()
+    const [up, pending] = FakePeer.all.slice(-2)
+    up.connectionState = 'connected'
+
+    vi.useFakeTimers()
+    first.onclose?.()
+    // The connected one carries on; the one still being set up goes
+    expect(up.closed).toBe(false)
+    expect(pending.closed).toBe(true)
+    vi.advanceTimersByTime(1000)
+    vi.useRealTimers()
+    const second = FakeSocket.last
+    expect(second).not.toBe(first)
+
+    // The same tab rejoins: no new offer, the media never stopped
+    const peers = FakePeer.all.length
+    second.hear({ t: 'join', from: 'tab-1' })
+    await flush()
+    expect(FakePeer.all.length).toBe(peers)
+    expect(second.sent.some((m) => m.t === 'offer')).toBe(false)
+
+    // Its connection fails (a network change): offered again, once
+    up.connectionState = 'failed'
+    up.onconnectionstatechange?.()
+    await flush()
+    expect(up.closed).toBe(true)
+    expect(FakePeer.all.length).toBe(peers + 1)
+    expect(second.sent.filter((m) => m.t === 'offer')).toHaveLength(1)
+    const again = FakePeer.all.at(-1)!
+    again.connectionState = 'failed'
+    again.onconnectionstatechange?.()
+    await flush()
+    expect(FakePeer.all.length).toBe(peers + 1)
+    cam.stop()
+  })
 })

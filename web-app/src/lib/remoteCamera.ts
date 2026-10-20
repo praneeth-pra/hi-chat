@@ -103,6 +103,16 @@ export function startCameraSender({
     status()
   }
 
+  // Tracks tuned for what they carry: a moving picture, and a voice
+  const hint = (s: MediaStream) => {
+    for (const t of s.getTracks())
+      if (!t.contentHint)
+        t.contentHint = t.kind === 'video' ? 'motion' : 'speech'
+  }
+  hint(current)
+  // Viewers re-offered after their connection failed, until it connects again
+  const retried = new Set<string>()
+
   async function offer(id: string) {
     drop(id)
     const pc = new PeerConnection({ iceServers: ice })
@@ -126,8 +136,16 @@ export function startCameraSender({
     pc.onicecandidate = (e) =>
       send({ t: 'ice', to: id, candidate: e.candidate?.toJSON() ?? null })
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') drop(id)
-      else status()
+      if (peers.get(id) !== pc) return
+      if (pc.connectionState === 'connected') retried.delete(id)
+      if (pc.connectionState !== 'failed') return status()
+      drop(id)
+      // A network change on either side: connect again once, at once,
+      // rather than leave Meet on a frozen picture until the tab rejoins
+      if (!retried.has(id) && ws?.readyState === WebSocketImpl.OPEN) {
+        retried.add(id)
+        queue = queue.then(() => offer(id)).catch(() => {})
+      }
     }
     for (const sender of pc.getSenders())
       if (sender.track?.kind === 'video') {
@@ -150,8 +168,12 @@ export function startCameraSender({
     on?: boolean
   }) {
     if (m.t === 'hello') ice = Array.isArray(m.ice) ? m.ice : []
-    else if (m.t === 'join' && m.from) await offer(m.from)
-    else if (m.t === 'leave' && m.from) drop(m.from)
+    else if (m.t === 'join' && m.from) {
+      // The same Meet tab again after a blip in the server connection: its
+      // camera and sound never stopped, so they carry on as they are
+      if (peers.get(m.from)?.connectionState === 'connected') return status()
+      await offer(m.from)
+    } else if (m.t === 'leave' && m.from) drop(m.from)
     else if (m.t === 'screen' && m.from) {
       const from = m.from
       presenting = presenting.filter((p) => p !== from)
@@ -188,19 +210,24 @@ export function startCameraSender({
     socket.onclose = (e?: { code?: number }) => {
       if (ws !== socket) return
       ws = null
-      for (const id of [...peers.keys()]) drop(id)
       // Replaced by a newer camera page (relay/camera.mjs): stop, rather than
       // reconnect and take the camera back from it, over and over
       if (e?.code === 4000) {
+        for (const id of [...peers.keys()]) drop(id)
         stopped = true
         clearInterval(ping)
         onStatus({ connected: false, viewers: 0, replaced: true })
         return
       }
+      // Lost the server only: connections that are up keep going, as the
+      // media goes directly between the browsers. Ones still being set up
+      // can't finish without it, and start again when the tab rejoins
+      for (const [id, pc] of [...peers])
+        if (pc.connectionState !== 'connected') drop(id)
       status()
       if (stopped) return
       retry = setTimeout(connect, retryMs)
-      retryMs = Math.min(retryMs * 2, 15_000)
+      retryMs = Math.min(retryMs * 2, 8_000)
     }
   }
 
@@ -211,6 +238,7 @@ export function startCameraSender({
     /** Swaps in another camera or microphone without reconnecting. */
     replace(next: MediaStream) {
       current = next
+      hint(next)
       for (const pc of peers.values())
         for (const sender of pc.getSenders()) {
           const kind = sender.track?.kind

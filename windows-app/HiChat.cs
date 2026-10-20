@@ -535,8 +535,15 @@ sealed class ChatWindow : Form
     CoreWebView2Environment env;
     try
     {
+      // The page keeps full speed while the window is hidden or covered:
+      // a reply being mirrored to /mirror otherwise reaches the other screen
+      // in bursts, as Chromium slows background pages' timers down.
       env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(App.DataDir, "WebView2"),
-        new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
+        new CoreWebView2EnvironmentOptions(
+          "--autoplay-policy=no-user-gesture-required" +
+          " --disable-background-timer-throttling" +
+          " --disable-renderer-backgrounding" +
+          " --disable-backgrounding-occluded-windows"));
       await webView.EnsureCoreWebView2Async(env);
     }
     catch (WebView2RuntimeNotFoundException)

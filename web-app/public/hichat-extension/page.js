@@ -36,8 +36,13 @@
 
   async function pump(kind, track) {
     pumps[kind]?.cancel().catch(() => {})
-    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader()
+    // A short queue: a frame that would wait behind another is late already
+    const reader = new MediaStreamTrackProcessor({
+      track,
+      maxBufferSize: kind === 'video' ? 1 : undefined,
+    }).readable.getReader()
     pumps[kind] = reader
+    let writing = null
     for (;;) {
       const { value, done } = await reader.read().catch(() => ({ done: true }))
       if (done) return
@@ -45,7 +50,20 @@
         value.close()
         return
       }
-      await writers[kind].write(value).catch(() => value.close())
+      if (kind === 'audio') {
+        await writers.audio.write(value).catch(() => value.close())
+        continue
+      }
+      // Video: while Meet is still taking the last frame, this one is
+      // dropped rather than queued, so the picture never falls behind
+      if (writing) {
+        value.close()
+        continue
+      }
+      writing = writers.video
+        .write(value)
+        .catch(() => value.close())
+        .finally(() => (writing = null))
     }
   }
 
@@ -193,11 +211,19 @@
 
   async function onSignal(m) {
     if (m.t === 'hello') ice = Array.isArray(m.ice) ? m.ice : []
-    else if (m.t === 'sender' && !m.on) closePeer()
-    else if (m.t === 'offer') {
+    // The camera page lost Hi-chat's server: a connection that is up keeps
+    // going (the media doesn't pass through the server), and ends on its own
+    // if the page is really gone
+    else if (m.t === 'sender' && !m.on) {
+      if (pc?.connectionState !== 'connected') closePeer()
+    } else if (m.t === 'offer') {
       closePeer()
       const peer = new RealPeerConnection({ iceServers: ice })
       pc = peer
+      peer.onconnectionstatechange = () => {
+        // The camera page offers again when it sees this fail too
+        if (pc === peer && peer.connectionState === 'failed') closePeer()
+      }
       peer.onicecandidate = (e) =>
         send({ t: 'ice', candidate: e.candidate ? e.candidate.toJSON() : null })
       const mid = laneMid(m.sdp, 'video')
