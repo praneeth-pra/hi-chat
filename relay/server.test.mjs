@@ -259,6 +259,18 @@ test('speech log: one capped line per clip', () => {
   assert.equal(speechLogLine(Buffer.from('not json')), null)
 })
 
+test('speech log: Windows key waits keep only their numbers', () => {
+  const body = (o) => Buffer.from(JSON.stringify(o))
+  assert.equal(
+    speechLogLine(body({ line: 'windows key: waited=1840ms mirror=pointer' })),
+    'speech windows key: waited=1840ms mirror=pointer'
+  )
+  assert.equal(
+    speechLogLine(body({ line: 'windows key: waited=1840ms mirror=secret' })),
+    'speech diagnostic text omitted'
+  )
+})
+
 test('speech log: Accuracy lines keep only key=value tokens', () => {
   const body = (o) => Buffer.from(JSON.stringify(o))
   const line =

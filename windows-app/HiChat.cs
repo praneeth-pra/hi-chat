@@ -636,6 +636,16 @@ sealed class ChatWindow : Form
       $"window.hiChatRemote && window.hiChatRemote({JsonSerializer.Serialize(key)})");
   }
 
+  /// A shortcut that waited this long for the window to run it. A long wait
+  /// is reported (with the mirror's view) so a stall shows in the logs.
+  public void KeyWaited(long ms)
+  {
+    if (ms < 300) return;
+    var view = mirror.InPointerView ? "pointer" : mirror.Visible ? "chat" : "off";
+    RunInPage("fetch('/api/speech-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true, " +
+      $"body: JSON.stringify({{ line: 'windows key: waited={ms}ms mirror={view}' }}) }}).catch(() => {{}})");
+  }
+
   public void ScrollChat(double fraction) => RunInPage(
     $"const s = document.querySelector('[data-thread-scroller]'); if (s) s.scrollBy({{ top: s.clientHeight * {fraction.ToString(System.Globalization.CultureInfo.InvariantCulture)}, behavior: 'smooth' }})");
 
@@ -1238,7 +1248,9 @@ sealed class Shortcuts(ChatWindow app)
 
   void Later(Action<ChatWindow> action)
   {
-    try { app.BeginInvoke(() => action(app)); } catch (InvalidOperationException) { }
+    var at = Environment.TickCount64;
+    try { app.BeginInvoke(() => { app.KeyWaited(Environment.TickCount64 - at); action(app); }); }
+    catch (InvalidOperationException) { }
   }
 
   bool Ctrl => held.Contains(Native.VK_LCONTROL) || held.Contains(Native.VK_RCONTROL);
@@ -1992,12 +2004,29 @@ sealed class Mirror : Form
         if (Native.DwmFlush() != 0 || clock.ElapsedMilliseconds < 2) Thread.Sleep(4);
         if (Volatile.Read(ref frameGen) != gen) break;
         if (Interlocked.Exchange(ref frameWanted, 1) == 1) continue;
-        try { BeginInvoke(new Action(() => { Volatile.Write(ref frameWanted, 0); if (frameGen == gen) Follow(); })); }
+        try { BeginInvoke(new Action(() => DrawFrame(gen))); }
         catch (Exception e) when (e is InvalidOperationException or ObjectDisposedException) { break; } // the window is gone
       }
     }) { IsBackground = true, Name = "Hi-chat mirror frames" };
     thread.Start();
   }
+  /// One pointer-view frame, unless something else is waiting for this
+  /// thread. A frame that took about a screen refresh to draw had the next
+  /// one asked for before it was done, and an asked-for frame always comes
+  /// before keys, clicks, painting and timers, so those waited for as long
+  /// as the pointer view was on: Hi-chat stopped answering its shortcuts
+  /// (Left Ctrl, Ctrl + Left) and then ran them all at once. Now the next
+  /// frame is asked for only after this one is drawn, at the next refresh,
+  /// and a frame gives way to anything else that's waiting.
+  void DrawFrame(int gen)
+  {
+    try
+    {
+      if (frameGen == gen && !Native.InputWaiting()) Follow();
+    }
+    finally { Volatile.Write(ref frameWanted, 0); }
+  }
+  public bool InPointerView => Visible && mode == Mode.Pointer;
   void StopFrames()
   {
     Interlocked.Increment(ref frameGen);
@@ -2344,6 +2373,14 @@ static class Native
     }
     SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
   }
+
+  /// Keys, clicks, painting, timers or a call from another thread waiting
+  /// for this thread (GetQueueStatus' high word: what's in the queue now).
+  public static bool InputWaiting() =>
+    (GetQueueStatus(QS_ALLINPUT_BUT_POSTED) >> 16 & QS_ALLINPUT_BUT_POSTED) != 0;
+  // QS_KEY, QS_MOUSE, QS_PAINT, QS_TIMER, QS_SENDMESSAGE, QS_RAWINPUT, QS_TOUCH, QS_POINTER
+  const uint QS_ALLINPUT_BUT_POSTED = 0x0001 | 0x0006 | 0x0020 | 0x0010 | 0x0040 | 0x0400 | 0x0800 | 0x1000;
+  [DllImport("user32.dll")] static extern uint GetQueueStatus(uint flags);
 
   /// Gives a window the keyboard. Windows lets only the app in front do that,
   /// so this briefly joins the front app's input to make the switch.
