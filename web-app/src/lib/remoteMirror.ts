@@ -113,7 +113,10 @@ export function messageImages(messages: ThreadMessage[]): Map<string, string> {
   const out = new Map<string, string>()
   for (const m of messages)
     if (m.role === 'user')
-      imageParts(m).forEach((c, i) => out.set(`${m.id}.${i}`, c.image_url!.url))
+      imageParts(m).forEach((c, i) => {
+        const url = c.image_url?.url
+        if (url) out.set(`${m.id}.${i}`, url)
+      })
   return out
 }
 
