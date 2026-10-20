@@ -134,6 +134,15 @@ for the assessed replacement options; no replacement listener is enabled.
 
 These are the defaults. Each can be changed, turned off or reset in Hi-chat's **Settings > App keys**: press Change, then press the new keys (a key with modifiers, or a modifier tapped on its own). Esc cancels.
 
+## Remote mirror
+
+Open `/mirror` on this site from any other computer (sign in with the
+emailed code) to follow the conversation open in Hi-chat, live: replies show
+as they stream, a fraction of a second behind. Hi-chat sends the text, not
+video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/lib/remoteMirror.ts`),
+and only while a viewer is open. With Hi-chat open in several windows, the
+one in front is shown.
+
 ## Test and build
 
 ```bash

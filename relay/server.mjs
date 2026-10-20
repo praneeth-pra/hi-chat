@@ -21,6 +21,7 @@ import {
 import { handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
+import { createMirrorHub } from './mirror.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -617,8 +618,21 @@ export function createRelay(options = {}) {
   // Grok and Muse live: the browser's WebSocket is piped to xAI or Meta
   // (see wsProxy.mjs)
   const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
+  // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
+  const mirror = createMirrorHub()
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
+    if (url.pathname === '/api/mirror') {
+      if (!sameOriginRequest(req))
+        return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      const client = acceptWebSocket(req, socket, head)
+      if (client)
+        mirror.join(
+          client,
+          url.searchParams.get('role') === 'send' ? 'send' : 'view'
+        )
+      return
+    }
     const engine = LIVE_PATHS[url.pathname]
     if (!engine) return socket.destroy()
     if (!sameOriginRequest(req))

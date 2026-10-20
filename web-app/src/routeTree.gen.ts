@@ -12,6 +12,7 @@
 
 import { Route as rootRoute } from './routes/__root'
 import { Route as SystemMonitorImport } from './routes/system-monitor'
+import { Route as MirrorImport } from './routes/mirror'
 import { Route as LogsImport } from './routes/logs'
 import { Route as IndexImport } from './routes/index'
 import { Route as ProjectIndexImport } from './routes/project/index'
@@ -40,6 +41,12 @@ import { Route as SettingsProvidersProviderNameImport } from './routes/settings/
 const SystemMonitorRoute = SystemMonitorImport.update({
   id: '/system-monitor',
   path: '/system-monitor',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const MirrorRoute = MirrorImport.update({
+  id: '/mirror',
+  path: '/mirror',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -192,6 +199,13 @@ declare module '@tanstack/react-router' {
       path: '/logs'
       fullPath: '/logs'
       preLoaderRoute: typeof LogsImport
+      parentRoute: typeof rootRoute
+    }
+    '/mirror': {
+      id: '/mirror'
+      path: '/mirror'
+      fullPath: '/mirror'
+      preLoaderRoute: typeof MirrorImport
       parentRoute: typeof rootRoute
     }
     '/system-monitor': {
@@ -349,6 +363,7 @@ declare module '@tanstack/react-router' {
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/logs': typeof LogsRoute
+  '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
@@ -375,6 +390,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/logs': typeof LogsRoute
+  '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
@@ -402,6 +418,7 @@ export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
   '/logs': typeof LogsRoute
+  '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
@@ -430,6 +447,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/logs'
+    | '/mirror'
     | '/system-monitor'
     | '/hub/$modelId'
     | '/local-api-server/logs'
@@ -455,6 +473,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/logs'
+    | '/mirror'
     | '/system-monitor'
     | '/hub/$modelId'
     | '/local-api-server/logs'
@@ -480,6 +499,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/logs'
+    | '/mirror'
     | '/system-monitor'
     | '/hub/$modelId'
     | '/local-api-server/logs'
@@ -507,6 +527,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LogsRoute: typeof LogsRoute
+  MirrorRoute: typeof MirrorRoute
   SystemMonitorRoute: typeof SystemMonitorRoute
   HubModelIdRoute: typeof HubModelIdRoute
   LocalApiServerLogsRoute: typeof LocalApiServerLogsRoute
@@ -533,6 +554,7 @@ export interface RootRouteChildren {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LogsRoute: LogsRoute,
+  MirrorRoute: MirrorRoute,
   SystemMonitorRoute: SystemMonitorRoute,
   HubModelIdRoute: HubModelIdRoute,
   LocalApiServerLogsRoute: LocalApiServerLogsRoute,
@@ -568,6 +590,7 @@ export const routeTree = rootRoute
       "children": [
         "/",
         "/logs",
+        "/mirror",
         "/system-monitor",
         "/hub/$modelId",
         "/local-api-server/logs",
@@ -596,6 +619,9 @@ export const routeTree = rootRoute
     },
     "/logs": {
       "filePath": "logs.tsx"
+    },
+    "/mirror": {
+      "filePath": "mirror.tsx"
     },
     "/system-monitor": {
       "filePath": "system-monitor.tsx"
