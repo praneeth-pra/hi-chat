@@ -7,11 +7,18 @@ import type { ThreadMessage } from '@janhq/core'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
+import {
+  linkFromPath,
+  mirrorLinkSecret,
+  onMirrorLinkRenewed,
+} from '@/lib/mirrorLink'
 
 export const MIRROR_PATH = '/mirror'
 // The remote laptop's page follows the conversation and sends the camera, so
 // it never sends a conversation of its own over the real one
 const NOT_SENDING = [MIRROR_PATH]
+const notSending = (pathname: string) =>
+  NOT_SENDING.includes(pathname) || linkFromPath(pathname) !== null
 const PUSH_MS = 40
 const PING_MS = 30_000
 const MAX_MESSAGES = 200
@@ -77,10 +84,15 @@ export function streamUpdate(
 
 export function mirrorSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
-  role: 'send' | 'view'
+  role: 'send' | 'view',
+  link?: string
 ) {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${location.host}/api/mirror?role=${role}`
+  const base = `${scheme}//${location.host}`
+  const secret = link ? encodeURIComponent(link) : ''
+  // A link's viewer has no login: it watches through the link's own socket
+  if (role === 'view' && link) return `${base}/api/mirror-link?link=${secret}`
+  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}`
 }
 
 /** Starts sending; returns a function that stops it. */
@@ -95,7 +107,7 @@ export function startRemoteMirror({
     !WebSocketImpl ||
     !location ||
     !/^https?:$/.test(location.protocol) ||
-    NOT_SENDING.includes(location.pathname)
+    notSending(location.pathname)
   )
     return () => {}
 
@@ -119,7 +131,7 @@ export function startRemoteMirror({
   function push() {
     pushTimer = undefined
     if (!viewers || ws?.readyState !== WebSocketImpl.OPEN) return
-    if (NOT_SENDING.includes(location.pathname)) return
+    if (notSending(location.pathname)) return
     // With Hi-chat open in several windows, the one in front speaks; one in
     // the background only finishes a reply it is writing
     if (
@@ -193,7 +205,10 @@ export function startRemoteMirror({
 
   function connect() {
     if (stopped) return
-    const socket = new WebSocketImpl(mirrorSocketUrl(location, 'send'))
+    // Signed in, so it also sends to this app's own link
+    const socket = new WebSocketImpl(
+      mirrorSocketUrl(location, 'send', mirrorLinkSecret())
+    )
     ws = socket
     socket.onopen = () => {
       retryMs = 1000
@@ -254,6 +269,18 @@ export function startRemoteMirror({
       globalThis.document?.removeEventListener('visibilitychange', onVisible),
     () => globalThis.document?.removeEventListener('scroll', onScroll, true),
   ]
+  // "New link": end the old one, then send on the new
+  unsubscribe.push(
+    onMirrorLinkRenewed((old) => {
+      send({ t: 'revoke', link: old })
+      const was = ws
+      ws = null
+      viewers = 0
+      was?.close()
+      clearTimeout(retryTimer)
+      connect()
+    })
+  )
   const ping = setInterval(() => send({ t: 'ping' }), PING_MS)
   connect()
 
@@ -268,7 +295,7 @@ export function startRemoteMirror({
   }
 }
 
-// Viewing side (routes/mirror.tsx)
+// Viewing side (containers/MirrorView.tsx)
 
 type Stream = { id: string; text: string } | null
 export type MirrorState = {

@@ -88,6 +88,21 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/camera-key)" = 401
           key=$(curl -sf -X POST -b "$C" -H 'Origin: http://localhost:8081' http://localhost:8081/api/camera-key | sed -n 's/.*"key":"\([0-9a-f]*\)".*/\1/p')
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=view&key=$key" || true)" = 101
+          # A mirror link's page opens without login; its socket only for a link
+          # an app keeps, and so does the camera sending through it
+          L=AAAAAAAAAAAAAAAAAAAAAAAA
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/m/$L)" = 200
+          curl -s http://localhost:8081/m/$L | grep -qi '<div id="root"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/mirror-link?link=$L")" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/camera?role=send&link=$L")" = 401
+          # The app's code loads without login; pages and APIs still don't
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8081/assets/$asset")" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/)" = 302
+          # Once a signed-in app sends with the link, the link opens
+          (curl -s -o /dev/null --max-time 8 -b "$C" $WS "http://localhost:8081/api/mirror?role=send&link=$L" || true) &
+          sleep 2
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/mirror-link?link=$L" || true)" = 101
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=send&link=$L" || true)" = 101
           # One upload reaches the relay, which tries both engines
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac

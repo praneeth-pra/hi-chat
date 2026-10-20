@@ -13,16 +13,22 @@ const MAX_VIDEO_BITRATE = 2_500_000
 
 export function cameraSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
-  key: string
+  key: string,
+  link?: string
 ) {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${location.host}/api/camera?role=send&key=${encodeURIComponent(key)}`
+  const base = `${scheme}//${location.host}/api/camera?role=send`
+  // On a mirror link (no login, so no camera key) the link stands in
+  return link
+    ? `${base}&link=${encodeURIComponent(link)}`
+    : `${base}&key=${encodeURIComponent(key)}`
 }
 
 /** Starts offering `stream`; returns controls to swap it or stop. */
 export function startCameraSender({
   stream,
   key,
+  link,
   location = globalThis.location,
   onStatus = () => {},
   onScreen = () => {},
@@ -31,6 +37,8 @@ export function startCameraSender({
 }: {
   stream: MediaStream
   key: string
+  /** A mirror link to send through instead of the camera key */
+  link?: string
   location?: Pick<Location, 'protocol' | 'host'>
   onStatus?: (s: CameraStatus) => void
   /** The screen a Meet tab is presenting, or null when none is. */
@@ -138,7 +146,7 @@ export function startCameraSender({
 
   function connect() {
     if (stopped) return
-    const socket = new WebSocketImpl(cameraSocketUrl(location, key))
+    const socket = new WebSocketImpl(cameraSocketUrl(location, key, link))
     ws = socket
     socket.onopen = () => {
       retryMs = 1000

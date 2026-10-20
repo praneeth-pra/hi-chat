@@ -199,3 +199,69 @@ test('the relay serves /api/mirror over real WebSockets', async () => {
     await new Promise((r) => server.close(r))
   }
 })
+
+test('a link shows only its own app, and stops when the app replaces it', () => {
+  let t = 1000
+  const hub = createMirrorHub({ now: () => t })
+  const link = 'L'.repeat(22)
+  const other = 'O'.repeat(22)
+  const appA = fakeSocket()
+  const appB = fakeSocket()
+  assert.equal(hub.isLink(link), false, 'unknown until an app opens it')
+  hub.join(appA, 'send', { link })
+  hub.join(appB, 'send', { link: other })
+  assert.equal(hub.isLink(link), true)
+
+  const viaLink = fakeSocket()
+  const signedIn = fakeSocket()
+  viaLink.closed = null
+  viaLink.close = (code) => {
+    viaLink.closed = code
+    viaLink.onclose()
+  }
+  hub.join(viaLink, 'view', { link })
+  hub.join(signedIn, 'view')
+  assert.deepEqual(viaLink.got.at(-1), { t: 'sender', on: true })
+
+  appA.onmessage(snap([{ id: 'a', role: 'user', text: 'from A' }]))
+  appB.onmessage(snap([{ id: 'b', role: 'user', text: 'from B' }]))
+  // The link sees only app A; the signed-in mirror sees both, latest last
+  assert.deepEqual(
+    viaLink.got.filter((m) => m.t === 'snap').map((m) => m.msgs[0].text),
+    ['from A']
+  )
+  assert.equal(
+    signedIn.got.filter((m) => m.t === 'snap').at(-1).msgs[0].text,
+    'from B'
+  )
+  // App A hears both viewers, B only the signed-in one
+  assert.deepEqual(appA.got.at(-1), { t: 'viewers', n: 2 })
+  assert.deepEqual(appB.got.at(-1), { t: 'viewers', n: 1 })
+
+  // Closing the app keeps the link for a while, so a restart keeps it
+  appA.onclose()
+  assert.equal(hub.isLink(link), true)
+  t += 13 * 60 * 60 * 1000
+  assert.equal(hub.isLink(link), false, 'gone after the grace period')
+
+  // "New link": the old one stops at once and its viewers are closed
+  hub.join(appB, 'send', { link: other })
+  const viaOther = fakeSocket()
+  viaOther.close = (code) => {
+    viaOther.closed = code
+    viaOther.onclose()
+  }
+  hub.join(viaOther, 'view', { link: other })
+  appB.onmessage(JSON.stringify({ t: 'revoke', link: other }))
+  assert.equal(hub.isLink(other), false)
+  assert.equal(viaOther.closed, 4001)
+})
+
+test('links must look like secrets', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  hub.join(app, 'send', { link: 'short' })
+  assert.equal(hub.isLink('short'), false)
+  assert.equal(hub.isLink(''), false)
+  assert.equal(hub.isLink(undefined), false)
+})
