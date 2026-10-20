@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadMessage } from '@janhq/core'
 import {
   applyMirrorMessage,
+  diffMessages,
   emptyMirror,
+  messageImages,
+  mirrorStreamTap,
   mirrorMessages,
   mirrorSocketUrl,
   readScroll,
   startRemoteMirror,
   streamUpdate,
 } from '../remoteMirror'
+import { markdownBlocks } from '../markdownBlocks'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
@@ -190,7 +194,7 @@ describe('remote mirror', () => {
       return ws
     }
 
-    it('sends nothing until someone is watching', () => {
+    it('sends nothing until someone is watching', async () => {
       const ws = start()
       // Signed in, it also sends to this app's own mirror link
       expect(ws.url).toMatch(
@@ -199,14 +203,14 @@ describe('remote mirror', () => {
       useMessages.setState({
         messages: { t1: [msg('u', 'user', 'Hi again')] },
       })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent).toEqual([])
     })
 
-    it('sends the conversation, then the reply as it streams', () => {
+    it('sends the conversation, then the reply as it streams', async () => {
       const ws = start()
       ws.hear({ t: 'viewers', n: 1 })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent).toEqual([
         {
           t: 'snap',
@@ -215,11 +219,11 @@ describe('remote mirror', () => {
         },
       ])
       useAppState.setState({ streamingContent: msg('a', 'assistant', 'He') })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       useAppState.setState({
         streamingContent: msg('a', 'assistant', 'Hello'),
       })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent.slice(1)).toEqual([
         { t: 'stream', id: 'a', text: 'He' },
         { t: 'stream', id: 'a', add: 'llo' },
@@ -230,35 +234,34 @@ describe('remote mirror', () => {
         },
       })
       useAppState.setState({ streamingContent: undefined })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
+      // Only what changed: the saved reply, appended
       expect(ws.sent.slice(3)).toEqual([
         {
-          t: 'snap',
+          t: 'ops',
           title: 'Plans',
-          msgs: [
-            { id: 'u', role: 'user', text: 'Hi' },
-            { id: 'a', role: 'assistant', text: 'Hello' },
-          ],
+          set: [],
+          add: [{ id: 'a', role: 'assistant', text: 'Hello' }],
         },
         { t: 'stream', id: null },
       ])
     })
 
-    it('follows a reply whose id changes on every update, as the chat does', () => {
+    it('follows a reply whose id changes on every update, as the chat does', async () => {
       const ws = start()
       ws.hear({ t: 'viewers', n: 1 })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       // useChat builds each streamed update, and the saved reply, with a new id
       useAppState.setState({ streamingContent: msg('a1', 'assistant', 'He') })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       useAppState.setState({
         streamingContent: msg('a2', 'assistant', 'Hello'),
       })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       useAppState.setState({
         streamingContent: msg('a3', 'assistant', 'Hello there'),
       })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent.slice(1)).toEqual([
         { t: 'stream', id: 'a1', text: 'He' },
         { t: 'stream', id: 'a1', add: 'llo' },
@@ -270,15 +273,13 @@ describe('remote mirror', () => {
         },
       })
       useAppState.setState({ streamingContent: undefined })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent.slice(4)).toEqual([
         {
-          t: 'snap',
+          t: 'ops',
           title: 'Plans',
-          msgs: [
-            { id: 'u', role: 'user', text: 'Hi' },
-            { id: 'a9', role: 'assistant', text: 'Hello there' },
-          ],
+          set: [],
+          add: [{ id: 'a9', role: 'assistant', text: 'Hello there' }],
         },
         { t: 'stream', id: null },
       ])
@@ -290,7 +291,7 @@ describe('remote mirror', () => {
       expect(s.msgs.map((m) => m.text)).toEqual(['Hi', 'Hello there'])
     })
 
-    it('does not run on the viewer page itself', () => {
+    it('does not run on the viewer page itself', async () => {
       const before = FakeSocket.last
       stop = startRemoteMirror({
         WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
@@ -303,7 +304,7 @@ describe('remote mirror', () => {
       expect(FakeSocket.last).toBe(before)
     })
 
-    it('stops sending once the page moves to the viewer', () => {
+    it('stops sending once the page moves to the viewer', async () => {
       const location = {
         protocol: 'https:',
         host: 'hi.example',
@@ -317,8 +318,179 @@ describe('remote mirror', () => {
       ws.open()
       location.pathname = '/mirror'
       ws.hear({ t: 'viewers', n: 1 })
-      vi.advanceTimersByTime(100)
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent).toEqual([])
     })
+  })
+})
+
+describe('mirror: what it shows, and sending only what changed', () => {
+  it('shows what Hi-chat shows for each message', () => {
+    const user = {
+      id: 'u',
+      role: 'user',
+      thread_id: 't1',
+      content: [
+        { type: 'text', text: { value: 'What is this?', annotations: [] } },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+      ],
+    } as unknown as ThreadMessage
+    const answer = {
+      id: 'a',
+      role: 'assistant',
+      thread_id: 't1',
+      status: 'stopped',
+      content: [
+        {
+          type: 'text',
+          text: { value: '<think>hmm</think>A chart', annotations: [] },
+        },
+      ],
+      metadata: {
+        accuracyReview: {
+          verdict: 'approved',
+          verifier: 'gpt-oss-120b',
+          webStatus: 'ready',
+          sources: [{ title: 'Docs', url: 'https://example.com' }],
+          model: 'x',
+          reviewMs: 1,
+          draftMs: 1,
+        },
+        tool_calls: [
+          { tool: { function: { name: 'search' } }, state: 'pending' },
+        ],
+      },
+    } as unknown as ThreadMessage
+    expect(mirrorMessages([user, answer])).toEqual([
+      { id: 'u', role: 'user', text: 'What is this?', images: ['u.0'] },
+      {
+        id: 'a',
+        role: 'assistant',
+        text: '<think>hmm</think>A chart',
+        stopped: true,
+        review: {
+          verdict: 'approved',
+          fallback: undefined,
+          verifier: 'gpt-oss-120b',
+          webStatus: 'ready',
+          sources: [{ title: 'Docs', url: 'https://example.com' }],
+        },
+        tools: [{ name: 'search', pending: true }],
+      },
+    ])
+    expect([...messageImages([user, answer])]).toEqual([
+      ['u.0', 'data:image/png;base64,AAA'],
+    ])
+  })
+
+  it('finds what changed: replaced and appended messages', () => {
+    const a = { id: 'a', role: 'user' as const, text: 'Hi' }
+    const b = { id: 'b', role: 'assistant' as const, text: 'Hello' }
+    const b2 = { ...b, text: 'Hello!' }
+    const c = { id: 'c', role: 'user' as const, text: 'More' }
+    const json = (l: object[]) => l.map((x) => JSON.stringify(x))
+    expect(
+      diffMessages(['a', 'b'], json([a, b]), [a, b, c], json([a, b, c]))
+    ).toEqual({ set: [], add: [c] })
+    expect(
+      diffMessages(['a', 'b'], json([a, b]), [a, b2], json([a, b2]))
+    ).toEqual({ set: [b2], add: [] })
+    // A deleted or different message: send it all
+    expect(diffMessages(['a', 'b'], json([a, b]), [a], json([a]))).toBeNull()
+    expect(
+      diffMessages(['a', 'b'], json([a, b]), [a, c], json([a, c]))
+    ).toBeNull()
+  })
+
+  it('viewer applies changes, keeping unchanged messages as they were', () => {
+    let s = applyMirrorMessage(emptyMirror, {
+      t: 'snap',
+      title: 'Plans',
+      msgs: [
+        { id: 'a', role: 'user', text: 'Hi' },
+        { id: 'b', role: 'assistant', text: 'Hello' },
+      ],
+    })
+    s = applyMirrorMessage(s, { t: 'scroll', id: 'b', f: 0.5 })
+    const first = s.msgs[0]
+    s = applyMirrorMessage(s, {
+      t: 'ops',
+      title: 'Plans',
+      set: [{ id: 'b', role: 'assistant', text: 'Hello!' }],
+      add: [{ id: 'c', role: 'user', text: 'More' }],
+    })
+    expect(s.msgs.map((m) => m.text)).toEqual(['Hi', 'Hello!', 'More'])
+    expect(s.msgs[0]).toBe(first) // not drawn again
+    // Scroll sync is untouched by content updates
+    expect(s.scroll).toEqual({ id: 'b', f: 0.5 })
+    s = applyMirrorMessage(s, { t: 'img', key: 'a.0', src: 'data:x' })
+    expect(s.images).toEqual({ 'a.0': 'data:x' })
+    s = applyMirrorMessage(s, { t: 'phase', phase: 'searching' })
+    expect(s.phase).toBe('searching')
+    s = applyMirrorMessage(s, { t: 'phase', phase: 'nonsense' })
+    expect(s.phase).toBeNull()
+  })
+
+  it('splits streaming markdown into blocks, never inside code', () => {
+    expect(
+      markdownBlocks('One\n\nTwo\nlines\n\n```\na\n\nb\n```\n\nEnd')
+    ).toEqual(['One', 'Two\nlines', '```\na\n\nb\n```', 'End'])
+    expect(markdownBlocks('')).toEqual([''])
+  })
+})
+
+describe('mirror: a reply goes out the moment it arrives', () => {
+  let stop = () => {}
+  beforeEach(() => {
+    vi.useFakeTimers()
+    useThreads.setState({
+      currentThreadId: 't1',
+      threads: { t1: { id: 't1', title: 'Plans' } },
+    } as never)
+    useMessages.setState({ messages: { t1: [msg('u', 'user', 'Hi')] } })
+    useAppState.setState({
+      streamingContent: undefined,
+      accuracyStatus: undefined,
+    })
+  })
+  afterEach(() => {
+    stop()
+    vi.useRealTimers()
+  })
+
+  it('sends each piece from the model at once, and never goes back', async () => {
+    stop = startRemoteMirror({
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      location: {
+        protocol: 'https:',
+        host: 'hi.example',
+        pathname: '/',
+      } as Location,
+    })
+    const ws = FakeSocket.last
+    ws.open()
+    ws.hear({ t: 'viewers', n: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    const before = ws.sent.length
+    // Straight from the model: sent synchronously, no frame or timer
+    mirrorStreamTap('t1', 'He')
+    mirrorStreamTap('t1', 'Hello')
+    expect(ws.sent.slice(before)).toEqual([
+      { t: 'stream', id: 'reply-1', text: 'He' },
+      { t: 'stream', id: 'reply-1', add: 'llo' },
+    ])
+    // Hi-chat's own drawing lags behind: nothing to resend
+    useAppState.setState({ streamingContent: msg('x1', 'assistant', 'Hel') })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ws.sent.length).toBe(before + 2)
+    // Another chat's reply isn't this mirror's
+    mirrorStreamTap('t2', 'Other')
+    expect(ws.sent.length).toBe(before + 2)
+    // Accuracy progress shows as it changes
+    useAppState.setState({
+      accuracyStatus: { threadId: 't1', phase: 'verifying' },
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ws.sent.at(-1)).toEqual({ t: 'phase', phase: 'verifying' })
   })
 })

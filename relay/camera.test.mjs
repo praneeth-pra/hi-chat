@@ -145,3 +145,15 @@ test('the relay accepts /api/camera only with the key', async () => {
     await new Promise((r) => server.close(r))
   }
 })
+
+test('camera pings get a pong, and a replaced camera page hears 4000', () => {
+  const hub = createCameraHub(quiet)
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  viewer.onmessage('{"t":"ping"}')
+  assert.deepEqual(viewer.got.at(-1), { t: 'pong' })
+  const first = fakeSocket()
+  hub.join(first, 'send')
+  hub.join(fakeSocket(), 'send')
+  assert.equal(first.closed, 4000)
+})

@@ -11,14 +11,22 @@ import {
   IconArrowDown,
   IconGripVertical,
   IconLayoutSidebarRightCollapse,
+  IconLoader2,
   IconMaximize,
   IconMessageCircle,
   IconScreenShare,
+  IconTool,
   IconVideo,
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
 import { RenderMarkdown } from '@/containers/RenderMarkdown'
+import { AccuracyProgress } from '@/containers/AccuracyProgress'
+import { AccuracyReviewInfo } from '@/containers/ThreadContent'
+import ThinkingBlock from '@/containers/ThinkingBlock'
+import type { AccuracyReview } from '@/lib/accuracyReview'
+import { markdownBlocks } from '@/lib/markdownBlocks'
+import { splitReasoning } from '@/lib/splitReasoning'
 import {
   RemoteCameraPanel,
   StatusPill,
@@ -36,6 +44,7 @@ import {
   applyMirrorMessage,
   emptyMirror,
   mirrorSocketUrl,
+  type MirrorMessage as MirrorMessageData,
   type MirrorState,
 } from '@/lib/remoteMirror'
 import { cn } from '@/lib/utils'
@@ -46,19 +55,40 @@ import { cn } from '@/lib/utils'
 // computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
 // presents in Meet, its shared screen fills the space left of the text.
 
-// Reasoning stays out of the mirror, as it's folded away in Hi-chat
-const withoutThinking = (text: string) =>
-  text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim()
-
 function useMirror(link?: string) {
   const [state, setState] = useState<MirrorState>(emptyMirror)
   const [connected, setConnected] = useState(false)
+  // Round trip to Hi-chat's server, in ms, from the pings below
+  const [lag, setLag] = useState<number | null>(null)
 
   useEffect(() => {
     let ws: WebSocket | null = null
     let stopped = false
     let retryMs = 1000
     let retry: ReturnType<typeof setTimeout> | undefined
+    // Messages wait at most until the next frame, then apply together: a
+    // burst of streamed pieces costs one redraw, not one each
+    let pending: unknown[] = []
+    let frame: number | undefined
+    const apply = () => {
+      frame = undefined
+      const batch = pending
+      pending = []
+      if (batch.length)
+        setState((s) => batch.reduce<MirrorState>(applyMirrorMessage, s))
+    }
+    const queue = (m: unknown) => {
+      pending.push(m)
+      if (frame !== undefined) return
+      // A hidden page draws no frames; apply soon anyway
+      frame = document.hidden
+        ? (setTimeout(apply, 50) as unknown as number)
+        : requestAnimationFrame(apply)
+    }
+    const ping = () => {
+      if (ws?.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ t: 'ping', n: performance.now() }))
+    }
     const connect = () => {
       const socket = new WebSocket(
         mirrorSocketUrl(window.location, 'view', link)
@@ -67,36 +97,85 @@ function useMirror(link?: string) {
       socket.onopen = () => {
         retryMs = 1000
         setConnected(true)
+        ping()
       }
       socket.onmessage = (e) => {
+        let m: { t?: string; n?: number }
         try {
-          const m = JSON.parse(String(e.data))
-          setState((s) => applyMirrorMessage(s, m))
+          m = JSON.parse(String(e.data))
         } catch {
-          // not a mirror message
+          return // not a mirror message
         }
+        if (m.t === 'pong') {
+          if (typeof m.n === 'number')
+            setLag(Math.max(0, Math.round(performance.now() - m.n)))
+          return
+        }
+        queue(m)
       }
       socket.onclose = () => {
         if (ws !== socket) return
         setConnected(false)
+        setLag(null)
         if (stopped) return
         retry = setTimeout(connect, retryMs)
         retryMs = Math.min(retryMs * 2, 15_000)
       }
     }
+    // After a gap (Wi-Fi back, the laptop waking), connect again at once:
+    // the server sends everything current, rather than waiting for a socket
+    // that may already be dead to notice
+    const fresh = () => {
+      clearTimeout(retry)
+      retryMs = 1000
+      const was = ws
+      ws = null
+      was?.close()
+      connect()
+    }
+    let hiddenAt = 0
+    const onVisibility = () => {
+      if (document.hidden) hiddenAt = Date.now()
+      else if (hiddenAt && Date.now() - hiddenAt > 20_000) fresh()
+    }
+    window.addEventListener('online', fresh)
+    document.addEventListener('visibilitychange', onVisibility)
     connect()
-    const ping = setInterval(() => {
-      if (ws?.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}')
-    }, 30_000)
+    // Often enough to show a current lag, and to keep the socket open
+    const pinger = setInterval(ping, 5_000)
     return () => {
       stopped = true
-      clearInterval(ping)
+      clearInterval(pinger)
       clearTimeout(retry)
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame)
+        clearTimeout(frame)
+      }
+      window.removeEventListener('online', fresh)
+      document.removeEventListener('visibilitychange', onVisibility)
       ws?.close()
     }
   }, [link])
 
-  return { state, connected }
+  // Keep the screen (and so the mirror) awake while this page is open
+  useEffect(() => {
+    let lock: WakeLockSentinel | undefined
+    const take = () => {
+      if (document.visibilityState !== 'visible') return
+      navigator.wakeLock
+        ?.request('screen')
+        .then((l) => (lock = l))
+        .catch(() => {})
+    }
+    take()
+    document.addEventListener('visibilitychange', take)
+    return () => {
+      document.removeEventListener('visibilitychange', take)
+      lock?.release().catch(() => {})
+    }
+  }, [])
+
+  return { state, connected, lag }
 }
 
 /**
@@ -104,7 +183,7 @@ function useMirror(link?: string) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected } = useMirror(link)
+  const { state, connected, lag } = useMirror(link)
   const cam = useCameraSender({ link })
   // Open as last left; at first, open on a computer that sends its camera
   const [panelOpen, setPanelOpen] = useState(() => {
@@ -182,11 +261,17 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
     state.stream && !state.msgs.some((m) => m.id === state.stream?.id)
       ? state.stream
       : null
+  // Live, with this page's round trip to the server; amber when it's slow
   const mirror = !connected
     ? { label: 'Reconnecting…', tone: 'waiting' as const }
     : !state.senderOn
       ? { label: "Hi-chat isn't open", tone: 'off' as const }
-      : { label: 'Live', tone: 'live' as const }
+      : lag === null
+        ? { label: 'Live', tone: 'live' as const }
+        : {
+            label: `Live · ${lag} ms`,
+            tone: lag > 400 ? ('waiting' as const) : ('live' as const),
+          }
   const camera = cameraState(cam)
   // The Meet call's sound: on unless muted here (remembered)
   const [callMuted, setCallMuted] = useState(() => stored(CALL_MUTED) === '1')
@@ -358,15 +443,17 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
               {state.msgs.map((m) => (
                 <MirrorMessage
                   key={m.id}
-                  id={m.id}
-                  role={m.role}
-                  text={m.text}
+                  msg={m}
+                  images={m.images?.map((k) => state.images[k])}
                 />
               ))}
+              {/* Accuracy mode's progress, as Hi-chat shows it */}
+              {state.phase && !streaming && (
+                <AccuracyProgress phase={state.phase} />
+              )}
               {streaming && (
                 <MirrorMessage
-                  role="assistant"
-                  text={streaming.text}
+                  msg={{ id: '', role: 'assistant', text: streaming.text }}
                   streaming
                 />
               )}
@@ -642,45 +729,163 @@ function EmptyState({ tone }: { tone: 'off' | 'waiting' | 'live' }) {
 
 // Re-rendered only when its own text changes, not on every scroll or word
 // elsewhere: rendering a long chat's markdown again would lag the scroll
-const MirrorMessage = memo(function MirrorMessage({
-  id,
-  role,
-  text,
-  streaming,
-}: {
-  id?: string
-  role: 'user' | 'assistant'
-  text: string
-  streaming?: boolean
-}) {
-  const shown = withoutThinking(text)
-  if (role === 'user')
+/**
+ * One message, drawn as Hi-chat's chat draws it (ThreadContent): a question
+ * with its files and screenshots, an answer with its thinking folded, its
+ * Accuracy review and the tools it used. Drawn again only when it changes.
+ */
+const MirrorMessage = memo(
+  function MirrorMessage({
+    msg,
+    images,
+    streaming,
+  }: {
+    msg: MirrorMessageData
+    /** Its screenshots, as they arrive (undefined until then) */
+    images?: (string | undefined)[]
+    streaming?: boolean
+  }) {
+    if (msg.role === 'user')
+      return (
+        <div data-mid={msg.id || undefined} className="w-full">
+          {msg.text && (
+            <div className="flex w-full justify-end break-words text-start">
+              <div className="relative max-w-[90%] rounded-3xl bg-surface px-5 py-2.5 text-main-view-fg">
+                <RenderMarkdown content={msg.text} isUser />
+              </div>
+            </div>
+          )}
+          {!!msg.files?.length && (
+            <div className="mt-2 flex w-full justify-end">
+              <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
+                {msg.files.map((name, i) => (
+                  <span
+                    key={i}
+                    className="max-w-48 truncate rounded-md border border-main-view-fg/10 bg-main-view-fg/5 px-3 py-2 text-xs"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {!!msg.images?.length && (
+            <div className="mt-2 flex w-full justify-end">
+              <div className="flex max-w-[90%] flex-wrap justify-end gap-2">
+                {msg.images.map((key, i) => (
+                  <MirrorImage key={key} src={images?.[i]} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    const { reasoningSegment, textSegment } = splitReasoning(msg.text)
+    const answer = textSegment.replace('</think>', '')
     return (
-      <div
-        data-mid={id}
-        className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-main-view-fg/[0.06] px-4 py-2.5 leading-relaxed"
-      >
-        {shown}
+      <div data-mid={msg.id || undefined} className="w-full">
+        {reasoningSegment && (
+          <ThinkingBlock
+            id={`mirror-${msg.id || 'streaming'}`}
+            text={reasoningSegment}
+          />
+        )}
+        {streaming && !reasoningSegment && !answer.trim() && (
+          <span
+            aria-label="Answer on its way"
+            className="relative flex size-5 items-center justify-center text-main-view-fg/70"
+          >
+            <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
+            <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
+          </span>
+        )}
+        {streaming ? (
+          <StreamingMarkdown text={answer} />
+        ) : (
+          <RenderMarkdown content={answer} />
+        )}
+        {msg.review && (
+          <AccuracyReviewInfo
+            review={msg.review as unknown as AccuracyReview}
+          />
+        )}
+        {!!msg.tools?.length && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {msg.tools.map((tool, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 rounded-md border border-main-view-fg/10 bg-main-view-fg/5 px-2 py-1 text-xs text-main-view-fg/70"
+              >
+                {tool.pending ? (
+                  <IconLoader2 size={12} className="animate-spin" />
+                ) : (
+                  <IconTool size={12} />
+                )}
+                {tool.name || 'Tool'}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     )
+  },
+  // The same message, the same screenshots: nothing to draw again
+  (a, b) =>
+    a.msg === b.msg &&
+    a.streaming === b.streaming &&
+    (a.images ?? []).length === (b.images ?? []).length &&
+    (a.images ?? []).every((src, i) => src === b.images?.[i])
+)
+
+/** A screenshot: small like Hi-chat's, full width with a click. */
+function MirrorImage({ src }: { src?: string }) {
+  const [big, setBig] = useState(false)
+  if (!src)
+    return (
+      <span
+        aria-label="Screenshot loading"
+        className="size-40 animate-pulse rounded-md border border-main-view-fg/10 bg-main-view-fg/5"
+      />
+    )
   return (
-    <div data-mid={id} className="w-full">
-      {streaming && !shown ? (
-        <span
-          className="inline-flex items-center gap-1 py-2"
-          aria-label="Hi-chat is answering"
-        >
-          {[0, 150, 300].map((d) => (
-            <span
-              key={d}
-              className="size-1.5 animate-bounce rounded-full bg-main-view-fg/40 motion-reduce:animate-none"
-              style={{ animationDelay: `${d}ms` }}
-            />
-          ))}
-        </span>
-      ) : (
-        <RenderMarkdown content={shown} isStreaming={streaming} />
-      )}
-    </div>
+    <button
+      type="button"
+      onClick={() => setBig((b) => !b)}
+      title={big ? 'Smaller' : 'Bigger'}
+      className={cn('block', big && 'w-full')}
+    >
+      <img
+        src={src}
+        alt="Attached screenshot"
+        className={cn(
+          'rounded-md border border-main-view-fg/10',
+          big ? 'w-full object-contain' : 'size-40 object-cover'
+        )}
+      />
+    </button>
   )
+}
+
+const MarkdownBlock = memo(function MarkdownBlock({
+  content,
+}: {
+  content: string
+}) {
+  return <RenderMarkdown content={content} />
 })
+
+function StreamingMarkdown({ text }: { text: string }) {
+  const blocks = markdownBlocks(text)
+  const last = blocks.length - 1
+  return (
+    <>
+      {blocks.map((block, i) =>
+        i < last ? (
+          <MarkdownBlock key={i} content={block} />
+        ) : (
+          <RenderMarkdown key={i} content={block} isStreaming />
+        )
+      )}
+    </>
+  )
+}

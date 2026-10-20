@@ -32,6 +32,9 @@ export function iceServers(env = process.env) {
 export function createCameraHub({ env = process.env, log = console.log } = {}) {
   let sender = null
   const viewers = new Map() // id → socket
+  // Pings get a pong, so an idle socket stays open (nginx closes one that
+  // hears nothing for 120 s)
+  const pong = (ws, m) => m?.t === 'ping' && ws.send('{"t":"pong"}')
 
   const hello = (ws, extra) =>
     ws.send(JSON.stringify({ t: 'hello', ice: iceServers(env), ...extra }))
@@ -60,7 +63,8 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
   }
 
   function joinSender(ws) {
-    // A newer camera page replaces the old one
+    // A newer camera page replaces the old one; it hears 4000 and stays off
+    // (rather than reconnecting and taking the camera back, over and over)
     if (sender) sender.close(4000)
     sender = ws
     log(`camera: sender on, ${viewers.size} viewer(s)`)
@@ -71,6 +75,7 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
       v.send(JSON.stringify({ t: 'sender', on: true }))
     ws.onmessage = (raw) => {
       const m = parse(raw)
+      pong(ws, m)
       const out = m && signal(m)
       const to = m && viewers.get(m.to)
       if (out && to) to.send(JSON.stringify(out))
@@ -91,6 +96,7 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
     sender?.send(JSON.stringify({ t: 'join', from: id }))
     ws.onmessage = (raw) => {
       const m = parse(raw)
+      pong(ws, m)
       const out = m && signal(m)
       if (out && sender) sender.send(JSON.stringify({ ...out, from: id }))
     }
