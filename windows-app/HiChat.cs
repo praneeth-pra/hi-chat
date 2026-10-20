@@ -1862,7 +1862,6 @@ sealed class Mirror : Form
       }
       return;
     }
-    if (magnifier == IntPtr.Zero) return;
     Native.GetCursorPos(out var p);
     var full = Screen.FromPoint(new Point(p.X, p.Y)).Bounds;
     var pic = Picture;
