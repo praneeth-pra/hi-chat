@@ -1355,8 +1355,10 @@ sealed class TouchpadScroll(Action<int> scroll)
       double moved = 0;
       for (var i = 0; i < count; i++) moved += Report(pad, hid + 8 + i * (int)reportSize, reportSize);
       // Up as soon as the second finger lands, before Windows sees a scroll
-      // and picks the window to send it to
-      Shield(fingers.Count >= 2);
+      // and picks the window to send it to; it stays up while any finger is
+      // still down, since a report can miss a finger for a moment
+      if (fingers.Count >= 2) Shield(true);
+      else if (fingers.Count == 0) Shield(false, later: true);
       if (moved == 0 || inFrame < 2) return;
       if (!masked)
       {
@@ -1380,12 +1382,29 @@ sealed class TouchpadScroll(Action<int> scroll)
     Shield(false);
   }
 
-  void Shield(bool on)
+  /// Taking the shield down a moment after the fingers lift: putting it up
+  /// and down between strokes flickers the pointer and the taskbar.
+  readonly System.Windows.Forms.Timer lower = new() { Interval = 400 };
+
+  void Shield(bool on, bool later = false)
   {
+    if (on || !later) lower.Stop();
+    if (!on && later)
+    {
+      if (Scrolling && !lower.Enabled)
+      {
+        lower.Tick -= Lower;
+        lower.Tick += Lower;
+        lower.Start();
+      }
+      return;
+    }
     if (Scrolling == on) return;
     Scrolling = on;
     if (on) shield.Cover(); else shield.Uncover();
   }
+
+  void Lower(object? sender, EventArgs e) => Shield(false);
 
   /// Reads one report; returns how far its fingers moved down the pad.
   double Report(Pad pad, IntPtr report, uint length)
@@ -1522,6 +1541,9 @@ sealed class ScrollShield : Form
     var screen = Screen.FromPoint(Cursor.Position);
     var area = screen.WorkingArea;
     if (area == screen.Bounds) area.Height -= 1;
+    // The pointer keeps the shape it had over the window underneath
+    var info = new Native.CURSORINFO { cbSize = Marshal.SizeOf<Native.CURSORINFO>() };
+    if (Native.GetCursorInfo(ref info) && info.hCursor != IntPtr.Zero) Cursor = new Cursor(info.hCursor);
     Native.SetWindowPos(Handle, Native.HWND_TOPMOST, area.X, area.Y, area.Width, area.Height,
       Native.SWP_NOACTIVATE | Native.SWP_SHOWWINDOW);
     Visible = true;
