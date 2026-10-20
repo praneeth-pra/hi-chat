@@ -104,6 +104,7 @@ describe('speedLogLine', () => {
         usage: {
           completion_tokens: 312,
           prompt_tokens: 9100,
+          prompt_tokens_details: { cached_tokens: 8960 },
           queue_time: 0.012,
           prompt_time: 0.045,
         },
@@ -114,13 +115,13 @@ describe('speedLogLine', () => {
       { messages: 3, chars: 40_000, tools: 0, model: 'openai/gpt-oss-20b' }
     )
     expect(speedLogLine(t)).toBe(
-      'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 prompt_tokens=9100 queue=12ms prompt=45ms request=39KB route=direct hidden=no'
+      'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 prompt_tokens=9100 cached=8960 queue=12ms prompt=45ms request=39KB route=direct hidden=no'
     )
   })
   it('marks missing timings as none', () => {
     const t = describeTiming(0, 500, {}, { messages: 1, chars: 1, tools: 0 })
     expect(speedLogLine(t)).toBe(
-      'speed: model=none total=500ms first_byte=none first_words=none answer=none tokens=0 prompt_tokens=0 queue=none prompt=none request=0KB route=none hidden=no'
+      'speed: model=none total=500ms first_byte=none first_words=none answer=none tokens=0 prompt_tokens=0 cached=0 queue=none prompt=none request=0KB route=none hidden=no'
     )
   })
 })

@@ -48,7 +48,7 @@ import { Attachment } from '@/types/attachment'
 import { ModelCapabilities } from '@/types/models'
 import { trackFetch, type FetchAttempt } from '@/lib/replyTiming'
 import { viaBackupRoute, withGroqHedge } from '@/lib/groqProxy'
-import { chatThinkingParams } from '@/lib/chatThinking'
+import { chatCacheParams, chatThinkingParams } from '@/lib/chatThinking'
 
 export type ChatCompletionResponse =
   | chatCompletion
@@ -324,6 +324,7 @@ export const sendCompletion = async (
             tools: normalizeTools(usableTools),
             tool_choice: usableTools.length ? 'auto' : undefined,
             ...chatThinkingParams(provider.provider, modelId),
+            ...chatCacheParams(provider.provider, thread.id),
             ...params,
           },
           {
@@ -339,6 +340,7 @@ export const sendCompletion = async (
             tools: normalizeTools(usableTools),
             tool_choice: usableTools.length ? 'auto' : undefined,
             ...chatThinkingParams(provider.provider, modelId),
+            ...chatCacheParams(provider.provider, thread.id),
             ...params,
           },
           { signal: abortController.signal }

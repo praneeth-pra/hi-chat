@@ -267,6 +267,25 @@ export function startRemoteMirror({
   let sentScroll = ''
   let scrollFrame: number | undefined
   let streamCount = 0
+  // While someone watches, a held Web Lock keeps Chrome from freezing or
+  // discarding this tab when it is in the background
+  let releaseAwake: (() => void) | undefined
+  const stayAwake = (on: boolean) => {
+    if (!on) {
+      releaseAwake?.()
+      releaseAwake = undefined
+      return
+    }
+    const locks = globalThis.navigator?.locks
+    if (releaseAwake || !locks) return
+    const held = new Promise<void>((resolve) => (releaseAwake = resolve))
+    locks
+      .request(
+        `hichat-mirror-${Math.random().toString(36).slice(2)}`,
+        () => held
+      )
+      .catch(() => {})
+  }
 
   const open = () => ws?.readyState === WebSocketImpl.OPEN
   const send = (data: unknown) => {
@@ -433,6 +452,7 @@ export function startRemoteMirror({
       if (m.t !== 'viewers' || typeof m.n !== 'number') return
       const had = viewers
       viewers = m.n
+      stayAwake(viewers > 0)
       // A new viewer starts from the whole conversation
       if (viewers > had) {
         resend()
@@ -443,6 +463,7 @@ export function startRemoteMirror({
       if (ws !== socket) return
       ws = null
       viewers = 0
+      stayAwake(false)
       if (stopped) return
       retryTimer = setTimeout(connect, retryMs)
       retryMs = Math.min(retryMs * 2, 30_000)
@@ -496,6 +517,7 @@ export function startRemoteMirror({
   return () => {
     stopped = true
     tap = null
+    stayAwake(false)
     unsubscribe.forEach((u) => u())
     clearInterval(ping)
     clearTimeout(retryTimer)

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCameraHub, iceServers } from './camera.mjs'
+import { createCameraHub, createIceSource, iceServers } from './camera.mjs'
 import { cameraKey, cameraKeyOk } from './auth.mjs'
 import { createRelay } from './server.mjs'
 
@@ -156,4 +156,108 @@ test('camera pings get a pong, and a replaced camera page hears 4000', () => {
   hub.join(first, 'send')
   hub.join(fakeSocket(), 'send')
   assert.equal(first.closed, 4000)
+})
+
+test('Cloudflare TURN credentials: fetched once, port 53 dropped, STUN on failure', async () => {
+  const env = {
+    CLOUDFLARE_TURN_KEY_ID: 'abc123',
+    CLOUDFLARE_TURN_KEY_TOKEN: 'tok',
+  }
+  let calls = 0
+  let clock = 0
+  const fetchImpl = async (url, init) => {
+    calls++
+    assert.match(
+      url,
+      /\/turn\/keys\/abc123\/credentials\/generate-ice-servers$/
+    )
+    assert.equal(init.headers.Authorization, 'Bearer tok')
+    return {
+      ok: true,
+      json: async () => ({
+        iceServers: {
+          urls: [
+            'stun:stun.cloudflare.com:3478',
+            'turn:turn.cloudflare.com:53?transport=udp',
+            'turns:turn.cloudflare.com:443?transport=tcp',
+          ],
+          username: 'u',
+          credential: 'c',
+        },
+      }),
+    }
+  }
+  const ice = createIceSource({
+    env,
+    fetchImpl,
+    now: () => clock,
+    log: () => {},
+  })
+  assert.equal(ice.ready(), null, 'nothing yet: the first join waits')
+  const list = await ice.load()
+  assert.deepEqual(list[0].urls, [
+    'stun:stun.cloudflare.com:3478',
+    'turns:turn.cloudflare.com:443?transport=tcp',
+  ])
+  assert.equal(ice.ready(), list)
+  assert.equal(calls, 1)
+  // Past half-life: still served at once, refreshed in the background
+  clock = 13 * 60 * 60 * 1000
+  assert.equal(ice.ready(), list)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(calls, 2)
+
+  // Cloudflare down: public STUN, and no waiting on it for a minute
+  const down = createIceSource({
+    env,
+    fetchImpl: async () => ({ ok: false, status: 503 }),
+    now: () => 0,
+    log: () => {},
+  })
+  assert.match(JSON.stringify(await down.load()), /stun\.l\.google/)
+  assert.match(JSON.stringify(down.ready()), /stun\.l\.google/)
+
+  // Without the key: the old list, at once
+  assert.match(JSON.stringify(createIceSource({ env: {} }).ready()), /stun:/)
+})
+
+test('a join waits for the first TURN credentials, then says hello with them', async () => {
+  let release
+  const turn = [{ urls: 'turns:t.example:443', username: 'u', credential: 'c' }]
+  const ice = {
+    ready: () => null,
+    load: () => new Promise((r) => (release = () => r(turn))),
+  }
+  const hub = createCameraHub({ ...quiet, ice })
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  assert.equal(viewer.got.length, 0)
+  release()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(viewer.got[0].ice, turn)
+  assert.equal(hub.counts.viewers, 1)
+})
+
+test('a Meet tab reconnecting with its id stays the same viewer', () => {
+  const hub = createCameraHub(quiet)
+  const camera = fakeSocket()
+  hub.join(camera, 'send')
+  const vid = 'tab-0123456789abcdef'
+  const first = fakeSocket()
+  hub.join(first, 'view', { vid })
+  assert.deepEqual(camera.got.at(-1), { t: 'join', from: vid })
+  // The same tab again before its old socket closed: the old one goes
+  // quietly, and the camera page hears a join for the same id, no leave
+  const second = fakeSocket()
+  hub.join(second, 'view', { vid })
+  assert.equal(first.closed, undefined)
+  assert.deepEqual(camera.got.at(-1), { t: 'join', from: vid })
+  assert.ok(!camera.got.some((m) => m.t === 'leave'))
+  assert.equal(hub.counts.viewers, 1)
+  second.onmessage(JSON.stringify({ t: 'answer', sdp: 'a' }))
+  assert.deepEqual(camera.got.at(-1), { t: 'answer', sdp: 'a', from: vid })
+  // An id that isn't one gets a random one instead
+  const odd = fakeSocket()
+  hub.join(odd, 'view', { vid: 'x"y' })
+  assert.match(camera.got.at(-1).from, /^[0-9a-f]{16}$/)
 })

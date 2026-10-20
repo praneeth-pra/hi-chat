@@ -11,10 +11,15 @@ chrome.runtime.onConnect.addListener((port) => {
   let closed = false
   let retryMs = 1000
   let retry
+  // This tab's id for the whole call: reconnecting with it, the camera page
+  // knows the tab and keeps the camera and sound flowing through the blip
+  const vid = crypto.randomUUID()
   const url =
     site.replace(/^http/, 'ws').replace(/\/$/, '') +
     '/api/camera?role=view&key=' +
-    encodeURIComponent(key)
+    encodeURIComponent(key) +
+    '&vid=' +
+    vid
 
   const connect = () => {
     if (closed) return
@@ -27,9 +32,10 @@ chrome.runtime.onConnect.addListener((port) => {
     socket.onclose = () => {
       if (ws !== socket || closed) return
       ws = null
-      port.postMessage(JSON.stringify({ t: 'sender', on: false }))
+      // The media goes directly between the browsers, so losing this
+      // socket doesn't stop it: the page only hears "sender off" from Hi-chat
       retry = setTimeout(connect, retryMs)
-      retryMs = Math.min(retryMs * 2, 15000)
+      retryMs = Math.min(retryMs * 2, 8000)
     }
   }
   // Keeps the socket (and this worker) alive

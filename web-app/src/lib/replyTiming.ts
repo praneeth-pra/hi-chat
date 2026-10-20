@@ -93,8 +93,9 @@ export function describeTiming(
   const { firstChunkAt, firstAnswerAt, usage, providerCreated } = timing
   const u = usage ?? {}
   const details = u.completion_tokens_details as
-    | { reasoning_tokens?: number }
-    | undefined
+    { reasoning_tokens?: number } | undefined
+  const promptDetails = u.prompt_tokens_details as
+    { cached_tokens?: number } | undefined
   return {
     total_s: seconds(end - start),
     wait_for_first_byte_s: seconds(firstChunkAt && firstChunkAt - start),
@@ -126,6 +127,8 @@ export function describeTiming(
     request_chars: request.chars,
     tools_sent: request.tools,
     prompt_tokens: u.prompt_tokens,
+    // The part of the prompt the provider had cached: read for free and fast
+    cached_tokens: promptDetails?.cached_tokens,
     completion_tokens: u.completion_tokens,
     reasoning_tokens: details?.reasoning_tokens,
     provider_queue_s: u.queue_time,
@@ -137,7 +140,7 @@ export function describeTiming(
 /**
  * One Railway log line per reply outside Accuracy, with timings only (no question
  * or answer text): `speed: model=… total=…ms first_byte=…ms first_words=…ms
- * answer=…ms tokens=N prompt_tokens=N queue=…ms prompt=…ms request=NKB
+ * answer=…ms tokens=N prompt_tokens=N cached=N queue=…ms prompt=…ms request=NKB
  * route=direct|server|none hidden=yes|no`. queue and prompt are the
  * provider's own times (Groq, Cerebras): waiting its turn, and reading the
  * request, which is what grows with a long chat.
@@ -160,6 +163,7 @@ export function speedLogLine(timings: ReturnType<typeof describeTiming>) {
     `answer=${ms(timings.answer_s)}`,
     `tokens=${Math.max(0, Math.round(Number(timings.completion_tokens) || 0))}`,
     `prompt_tokens=${Math.max(0, Math.round(Number(timings.prompt_tokens) || 0))}`,
+    `cached=${Math.max(0, Math.round(Number(timings.cached_tokens) || 0))}`,
     `queue=${ms(Number(timings.provider_queue_s))}`,
     `prompt=${ms(Number(timings.provider_prompt_s))}`,
     `request=${Math.round((timings.request_chars ?? 0) / 1024)}KB`,
