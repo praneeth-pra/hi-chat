@@ -82,6 +82,10 @@ it offers each new version itself. It lives in the menu bar at the top (its H lo
 - **fn + Left**: live mirror window; **fn + Shift + Left** closes it.
 - **fn + N**: a new chat.
 
+With a monitor connected, Hi-chat's window goes on the monitor; otherwise it
+goes on the laptop's screen. Both apps do this at start, when a monitor is
+plugged in or out, and whenever Hi-chat brings its window up.
+
 The shortcuts need Accessibility, the mirror needs Screen Recording.
 GitHub Actions (`.github/workflows/mac-app.yml`) builds the DMG on every change.
 
@@ -95,6 +99,9 @@ from Hi-chat's own key, and the Mac app also only when the new app is signed
 with Hi-chat's own certificate. Both live in the repository secret
 `HICHAT_SIGNING` (a base64 tar of `update.pem`, `mac.p12` and `p12pass`); the
 public halves are in the apps' `Updater`. Releases from main fail without it.
+Keep it as a secret of the `release` environment (Settings > Environments),
+with deployments limited to `main`, so pull request builds can never read it;
+they build unsigned.
 
 ## Windows app
 

@@ -37,6 +37,8 @@ jobs:
     # Releases come only from main: never from a pull request or another branch
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # HICHAT_SIGNING lives in the "release" environment, limited to main
+    environment: release
     permissions:
       contents: write
     steps:

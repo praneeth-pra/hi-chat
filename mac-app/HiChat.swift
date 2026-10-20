@@ -27,6 +27,9 @@
 // active app, so a click or typing in it never greys out the app you're in.
 // The shortcuts need Accessibility (System Settings > Privacy & Security).
 //
+// With a monitor connected the window goes on it, otherwise on the laptop's
+// own screen (see placeOnHomeScreen).
+//
 // Hi-chat sits in the menu bar at the top (its H logo); its Dock icon is off
 // unless "Show in Dock" is ticked in that menu.
 //
@@ -150,6 +153,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+    placeOnHomeScreen()
     panel.makeKeyAndOrderFront(nil)
     return true
   }
@@ -206,12 +210,83 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     panel.delegate = self
     panel.center()
     panel.setFrameAutosaveName("HiChatWindow")
+    placeOnHomeScreen()
     panel.orderFrontRegardless()
+    // A monitor plugged in or out: wait for macOS to settle the screens first
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(screensChanged(_:)),
+      name: NSApplication.didChangeScreenParametersNotification, object: nil)
+  }
+
+  @objc func screensChanged(_ notification: Notification) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.placeOnHomeScreen()
+    }
   }
 
   @objc func reloadPage(_ sender: Any?) { webView.reload() }
 
-  @objc func showChat(_ sender: Any?) { panel.makeKeyAndOrderFront(nil) }
+  @objc func showChat(_ sender: Any?) {
+    placeOnHomeScreen()
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  // MARK: Which screen
+
+  /// The laptop's own screen, as opposed to a monitor plugged into it.
+  static func isBuiltIn(_ screen: NSScreen) -> Bool {
+    guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    else { return false }
+    return CGDisplayIsBuiltin(id.uint32Value) != 0
+  }
+
+  /// Where Hi-chat belongs: an external monitor when one is connected (the
+  /// biggest, if several), else the laptop's screen.
+  static func homeScreen() -> NSScreen? {
+    let screens = NSScreen.screens
+    let area = { (s: NSScreen) in s.frame.width * s.frame.height }
+    return screens.filter { !isBuiltIn($0) }.max { area($0) < area($1) }
+      ?? screens.first(where: isBuiltIn) ?? NSScreen.main
+  }
+
+  /// Where the window last was on a monitor, and on the laptop's screen.
+  static func frameKey(onMonitor: Bool) -> String {
+    onMonitor ? "HiChatWindowOnMonitor" : "HiChatWindowOnLaptop"
+  }
+
+  /// With a monitor connected Hi-chat goes on it, otherwise on the laptop's
+  /// screen, back where it last was there. Run at launch, when a monitor is
+  /// plugged in or out, and whenever Hi-chat brings its window up; a window
+  /// already on the right kind of screen stays where it is.
+  func placeOnHomeScreen() {
+    guard !panel.styleMask.contains(.fullScreen), let target = AppController.homeScreen()
+    else { return }
+    let onMonitor = !AppController.isBuiltIn(target)
+    if let now = panel.screen, AppController.isBuiltIn(now) != onMonitor { return }
+    let area = target.visibleFrame
+    var frame = NSRectFromString(
+      UserDefaults.standard.string(forKey: AppController.frameKey(onMonitor: onMonitor)) ?? "")
+    if frame.isEmpty || !area.intersects(frame) {
+      frame.size = panel.frame.size
+      frame.origin = NSPoint(x: area.midX - frame.width / 2, y: area.midY - frame.height / 2)
+    }
+    // Fits the screen: no bigger than it, and wholly on it
+    frame.size.width = min(frame.width, area.width)
+    frame.size.height = min(frame.height, area.height)
+    frame.origin.x = min(max(frame.minX, area.minX), area.maxX - frame.width)
+    frame.origin.y = min(max(frame.minY, area.minY), area.maxY - frame.height)
+    panel.setFrame(frame, display: true)
+  }
+
+  func windowDidMove(_ notification: Notification) { rememberFrame() }
+  func windowDidEndLiveResize(_ notification: Notification) { rememberFrame() }
+
+  func rememberFrame() {
+    guard let screen = panel.screen, !panel.styleMask.contains(.fullScreen) else { return }
+    UserDefaults.standard.set(
+      NSStringFromRect(panel.frame),
+      forKey: AppController.frameKey(onMonitor: !AppController.isBuiltIn(screen)))
+  }
 
   // MARK: Menu
 
@@ -411,6 +486,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   /// activating it, so the app you're in stays active.
   func bringUp() {
     if panel.isMiniaturized { panel.deminiaturize(nil) }
+    placeOnHomeScreen()
     panel.orderFrontRegardless()
   }
 
