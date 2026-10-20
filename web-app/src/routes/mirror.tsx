@@ -111,13 +111,40 @@ function MirrorViewer() {
   const atBottom = useRef(true)
   const [showJump, setShowJump] = useState(false)
 
-  // Follow new text while the view is at the bottom
+  // Scrolling here yourself takes over until Hi-chat scrolls again
+  const following = useRef(true)
+  const placed = useRef(-1) // scrollTop this page set last
+
+  // Follow Hi-chat's scroll: to the same message and point in it, or the end
+  useLayoutEffect(() => {
+    following.current = true
+  }, [state.scroll])
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    if (atBottom.current) el.scrollTop = el.scrollHeight
-    else setShowJump(true)
-  }, [state.msgs, state.stream])
+    const at = state.scroll
+    if (following.current && at && 'id' in at) {
+      const m = el.querySelector<HTMLElement>(
+        `[data-mid="${CSS.escape(at.id)}"]`
+      )
+      if (m) {
+        const top =
+          m.getBoundingClientRect().top -
+          el.getBoundingClientRect().top +
+          el.scrollTop
+        el.scrollTop = top + at.f * m.offsetHeight - 16
+        placed.current = el.scrollTop
+        atBottom.current = false
+        return
+      }
+    }
+    if ((following.current && at) || atBottom.current) {
+      el.scrollTop = el.scrollHeight
+      placed.current = el.scrollTop
+      atBottom.current = true
+      setShowJump(false)
+    } else setShowJump(true)
+  }, [state.msgs, state.stream, state.scroll])
 
   const jumpToLatest = () => {
     const el = scroller.current
@@ -197,6 +224,8 @@ function MirrorViewer() {
             className="flex-1 overflow-y-auto px-4 py-6"
             onScroll={(e) => {
               const el = e.currentTarget
+              if (Math.abs(el.scrollTop - placed.current) > 2)
+                following.current = false
               atBottom.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 40
               if (atBottom.current) setShowJump(false)
@@ -205,7 +234,12 @@ function MirrorViewer() {
             <div className="mx-auto flex max-w-3xl flex-col gap-6 text-base">
               {empty && <EmptyState tone={mirror.tone} />}
               {state.msgs.map((m) => (
-                <MirrorMessage key={m.id} role={m.role} text={m.text} />
+                <MirrorMessage
+                  key={m.id}
+                  id={m.id}
+                  role={m.role}
+                  text={m.text}
+                />
               ))}
               {streaming && (
                 <MirrorMessage
@@ -326,10 +360,12 @@ function EmptyState({ tone }: { tone: 'off' | 'waiting' | 'live' }) {
 }
 
 function MirrorMessage({
+  id,
   role,
   text,
   streaming,
 }: {
+  id?: string
   role: 'user' | 'assistant'
   text: string
   streaming?: boolean
@@ -337,12 +373,15 @@ function MirrorMessage({
   const shown = withoutThinking(text)
   if (role === 'user')
     return (
-      <div className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-main-view-fg/[0.06] px-4 py-2.5 leading-relaxed">
+      <div
+        data-mid={id}
+        className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-main-view-fg/[0.06] px-4 py-2.5 leading-relaxed"
+      >
         {shown}
       </div>
     )
   return (
-    <div className="w-full">
+    <div data-mid={id} className="w-full">
       {streaming && !shown ? (
         <span
           className="inline-flex items-center gap-1 py-2"

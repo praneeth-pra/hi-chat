@@ -3,9 +3,9 @@
 // viewer, on /api/mirror?role=view) sees it live, replies included while they
 // stream. Text, not video, so it arrives in about a network round trip.
 //
-// The hub keeps only the latest conversation in memory, so a viewer that
-// joins late starts from it. Senders hear how many viewers there are and send
-// nothing while there are none.
+// The hub keeps only the latest conversation (and where it's scrolled to) in
+// memory, so a viewer that joins late starts from it. Senders hear how many
+// viewers there are and send nothing while there are none.
 
 // Under wsProxy's 1 MB message cap, which would close the socket
 const MAX_TEXT = 900_000
@@ -36,6 +36,7 @@ export function createMirrorHub() {
   const viewers = new Set()
   let snap = null // JSON of the latest conversation
   let stream = null // { id, text } of the reply being written
+  let scroll = null // JSON of where Hi-chat is scrolled to
 
   const toViewers = (data) => {
     for (const v of viewers) v.send(data)
@@ -69,6 +70,23 @@ export function createMirrorHub() {
       )
         stream = null
       toViewers(snap)
+    } else if (m?.t === 'scroll') {
+      // At the bottom, or at a message and how far into it
+      const clean =
+        m.bottom === true
+          ? { t: 'scroll', bottom: true }
+          : typeof m.id === 'string' &&
+              typeof m.f === 'number' &&
+              Number.isFinite(m.f)
+            ? {
+                t: 'scroll',
+                id: m.id.slice(0, 100),
+                f: Math.min(1, Math.max(0, m.f)),
+              }
+            : null
+      if (!clean) return
+      scroll = JSON.stringify(clean)
+      toViewers(scroll)
     } else if (m?.t === 'stream') {
       if (m.id === null) {
         stream = null
@@ -108,6 +126,7 @@ export function createMirrorHub() {
         }
         if (snap) ws.send(snap)
         if (stream) ws.send(JSON.stringify({ t: 'stream', ...stream }))
+        if (scroll) ws.send(scroll)
       }
       status()
     },

@@ -33,6 +33,34 @@ export function mirrorMessages(messages: ThreadMessage[]): MirrorMessage[] {
     }))
 }
 
+/**
+ * Where the chat is scrolled to: at the bottom, or at a message (`id`) and how
+ * far into it the top of the view is (`f`, 0 to 1). By message rather than in
+ * pixels, as the viewer's text wraps at its own width.
+ */
+export type MirrorScroll =
+  { t: 'scroll'; bottom: true } | { t: 'scroll'; id: string; f: number }
+
+const AT_BOTTOM_PX = 40
+const MESSAGE = '[data-test-id^="message-"]'
+
+/** Reads where the chat's scroll area (`[data-thread-scroller]`) is. */
+export function readScroll(el: HTMLElement): MirrorScroll {
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX)
+    return { t: 'scroll', bottom: true }
+  const top = el.getBoundingClientRect().top
+  for (const m of el.querySelectorAll<HTMLElement>(MESSAGE)) {
+    const r = m.getBoundingClientRect()
+    if (r.bottom <= top) continue
+    const id = (m.dataset.testId ?? '').replace(/^message-[a-z]+-/, '')
+    const f =
+      r.height > 0 ? Math.min(1, Math.max(0, (top - r.top) / r.height)) : 0
+    return { t: 'scroll', id, f: Math.round(f * 1000) / 1000 }
+  }
+  // Below the last saved message: in the reply being written
+  return { t: 'scroll', bottom: true }
+}
+
 /** What to send for the streaming reply, given what was sent last. */
 export function streamUpdate(
   last: { id: string | null; text: string },
@@ -81,6 +109,7 @@ export function startRemoteMirror({
   let sentSnap = ''
   let snapKey: unknown[] = []
   let sentStream: { id: string | null; text: string } = { id: null, text: '' }
+  let sentScroll = ''
 
   const send = (data: unknown) => {
     if (ws?.readyState === WebSocketImpl.OPEN) ws.send(JSON.stringify(data))
@@ -138,6 +167,17 @@ export function startRemoteMirror({
       send(update)
       sentStream = { id, text: id === null ? '' : text }
     }
+    // Where the chat is scrolled to, so the viewer scrolls with it
+    const scroller = globalThis.document?.querySelector<HTMLElement>(
+      '[data-thread-scroller]'
+    )
+    if (scroller && !globalThis.document?.hidden) {
+      const scroll = JSON.stringify(readScroll(scroller))
+      if (scroll !== sentScroll) {
+        sentScroll = scroll
+        ws.send(scroll)
+      }
+    }
   }
 
   const schedule = () => {
@@ -166,6 +206,7 @@ export function startRemoteMirror({
         sentSnap = ''
         snapKey = []
         sentStream = { id: null, text: '' }
+        sentScroll = ''
         schedule()
       }
     }
@@ -184,15 +225,23 @@ export function startRemoteMirror({
     if (globalThis.document?.hidden) return
     sentSnap = ''
     snapKey = []
+    sentScroll = ''
     schedule()
   }
   globalThis.document?.addEventListener('visibilitychange', onVisible)
+  // Scrolling the chat (scroll events don't bubble, so listen while capturing)
+  const onScroll = (e: Event) => {
+    const target = e.target as HTMLElement | null
+    if (target?.matches?.('[data-thread-scroller]')) schedule()
+  }
+  globalThis.document?.addEventListener('scroll', onScroll, true)
   const unsubscribe = [
     useMessages.subscribe(schedule),
     useThreads.subscribe(schedule),
     useAppState.subscribe(schedule),
     () =>
       globalThis.document?.removeEventListener('visibilitychange', onVisible),
+    () => globalThis.document?.removeEventListener('scroll', onScroll, true),
   ]
   const ping = setInterval(() => send({ t: 'ping' }), PING_MS)
   connect()
@@ -216,6 +265,8 @@ export type MirrorState = {
   msgs: MirrorMessage[]
   stream: Stream
   senderOn: boolean
+  /** Where Hi-chat is scrolled to; a new object for each move */
+  scroll: { bottom: true } | { id: string; f: number } | null
 }
 
 export const emptyMirror: MirrorState = {
@@ -223,6 +274,7 @@ export const emptyMirror: MirrorState = {
   msgs: [],
   stream: null,
   senderOn: false,
+  scroll: null,
 }
 
 /**
@@ -262,5 +314,13 @@ export function applyMirrorMessage(
     return state
   }
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
+  if (m?.t === 'scroll') {
+    if (m.bottom === true) return { ...state, scroll: { bottom: true } }
+    if (typeof m.id === 'string' && typeof m.f === 'number')
+      return {
+        ...state,
+        scroll: { id: m.id, f: Math.min(1, Math.max(0, m.f)) },
+      }
+  }
   return state
 }

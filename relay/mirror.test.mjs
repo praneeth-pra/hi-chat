@@ -95,6 +95,26 @@ test('a reply saved under a new id still ends the stream', () => {
   assert.equal(late.got.filter((m) => m.t === 'stream').length, 0)
 })
 
+test('viewers scroll with Hi-chat, late ones too', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(JSON.stringify({ t: 'scroll', id: 'm1', f: 1.7, x: 1 }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'scroll', id: 'm1', f: 1 })
+  sender.onmessage(JSON.stringify({ t: 'scroll', id: 'm1', f: 'x' }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'scroll', id: 'm1', f: 1 })
+  sender.onmessage(JSON.stringify({ t: 'scroll', bottom: true }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'scroll', bottom: true })
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  assert.deepEqual(
+    late.got.filter((m) => m.t === 'scroll'),
+    [{ t: 'scroll', bottom: true }]
+  )
+})
+
 test('viewers cannot send, and bad messages are dropped', () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()
