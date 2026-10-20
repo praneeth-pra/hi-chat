@@ -140,7 +140,7 @@ data type
 group by
 WAN
 ui5
-EKs
+EKS
 consumer
 requests
 data lake
