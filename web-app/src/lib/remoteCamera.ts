@@ -1,4 +1,4 @@
-// Remote camera, sending side (the /camera page on the remote laptop): offers
+// Remote camera, sending side (/mirror's camera panel on the remote laptop): offers
 // its camera and microphone to every Meet tab running the Hi-chat extension,
 // over WebRTC. relay/camera.mjs passes the connection setup between them.
 
@@ -168,7 +168,7 @@ export const EXTENSION_FILES = [
 ]
 
 export const extensionConfig = (site: string, key: string) =>
-  `// Filled in by Hi-chat's /camera page. Keep this folder private: the key\n` +
+  `// Filled in by Hi-chat's /mirror page. Keep this folder private: the key\n` +
   `// lets Meet tabs on this computer receive the remote camera.\n` +
   `self.HICHAT_CAMERA = ${JSON.stringify({ site, key })}\n`
 

@@ -528,7 +528,7 @@ export function createRelay(options = {}) {
       }
       return
     }
-    // The remote camera's key, for the signed-in /camera page (nginx checks
+    // The remote camera's key, for the signed-in /mirror page (nginx checks
     // the login before this)
     if (req.url === '/api/camera-key') {
       const key = cameraKey(options.env ?? process.env)

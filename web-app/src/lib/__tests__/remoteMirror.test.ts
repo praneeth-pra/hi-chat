@@ -257,5 +257,23 @@ describe('remote mirror', () => {
       })
       expect(FakeSocket.last).toBe(before)
     })
+
+    it('stops sending once the page moves to the viewer', () => {
+      const location = {
+        protocol: 'https:',
+        host: 'hi.example',
+        pathname: '/',
+      } as Location
+      stop = startRemoteMirror({
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        location,
+      })
+      const ws = FakeSocket.last
+      ws.open()
+      location.pathname = '/mirror'
+      ws.hear({ t: 'viewers', n: 1 })
+      vi.advanceTimersByTime(100)
+      expect(ws.sent).toEqual([])
+    })
   })
 })

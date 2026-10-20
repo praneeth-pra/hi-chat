@@ -141,16 +141,19 @@ emailed code) to follow the conversation open in Hi-chat, live: replies show
 as they stream, a fraction of a second behind. Hi-chat sends the text, not
 video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/lib/remoteMirror.ts`),
 and only while a viewer is open. With Hi-chat open in several windows, the
-one in front is shown.
+one in front is shown. The same page has the remote camera (below): the
+**Camera** button in its header opens the panel.
 
 ## Remote camera
 
 Lets Google Meet on one computer use the camera and microphone of a laptop
 somewhere else:
 
-- On the remote laptop, open `/camera` in Chrome (signed in) and press Start
-  sending. It can start by itself each time the page opens.
-- On the computer that joins Meet, download the extension from the same page,
+- On the remote laptop, open `/mirror` in Chrome (signed in), open the
+  **Camera** panel and press Start sending. It can start by itself each time
+  the page opens.
+- On the computer that joins Meet, download the extension from the panel's
+  "Set up Meet on the other computer" section,
   unzip it, and load it in `chrome://extensions` (Developer mode, Load
   unpacked). Meet then lists "Hi-chat remote camera" and "Hi-chat remote mic".
   While the remote mic is connected, its sound also plays on this computer, so

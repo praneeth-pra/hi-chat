@@ -63,7 +63,7 @@ function safeEqual(a, b) {
 }
 
 /**
- * The remote camera's key (camera.mjs): the /camera page and the Chrome
+ * The remote camera's key (camera.mjs): the /mirror page's camera and the Chrome
  * extension use it instead of the login cookie, which Meet's pages can't send.
  * It changes with the cookie secret, so rotating AUTH_SECRET revokes it.
  */

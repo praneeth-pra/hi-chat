@@ -1,10 +1,10 @@
-// Remote camera: a laptop elsewhere opens /camera and sends its camera and
+// Remote camera: a laptop elsewhere opens /mirror and sends its camera and
 // microphone; the Hi-chat Chrome extension on another computer hands them to
 // Google Meet as "Hi-chat remote camera" and "Hi-chat remote mic".
 //
 // The media goes directly between the two browsers (WebRTC). This hub only
 // passes the connection setup (offers, answers, ICE candidates) between the
-// one sender (the /camera page) and each viewer (a Meet tab). Both connect to
+// one sender (the /mirror page's camera) and each viewer (a Meet tab). Both connect to
 // /api/camera?role=send|view&key=… with the camera key (auth.mjs), because a
 // Meet tab can't send Hi-chat's login cookie.
 

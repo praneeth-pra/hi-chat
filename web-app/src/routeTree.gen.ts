@@ -14,7 +14,6 @@ import { Route as rootRoute } from './routes/__root'
 import { Route as SystemMonitorImport } from './routes/system-monitor'
 import { Route as MirrorImport } from './routes/mirror'
 import { Route as LogsImport } from './routes/logs'
-import { Route as CameraImport } from './routes/camera'
 import { Route as IndexImport } from './routes/index'
 import { Route as ProjectIndexImport } from './routes/project/index'
 import { Route as HubIndexImport } from './routes/hub/index'
@@ -54,12 +53,6 @@ const MirrorRoute = MirrorImport.update({
 const LogsRoute = LogsImport.update({
   id: '/logs',
   path: '/logs',
-  getParentRoute: () => rootRoute,
-} as any)
-
-const CameraRoute = CameraImport.update({
-  id: '/camera',
-  path: '/camera',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -199,13 +192,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexImport
-      parentRoute: typeof rootRoute
-    }
-    '/camera': {
-      id: '/camera'
-      path: '/camera'
-      fullPath: '/camera'
-      preLoaderRoute: typeof CameraImport
       parentRoute: typeof rootRoute
     }
     '/logs': {
@@ -376,7 +362,6 @@ declare module '@tanstack/react-router' {
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/camera': typeof CameraRoute
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
@@ -404,7 +389,6 @@ export interface FileRoutesByFullPath {
 
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/camera': typeof CameraRoute
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
@@ -433,7 +417,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
-  '/camera': typeof CameraRoute
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
@@ -463,7 +446,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/camera'
     | '/logs'
     | '/mirror'
     | '/system-monitor'
@@ -490,7 +472,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/camera'
     | '/logs'
     | '/mirror'
     | '/system-monitor'
@@ -517,7 +498,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/camera'
     | '/logs'
     | '/mirror'
     | '/system-monitor'
@@ -546,7 +526,6 @@ export interface FileRouteTypes {
 
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CameraRoute: typeof CameraRoute
   LogsRoute: typeof LogsRoute
   MirrorRoute: typeof MirrorRoute
   SystemMonitorRoute: typeof SystemMonitorRoute
@@ -574,7 +553,6 @@ export interface RootRouteChildren {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CameraRoute: CameraRoute,
   LogsRoute: LogsRoute,
   MirrorRoute: MirrorRoute,
   SystemMonitorRoute: SystemMonitorRoute,
@@ -611,7 +589,6 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
-        "/camera",
         "/logs",
         "/mirror",
         "/system-monitor",
@@ -639,9 +616,6 @@ export const routeTree = rootRoute
     },
     "/": {
       "filePath": "index.tsx"
-    },
-    "/camera": {
-      "filePath": "camera.tsx"
     },
     "/logs": {
       "filePath": "logs.tsx"
