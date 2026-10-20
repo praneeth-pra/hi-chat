@@ -21,12 +21,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      # One Hi-chat.exe on .NET Framework 4.8 (part of Windows 10 and 11),
+      # with WebView2's DLLs packed inside it
       - name: Build Hi-chat.exe
         run: >
-          dotnet publish windows-app/HiChat.csproj -c Release -r win-x64 --self-contained
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:Version=1.0.${{ github.run_number }}
-          -o windows-app/out
+          dotnet build windows-app/HiChat.csproj -c Release
+          -p:Version=1.0.${{ github.run_number }} -o windows-app/out
       - uses: actions/upload-artifact@v4
         with:
           name: Hi-chat-exe
