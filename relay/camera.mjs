@@ -6,7 +6,8 @@
 // passes the connection setup (offers, answers, ICE candidates) between the
 // one sender (the /mirror page's camera) and each viewer (a Meet tab). Both connect to
 // /api/camera?role=send|view&key=… with the camera key (auth.mjs), because a
-// Meet tab can't send Hi-chat's login cookie.
+// Meet tab can't send Hi-chat's login cookie. The same connection carries the
+// screen a Meet tab presents back to /mirror; the hub passes its on/off.
 
 import { randomBytes } from 'node:crypto'
 
@@ -53,6 +54,8 @@ export function createCameraHub({ env = process.env, log = console.log } = {}) {
       return m.candidate === null || typeof m.candidate === 'object'
         ? { t: 'ice', candidate: m.candidate }
         : null
+    // A Meet tab starting or stopping a presentation it sends to /mirror
+    if (m.t === 'screen') return { t: 'screen', on: m.on === true }
     return null
   }
 

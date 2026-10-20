@@ -56,6 +56,8 @@ export function useCameraSender() {
   const [micId, setMicId] = useState<string>(() => savedChoice().mic ?? '')
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [status, setStatus] = useState<CameraStatus | null>(null)
+  // The screen the computer in Meet is presenting, while it presents
+  const [screen, setScreen] = useState<MediaStream | null>(null)
   const [autostart, setAutostartState] = useState(
     () => stored(AUTOSTART) === '1'
   )
@@ -92,6 +94,7 @@ export function useCameraSender() {
         stream: media,
         key,
         onStatus: setStatus,
+        onScreen: setScreen,
       })
       store(AUTOSTART, '1')
       setAutostartState(true)
@@ -112,6 +115,7 @@ export function useCameraSender() {
     stream?.getTracks().forEach((t) => t.stop())
     setStream(null)
     setStatus(null)
+    setScreen(null)
   }, [stream])
 
   const setAutostart = useCallback((on: boolean) => {
@@ -196,6 +200,7 @@ export function useCameraSender() {
     setMicId,
     stream,
     status,
+    screen,
     autostart,
     setAutostart,
     starting,
