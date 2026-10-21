@@ -1,0 +1,39 @@
+# Hi-chat on Fly.io, in Mumbai (closest to Bangalore). The same image as on
+# Railway: nginx in front of the Node relay, on one port.
+#
+# One machine, always on: the mirror and camera hubs keep their state in
+# memory, so a second machine (or one that stops when idle) would split or
+# lose it. Deploys come from .github/workflows/fly-deploy.yml.
+
+app = "hi-chat-mumbai"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 500
+    hard_limit = 1000
+
+  # The login page answers without a login: nginx and the relay are both up
+  [[http_service.checks]]
+    method = "GET"
+    path = "/login"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

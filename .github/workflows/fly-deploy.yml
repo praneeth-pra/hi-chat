@@ -1,0 +1,39 @@
+name: Deploy to Fly.io
+
+# Builds the image here on GitHub and sends it to Fly.io (Mumbai), so a
+# release never waits on any platform's builders. Runs only once the
+# FLY_API_TOKEN secret is set (a Fly deploy token for the hi-chat-mumbai app).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the token
+        id: token
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN isn't set: nothing deployed"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.token.outputs.ready == 'true'
+      - name: Build here and deploy
+        if: steps.token.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        # --local-only: built on this runner, not Fly's builders
+        run: flyctl deploy --local-only --ha=false --wait-timeout 300
