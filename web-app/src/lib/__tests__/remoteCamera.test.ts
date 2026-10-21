@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  readScreenStats,
+  screenStatsBetween,
   cameraSocketUrl,
   crc32,
   extensionConfig,
@@ -187,5 +189,60 @@ describe('remote camera', () => {
     await flush()
     expect(FakePeer.all.length).toBe(peers + 1)
     cam.stop()
+  })
+
+  it('reads how quickly the shared screen arrives', () => {
+    const report = new Map<string, Record<string, unknown>>([
+      [
+        'in',
+        {
+          type: 'inbound-rtp',
+          kind: 'video',
+          framesDecoded: 300,
+          jitterBufferDelay: 3,
+          jitterBufferEmittedCount: 300,
+          totalDecodeTime: 1.5,
+        },
+      ],
+      [
+        'pair',
+        {
+          type: 'candidate-pair',
+          state: 'succeeded',
+          nominated: true,
+          currentRoundTripTime: 0.04,
+          localCandidateId: 'l',
+          remoteCandidateId: 'r',
+        },
+      ],
+      ['l', { type: 'local-candidate', candidateType: 'srflx' }],
+      ['r', { type: 'remote-candidate', candidateType: 'host' }],
+    ])
+    const read = readScreenStats(report as unknown as RTCStatsReport)!
+    expect(read.rttMs).toBe(40)
+    expect(read.relay).toBe(false)
+    // Two seconds later: 60 more frames, each 5 ms in the buffer, 4 ms decoding
+    const later = {
+      framesDecoded: 360,
+      jitterBufferDelay: 3.3,
+      jitterBufferEmittedCount: 360,
+      totalDecodeTime: 1.74,
+    }
+    const s = screenStatsBetween(
+      { s: read.counters, at: 0 },
+      { s: later, at: 2000 },
+      read.rttMs,
+      read.relay
+    )
+    expect(s.fps).toBe(30)
+    expect(s.bufferMs).toBe(5)
+    expect(s.decodeMs).toBe(4)
+    // 20 (half the round trip) + 17 (half a frame) + 5 + 4
+    expect(s.estimateMs).toBe(46)
+    // Through a relay, it says so
+    report.set('l', { type: 'local-candidate', candidateType: 'relay' })
+    expect(readScreenStats(report as unknown as RTCStatsReport)!.relay).toBe(
+      true
+    )
   })
 })

@@ -13,6 +13,110 @@ export type CameraStatus = {
 
 const MAX_VIDEO_BITRATE = 2_500_000
 
+/** Counters of a screen lane's inbound video, as getStats reports them. */
+export type ScreenCounters = {
+  framesDecoded: number
+  jitterBufferDelay: number
+  jitterBufferEmittedCount: number
+  totalDecodeTime: number
+}
+
+/**
+ * How the shared screen arrives on /mirror: frames a second, the network
+ * (round trip), the time a frame waits to play and to decode, whether it
+ * comes through a relay, and an estimate of how long a change on the shared
+ * computer takes to show here (half the round trip, half a frame interval
+ * waiting to be captured, the wait to play and the decode).
+ */
+export type ScreenStats = {
+  fps: number
+  rttMs: number | null
+  bufferMs: number
+  decodeMs: number
+  relay: boolean
+  estimateMs: number | null
+}
+
+/** The screen lane's counters, round trip and route from a stats report. */
+export function readScreenStats(report: RTCStatsReport): {
+  counters: ScreenCounters
+  rttMs: number | null
+  relay: boolean
+} | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let inbound: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pair: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  report.forEach((s: any) => {
+    if (s.type === 'inbound-rtp' && s.kind === 'video') inbound = s
+    if (
+      s.type === 'candidate-pair' &&
+      s.state === 'succeeded' &&
+      (s.nominated || s.selected) &&
+      (!pair || s.selected)
+    )
+      pair = s
+  })
+  if (!inbound) return null
+  const kind = (id?: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    id ? (report.get(id) as any)?.candidateType : undefined
+  return {
+    counters: {
+      framesDecoded: inbound.framesDecoded ?? 0,
+      jitterBufferDelay: inbound.jitterBufferDelay ?? 0,
+      jitterBufferEmittedCount: inbound.jitterBufferEmittedCount ?? 0,
+      totalDecodeTime: inbound.totalDecodeTime ?? 0,
+    },
+    rttMs:
+      typeof pair?.currentRoundTripTime === 'number'
+        ? Math.round(pair.currentRoundTripTime * 1000)
+        : null,
+    relay:
+      kind(pair?.localCandidateId) === 'relay' ||
+      kind(pair?.remoteCandidateId) === 'relay',
+  }
+}
+
+/** The figures over the time between two reads (from the start if none). */
+export function screenStatsBetween(
+  prev: { s: ScreenCounters; at: number } | null,
+  now: { s: ScreenCounters; at: number },
+  rttMs: number | null,
+  relay: boolean
+): ScreenStats {
+  const a = prev?.s ?? {
+    framesDecoded: 0,
+    jitterBufferDelay: 0,
+    jitterBufferEmittedCount: 0,
+    totalDecodeTime: 0,
+  }
+  const b = now.s
+  const frames = b.framesDecoded - a.framesDecoded
+  const emitted = b.jitterBufferEmittedCount - a.jitterBufferEmittedCount
+  const seconds = prev ? (now.at - prev.at) / 1000 : 0
+  const fps = seconds > 0 ? Math.max(0, frames / seconds) : 0
+  const bufferMs =
+    emitted > 0
+      ? ((b.jitterBufferDelay - a.jitterBufferDelay) / emitted) * 1000
+      : 0
+  const decodeMs =
+    frames > 0 ? ((b.totalDecodeTime - a.totalDecodeTime) / frames) * 1000 : 0
+  const frameWait = fps > 0 ? 1000 / fps / 2 : 0
+  return {
+    fps: Math.round(fps),
+    rttMs,
+    bufferMs: Math.round(bufferMs),
+    decodeMs: Math.round(decodeMs),
+    relay,
+    estimateMs:
+      rttMs === null
+        ? null
+        : Math.round(rttMs / 2 + frameWait + bufferMs + decodeMs),
+  }
+}
+
 export function cameraSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
   key: string,
@@ -61,17 +165,28 @@ export function startCameraSender({
   let queue = Promise.resolve()
   // Each Meet tab's screen lane, and the tabs presenting, latest last
   const screens = new Map<string, MediaStream>()
-  // Each screen lane's receiver, to drop its playout delay while fast
+  // Each screen lane's receiver: for its playout delay, and its stats
   const screenReceivers = new Map<string, RTCRtpReceiver>()
   let presenting: string[] = []
-  // Someone controls the shared computer from here: the screen comes at
-  // 30 fps and plays the moment it arrives
+  // Someone controls the shared computer from here: its picture keeps its
+  // frame rate over sharpness, with more bitrate (extension, 'fast')
   let fast = false
+  // A shared screen plays each frame the moment it arrives: no buffer to
+  // smooth it, which only adds delay to a screen (it has no sound to sync)
   const tuneScreen = (id: string) => {
     const r = screenReceivers.get(id) as
-      (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined
-    if (r && 'jitterBufferTarget' in r) r.jitterBufferTarget = fast ? 0 : null
+      | (RTCRtpReceiver & {
+          jitterBufferTarget?: number | null
+          playoutDelayHint?: number | null
+        })
+      | undefined
+    if (!r) return
+    if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0
+    // Older Chrome: the same, in seconds
+    else if ('playoutDelayHint' in r) r.playoutDelayHint = 0
   }
+  // The last stats read, to measure the time between two reads
+  let lastStats: { id: string; at: number; s: ScreenCounters } | null = null
   let shown: MediaStream | null = null
   // Each Meet tab's call sound; the latest tab to connect is heard
   const calls = new Map<string, MediaStream>()
@@ -252,6 +367,23 @@ export function startCameraSender({
   connect()
 
   return {
+    /** How the shared screen is arriving now (see ScreenStats), or null. */
+    async screenStats(): Promise<ScreenStats | null> {
+      let id: string | undefined
+      for (const p of presenting) if (screens.has(p)) id = p
+      const r = id ? screenReceivers.get(id) : undefined
+      if (!id || !r) return null
+      const read = readScreenStats(await r.getStats())
+      if (!read) return null
+      const prev = lastStats?.id === id ? lastStats : null
+      lastStats = { id, at: performance.now(), s: read.counters }
+      return screenStatsBetween(
+        prev && { s: prev.s, at: prev.at },
+        { s: read.counters, at: lastStats.at },
+        read.rttMs,
+        read.relay
+      )
+    },
     /** The shared screen quick (30 fps, no playout delay) or as usual. */
     setFastScreen(on: boolean) {
       if (fast === on) return
