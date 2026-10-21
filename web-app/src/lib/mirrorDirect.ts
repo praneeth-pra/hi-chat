@@ -39,7 +39,7 @@ export function createUnchunker(done: (data: string) => void) {
   }
 }
 
-type Tagged = { s?: unknown; q?: unknown }
+type Tagged = { t?: unknown; s?: unknown; q?: unknown }
 
 // Direct copies held while they wait for an earlier update, per sender
 const MAX_HELD = 500
