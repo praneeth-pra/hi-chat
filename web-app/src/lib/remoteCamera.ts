@@ -174,12 +174,8 @@ export function startCameraSender({
   // A shared screen plays each frame the moment it arrives: no buffer to
   // smooth it, which only adds delay to a screen (it has no sound to sync)
   const tuneScreen = (id: string) => {
-    const r = screenReceivers.get(id) as
-      | (RTCRtpReceiver & {
-          jitterBufferTarget?: number | null
-          playoutDelayHint?: number | null
-        })
-      | undefined
+    const r = screenReceivers.get(id) as unknown as
+      Record<string, unknown> | undefined
     if (!r) return
     if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0
     // Older Chrome: the same, in seconds
