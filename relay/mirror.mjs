@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 // Remote mirror: Hi-chat (the sender) sends the open conversation over
 // /api/mirror?role=send, and any signed-in browser that opens /mirror (a
 // viewer, on /api/mirror?role=view) sees it live, replies included while they
@@ -16,6 +18,12 @@
 // The hub keeps the latest of each in memory, so a viewer that joins late
 // starts from it. Senders hear how many viewers there are and send nothing
 // while there are none.
+//
+// Direct connections: the hub also passes WebRTC setup ('rtc') between a
+// sender and each viewer, so the two can open a data channel straight to each
+// other and skip this server. A sender sends every update both ways, tagged
+// with its session `s` and a sequence number `q`, which the hub passes on;
+// the viewer applies each `q` once, from whichever route brings it first.
 
 // Under wsProxy's 1 MB message cap, which would close the socket
 const MAX_TEXT = 900_000
@@ -159,7 +167,67 @@ export const LINK_RE = /^[A-Za-z0-9_-]{22,64}$/
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
 
-export function createMirrorHub({ now = Date.now } = {}) {
+const ID_RE = /^[0-9a-f]{16}$/
+const SESSION_RE = /^[\w-]{1,40}$/
+const MAX_SDP = 64 * 1024
+
+/** The WebRTC setup fields an 'rtc' message may carry, checked. */
+function cleanRtc(m) {
+  if (typeof m.sdp === 'string' && (m.type === 'offer' || m.type === 'answer'))
+    return m.sdp.length <= MAX_SDP ? { type: m.type, sdp: m.sdp } : null
+  if (m.candidate === null) return { candidate: null }
+  if (m.candidate && typeof m.candidate === 'object') {
+    const c = m.candidate
+    if (typeof c.candidate !== 'string' || c.candidate.length > 2048)
+      return null
+    return {
+      candidate: {
+        candidate: c.candidate,
+        sdpMid: typeof c.sdpMid === 'string' ? c.sdpMid.slice(0, 64) : null,
+        sdpMLineIndex: Number.isInteger(c.sdpMLineIndex)
+          ? c.sdpMLineIndex
+          : null,
+      },
+    }
+  }
+  return null
+}
+
+/** A sender's `s` and `q`, as the start of a JSON object, or ''. */
+function seqTag(m) {
+  return typeof m?.s === 'string' &&
+    SESSION_RE.test(m.s) &&
+    Number.isSafeInteger(m.q) &&
+    m.q >= 0
+    ? `"s":"${m.s}","q":${m.q},`
+    : ''
+}
+
+export function createMirrorHub({
+  now = Date.now,
+  ice = { ready: () => null },
+} = {}) {
+  // TURN credentials when ready (fetched in the background), else STUN
+  const iceList = () => {
+    const list = ice.ready()
+    if (!list) ice.load?.()
+    return list ?? [{ urls: 'stun:stun.l.google.com:19302' }]
+  }
+  // Each socket's id, for addressing WebRTC setup
+  const ids = new Map() // socket -> id
+  const byId = new Map() // id -> { ws, role, names }
+  const newId = (ws, role, names) => {
+    const id = randomBytes(8).toString('hex')
+    ids.set(ws, id)
+    byId.set(id, { ws, role, names })
+    return id
+  }
+  const forget = (ws) => {
+    byId.delete(ids.get(ws))
+    ids.delete(ws)
+  }
+  // The tag of the update being passed on (see seqTag)
+  let tag = ''
   // '' is the signed-in /mirror, where every app sends; a link's secret
   // names its own channel, where only that app sends
   const channels = new Map()
@@ -188,8 +256,14 @@ export function createMirrorHub({ now = Date.now } = {}) {
       channels.delete(name)
   }
   const toViewers = (ch, data) => {
-    for (const v of ch.viewers) v.send(data)
+    const out = tag && data[0] === '{' ? '{' + tag + data.slice(1) : data
+    for (const v of ch.viewers) v.send(out)
   }
+  // A sender hears of each viewer (in any of its channels) it may connect to
+  const peerNote = (id, on) =>
+    JSON.stringify(
+      on ? { t: 'peer', id, on, ice: iceList() } : { t: 'peer', id, on }
+    )
   const status = (names) => {
     for (const name of names) {
       const ch = channels.get(name)
@@ -331,9 +405,48 @@ export function createMirrorHub({ now = Date.now } = {}) {
     }
     // "New link": the app's old link stops working now
     if (m?.t === 'revoke') return revoke(m.link)
+    // Setting up a direct connection with one of its viewers
+    if (m?.t === 'rtc') return rtcToViewer(ws, m)
     const handle = Object.hasOwn(HANDLERS, m?.t) ? HANDLERS[m.t] : null
     if (!handle) return
-    for (const name of senderChannels.get(ws) ?? []) handle(channel(name), m)
+    // Images aren't sequenced: they go by key, and only this way
+    tag = m.t === 'img' ? '' : seqTag(m)
+    try {
+      for (const name of senderChannels.get(ws) ?? []) handle(channel(name), m)
+    } finally {
+      tag = ''
+    }
+  }
+
+  function rtcToViewer(ws, m) {
+    const to = typeof m.to === 'string' && ID_RE.test(m.to) && byId.get(m.to)
+    const names = senderChannels.get(ws) ?? []
+    if (!to || to.role !== 'view' || !names.includes(to.names[0])) return
+    const clean = cleanRtc(m)
+    if (!clean) return
+    to.ws.send(
+      JSON.stringify({
+        t: 'rtc',
+        from: ids.get(ws),
+        ...clean,
+        ...(clean.type === 'offer' ? { ice: iceList() } : {}),
+      })
+    )
+  }
+
+  function rtcToSender(ws, name, raw) {
+    let m
+    try {
+      m = JSON.parse(raw)
+    } catch {
+      return
+    }
+    if (m?.t !== 'rtc') return
+    const to = typeof m.to === 'string' && ID_RE.test(m.to) && byId.get(m.to)
+    if (!to || to.role !== 'send' || !to.names.includes(name)) return
+    const clean = cleanRtc(m)
+    if (clean)
+      to.ws.send(JSON.stringify({ t: 'rtc', from: ids.get(ws), ...clean }))
   }
 
   function joinSender(ws, link) {
@@ -345,8 +458,10 @@ export function createMirrorHub({ now = Date.now } = {}) {
       l.live += 1
       links.set(link, l)
     }
+    newId(ws, 'send', names)
     ws.onmessage = (data) => fromSender(ws, data)
     ws.onclose = () => {
+      forget(ws)
       senderChannels.delete(ws)
       for (const name of names) channels.get(name)?.senders.delete(ws)
       const l = names[1] && links.get(link)
@@ -358,18 +473,29 @@ export function createMirrorHub({ now = Date.now } = {}) {
       names.forEach(tidy)
     }
     status(names)
+    // The viewers already watching, to connect to directly
+    for (const name of names)
+      for (const v of channels.get(name)?.viewers ?? [])
+        ws.send(peerNote(ids.get(v), true))
   }
 
   function joinViewer(ws, link) {
     const name = link ?? ''
     const ch = channel(name)
     ch.viewers.add(ws)
-    // Viewers only listen; a ping gets a pong (echoing its `n`, so the page
+    const id = newId(ws, 'view', [name])
+    // Viewers mostly listen; a ping gets a pong (echoing its `n`, so the page
     // can time the round trip), which also keeps an idle socket open: nginx
-    // closes one that hears nothing for 120 s
-    ws.onmessage = (raw) => pong(ws, raw)
+    // closes one that hears nothing for 120 s. They also answer a sender's
+    // offer of a direct connection
+    ws.onmessage = (raw) => {
+      if (typeof raw !== 'string' || raw.length > MAX_SDP + 4096) return
+      if (!pong(ws, raw)) rtcToSender(ws, name, raw)
+    }
     ws.onclose = () => {
+      forget(ws)
       ch.viewers.delete(ws)
+      for (const s of ch.senders) s.send(peerNote(id, false))
       status([name])
       tidy(name)
     }
@@ -379,6 +505,7 @@ export function createMirrorHub({ now = Date.now } = {}) {
     if (ch.phase) ws.send(JSON.stringify({ t: 'phase', phase: ch.phase }))
     if (ch.scroll) ws.send(ch.scroll)
     status([name])
+    for (const s of ch.senders) s.send(peerNote(id, true))
   }
 
   return {

@@ -14,6 +14,7 @@ import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { useThreads } from '@/hooks/useThreads'
+import { createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
 import {
   linkFromPath,
   mirrorLinkSecret,
@@ -237,9 +238,11 @@ export function mirrorSocketUrl(
 export function startRemoteMirror({
   WebSocketImpl = globalThis.WebSocket,
   location = globalThis.location,
+  PeerConnection = globalThis.RTCPeerConnection,
 }: {
   WebSocketImpl?: typeof WebSocket
   location?: Location
+  PeerConnection?: typeof RTCPeerConnection
 } = {}): () => void {
   if (
     !WebSocketImpl ||
@@ -288,8 +291,26 @@ export function startRemoteMirror({
   }
 
   const open = () => ws?.readyState === WebSocketImpl.OPEN
-  const send = (data: unknown) => {
-    if (open()) ws!.send(JSON.stringify(data))
+  // This page's updates, numbered, so a viewer applies each once whichever
+  // way it arrives first (lib/mirrorDirect.ts)
+  const session = Math.random().toString(36).slice(2, 12)
+  let seq = 0
+  // A data channel straight to each viewer, beside the server
+  const direct = PeerConnection
+    ? createDirectSender({
+        PeerConnection,
+        signal: (m) => {
+          if (open()) ws!.send(JSON.stringify(m))
+        },
+      })
+    : null
+  const send = (data: { t: string } & Record<string, unknown>) => {
+    if (!open()) return
+    if (!SEQUENCED.has(data.t)) return ws!.send(JSON.stringify(data))
+    const out = JSON.stringify({ ...data, s: session, q: ++seq })
+    // Straight to the viewers first, then the server's copy
+    direct?.broadcast(out)
+    ws!.send(out)
   }
   /** Everything again, for a new viewer or a window coming to the front. */
   const resend = () => {
@@ -313,7 +334,7 @@ export function startRemoteMirror({
           : (liveId ?? `reply-${++streamCount}`)
     const update = streamUpdate(sentStream, id, text ?? '')
     if (update) {
-      send(update)
+      send(update as { t: string })
       sentStream = { id, text: id === null ? '' : (text ?? '') }
     }
   }
@@ -417,10 +438,11 @@ export function startRemoteMirror({
       '[data-thread-scroller]'
     )
     if (!scroller) return
-    const scroll = JSON.stringify(readScroll(scroller))
+    const at = readScroll(scroller)
+    const scroll = JSON.stringify(at)
     if (scroll !== sentScroll) {
       sentScroll = scroll
-      ws!.send(scroll)
+      send(at)
     }
   }
 
@@ -449,6 +471,8 @@ export function startRemoteMirror({
       } catch {
         return
       }
+      // Setting up direct channels with viewers
+      if (m.t === 'peer' || m.t === 'rtc') return direct?.receive(m)
       if (m.t !== 'viewers' || typeof m.n !== 'number') return
       const had = viewers
       viewers = m.n
@@ -464,6 +488,8 @@ export function startRemoteMirror({
       ws = null
       viewers = 0
       stayAwake(false)
+      // The server introduces the viewers again on reconnecting
+      direct?.closeAll()
       if (stopped) return
       retryTimer = setTimeout(connect, retryMs)
       retryMs = Math.min(retryMs * 2, 30_000)
@@ -500,6 +526,7 @@ export function startRemoteMirror({
     const was = ws
     ws = null
     viewers = 0
+    direct?.closeAll()
     was?.close()
     clearTimeout(retryTimer)
     connect()
@@ -521,6 +548,7 @@ export function startRemoteMirror({
     unsubscribe.forEach((u) => u())
     clearInterval(ping)
     clearTimeout(retryTimer)
+    direct?.closeAll()
     ws?.close()
     ws = null
   }
