@@ -40,6 +40,7 @@ import {
   wheelPixels,
 } from '@/lib/remoteInput'
 import { splitReasoning } from '@/lib/splitReasoning'
+import type { ScreenStats } from '@/lib/remoteCamera'
 import {
   RemoteCameraPanel,
   StatusPill,
@@ -539,6 +540,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             canEdit={controllable}
             sendInput={sendInput}
             onEditing={cam.setFastScreen}
+            readStats={cam.screenStats}
           />
         )}
         {cam.screen && wide && bodyWidth > 0 && (
@@ -828,15 +830,31 @@ function useRemoteControl({
   }, [on, video, sendInput])
 }
 
+/** The readout's breakdown, on hover. */
+function screenStatsTitle(s: ScreenStats) {
+  return [
+    `About ${s.estimateMs ?? '?'} ms from a change there to here:`,
+    `network ${s.rttMs === null ? '?' : Math.round(s.rttMs / 2)} ms (half of a ${s.rttMs ?? '?'} ms round trip),`,
+    `waiting for the next frame ${s.fps ? Math.round(500 / s.fps) : '?'} ms (${s.fps} fps),`,
+    `buffer ${s.bufferMs} ms, decode ${s.decodeMs} ms.`,
+    s.relay
+      ? 'Through a relay server: a direct connection would be quicker.'
+      : 'Direct between the two computers.',
+  ].join(' ')
+}
+
 function SharedScreen({
   stream,
   width,
   canEdit,
   sendInput,
   onEditing,
+  readStats,
 }: {
   stream: MediaStream
   width?: number
+  /** How the picture is arriving, for the readout in its corner */
+  readStats: () => Promise<ScreenStats | null>
   /** The Hi-chat app sharing this screen can be controlled from here */
   canEdit: boolean
   sendInput: (m: RemoteInput) => boolean
@@ -848,6 +866,23 @@ function SharedScreen({
   const [picture, setPicture] = useState(false)
   const [editing, setEditing] = useState(false)
   const edit = editing && canEdit
+  // How quickly the picture arrives, read every 2 s while it shows
+  const [stats, setStats] = useState<ScreenStats | null>(null)
+  useEffect(() => {
+    if (!picture) return
+    let live = true
+    const read = () =>
+      readStats()
+        .then((s) => live && setStats(s))
+        .catch(() => {})
+    read()
+    const timer = setInterval(read, 2000)
+    return () => {
+      live = false
+      clearInterval(timer)
+      setStats(null)
+    }
+  }, [picture, readStats])
   useRemoteControl({
     on: edit,
     video,
@@ -901,6 +936,21 @@ function SharedScreen({
           aria-hidden
           className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-sky-400"
         />
+      )}
+      {stats && stats.fps > 0 && (
+        <span
+          title={screenStatsTitle(stats)}
+          className={cn(
+            'absolute bottom-3 left-3 rounded-full border border-white/10 bg-black/60 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white/80 backdrop-blur',
+            stats.estimateMs !== null &&
+              stats.estimateMs > 150 &&
+              'text-amber-300'
+          )}
+        >
+          {stats.fps} fps
+          {stats.estimateMs !== null && ` · ≈${stats.estimateMs} ms`}
+          {stats.relay ? ' · relay' : ' · direct'}
+        </span>
       )}
       {canEdit && (
         <button

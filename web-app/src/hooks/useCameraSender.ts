@@ -132,6 +132,12 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     sender.current?.setFastScreen(on)
   }, [])
 
+  // How the shared screen is arriving (for the readout on its panel)
+  const screenStats = useCallback(
+    () => sender.current?.screenStats() ?? Promise.resolve(null),
+    []
+  )
+
   const stop = useCallback(() => {
     sender.current?.stop()
     sender.current = null
@@ -236,6 +242,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     replaced,
     screen,
     setFastScreen,
+    screenStats,
     call,
     autostart,
     setAutostart,

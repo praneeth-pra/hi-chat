@@ -127,7 +127,12 @@ export function createDirectSender({
 }) {
   const peers = new Map<
     string,
-    { pc: RTCPeerConnection; dc: RTCDataChannel; input: RTCDataChannel }
+    {
+      pc: RTCPeerConnection
+      dc: RTCDataChannel
+      input: RTCDataChannel
+      moves: RTCDataChannel
+    }
   >()
   let queue = Promise.resolve()
 
@@ -137,6 +142,7 @@ export function createDirectSender({
     peers.delete(id)
     p.dc.close()
     p.input.close()
+    p.moves.close()
     p.pc.close()
   }
 
@@ -147,7 +153,13 @@ export function createDirectSender({
     const dc = pc.createDataChannel('mirror', { ordered: true })
     // Mouse and keys from the viewer: in order (a key's up after its down)
     const input = pc.createDataChannel('input', { ordered: true })
-    peers.set(id, { pc, dc, input })
+    // Pointer moves only: never resent and never waiting for an earlier one,
+    // as the next move replaces a lost one; numbered, so a late one is dropped
+    const moves = pc.createDataChannel('moves', {
+      ordered: false,
+      maxRetransmits: 0,
+    })
+    peers.set(id, { pc, dc, input, moves })
     // Never from a link's viewer (no login)
     const control = canControl && !link
     const mine = () => peers.get(id)?.pc === pc
@@ -166,16 +178,27 @@ export function createDirectSender({
       send(JSON.stringify({ t: 'hello', control }))
       onOpen?.()
     }
-    input.onmessage = (e) => {
-      if (!control || !mine()) return
-      const data = String(e.data)
-      if (data.length > 2000) return
+    const take = (data: string) => {
+      if (!control || !mine() || data.length > 2000) return null
       try {
         const m = JSON.parse(data)
-        if (m && typeof m === 'object' && typeof m.k === 'string') onInput?.(m)
+        return m && typeof m === 'object' && typeof m.k === 'string' ? m : null
       } catch {
-        // not an action
+        return null // not an action
       }
+    }
+    input.onmessage = (e) => {
+      const m = take(String(e.data))
+      if (m) onInput?.(m)
+    }
+    let lastMove = -1
+    moves.onmessage = (e) => {
+      const m = take(String(e.data))
+      if (!m || m.k !== 'm' || typeof m.n !== 'number' || m.n <= lastMove)
+        return
+      lastMove = m.n
+      delete m.n
+      onInput?.(m)
     }
     dc.onclose = () => mine() && close(id)
     // A viewer times the direct route with pings
@@ -250,6 +273,8 @@ type ViewerPeer = {
   pc: RTCPeerConnection
   dc: RTCDataChannel | null
   input: RTCDataChannel | null
+  /** Pointer moves, lossy and unordered */
+  moves: RTCDataChannel | null
   /** The sender lets this page control its computer */
   control: boolean
 }
@@ -271,12 +296,14 @@ export function createDirectViewer({
   PeerConnection?: typeof RTCPeerConnection
 }) {
   const peers = new Map<string, ViewerPeer>()
-  // The channel mouse and key actions go on, if any
-  const controlChannel = () => {
+  // The Hi-chat mouse and key actions go to, if any
+  const controlPeer = () => {
     for (const p of peers.values())
-      if (p.control && p.input?.readyState === 'open') return p.input
+      if (p.control && p.input?.readyState === 'open') return p
     return null
   }
+  const controlChannel = () => controlPeer()?.input ?? null
+  let moveCount = 0
   let couldControl = false
   const noteControl = () => {
     const can = controlChannel() !== null
@@ -295,6 +322,7 @@ export function createDirectViewer({
     peers.delete(id)
     p.dc?.close()
     p.input?.close()
+    p.moves?.close()
     p.pc.close()
     onChange(openCount())
     noteControl()
@@ -303,7 +331,13 @@ export function createDirectViewer({
   async function answer(from: string, sdp: string, ice: RTCIceServer[]) {
     close(from)
     const pc = new PeerConnection({ iceServers: ice.length ? ice : STUN })
-    const entry: ViewerPeer = { pc, dc: null, input: null, control: false }
+    const entry: ViewerPeer = {
+      pc,
+      dc: null,
+      input: null,
+      moves: null,
+      control: false,
+    }
     peers.set(from, entry)
     const mine = () => peers.get(from) === entry
     pc.onicecandidate = (e) =>
@@ -315,6 +349,10 @@ export function createDirectViewer({
     pc.ondatachannel = (e) => {
       if (!mine()) return
       const dc = e.channel
+      if (dc.label === 'moves') {
+        entry.moves = dc
+        return
+      }
       if (dc.label === 'input') {
         entry.input = dc
         dc.onopen = () => mine() && noteControl()
@@ -378,9 +416,14 @@ export function createDirectViewer({
     },
     /** Sends a mouse or key action to the Hi-chat that allows control. */
     sendInput(m: RemoteInput) {
-      const dc = controlChannel()
-      if (!dc) return false
-      dc.send(JSON.stringify(m))
+      const p = controlPeer()
+      if (!p?.input) return false
+      // A pointer move on the lossy lane when there is one
+      if (m.k === 'm' && p.moves?.readyState === 'open') {
+        p.moves.send(JSON.stringify({ ...m, n: ++moveCount }))
+        return true
+      }
+      p.input.send(JSON.stringify(m))
       return true
     },
     closeAll() {

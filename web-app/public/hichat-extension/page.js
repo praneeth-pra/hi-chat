@@ -99,26 +99,26 @@
   // /mirror. The offer from /mirror has one video lane coming this way (the
   // only m-section it receives on); the shared screen goes out on it.
   let shared = null // { source, copy }
-  const SCREEN_BITRATE = 2_500_000
-  // While someone controls this computer from /mirror, the copy is quick:
-  // 30 fps, and frames kept over sharpness when the connection is tight
+  // 30 fps: a change on screen waits at most a frame (33 ms) to go out, not
+  // the 66 ms of 15 fps. Sharpness is kept when the connection is tight
+  const SCREEN_FPS = 30
+  const SCREEN_BITRATE = 3_000_000
+  // While someone controls this computer from /mirror, frames are kept over
+  // sharpness instead, with more bitrate so text stays readable as it moves
+  const EDIT_BITRATE = 5_000_000
   let fastScreen = false
   const screenParams = (lane) => {
     const params = lane.getParameters()
     params.encodings = params.encodings?.length ? params.encodings : [{}]
-    params.encodings[0].maxBitrate = fastScreen ? 4_000_000 : SCREEN_BITRATE
-    params.encodings[0].maxFramerate = fastScreen ? 30 : 15
+    params.encodings[0].maxBitrate = fastScreen ? EDIT_BITRATE : SCREEN_BITRATE
+    params.encodings[0].maxFramerate = SCREEN_FPS
     params.degradationPreference = fastScreen
       ? 'maintain-framerate'
       : 'maintain-resolution'
     return lane.setParameters(params)
   }
   function tuneScreen() {
-    if (!shared) return
-    shared.copy
-      .applyConstraints({ frameRate: { max: fastScreen ? 30 : 15 } })
-      .catch(() => {})
-    if (screenSender) screenParams(screenSender).catch(() => {})
+    if (shared && screenSender) screenParams(screenSender).catch(() => {})
   }
   let screenSender = null
 
@@ -356,12 +356,12 @@
         const copy = source.clone()
         copy.contentHint = 'detail'
         // A whole Mac screen is ~3000px wide: too much to start a fresh
-        // connection with. 1080p at 15 fps reads well on /mirror
+        // connection with. 1080p at 30 fps reads well and moves smoothly
         await copy
           .applyConstraints({
             width: { max: 1920 },
             height: { max: 1080 },
-            frameRate: { max: fastScreen ? 30 : 15 },
+            frameRate: { max: SCREEN_FPS },
           })
           .catch(() => {})
         shared = { source, copy }
