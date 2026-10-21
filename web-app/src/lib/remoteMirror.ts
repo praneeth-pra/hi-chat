@@ -234,6 +234,18 @@ export function mirrorSocketUrl(
   return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}`
 }
 
+/** The Mac app's bridge to its page, when this page is in the Mac app. */
+function nativeBridge(): { postMessage(m: unknown): void } | null {
+  const w = globalThis as {
+    webkit?: {
+      messageHandlers?: { hiChat?: { postMessage(m: unknown): void } }
+    }
+    navigator?: Navigator
+  }
+  if (!/HiChatMac/.test(w.navigator?.userAgent ?? '')) return null
+  return w.webkit?.messageHandlers?.hiChat ?? null
+}
+
 /** Starts sending; returns a function that stops it. */
 export function startRemoteMirror({
   WebSocketImpl = globalThis.WebSocket,
@@ -302,6 +314,10 @@ export function startRemoteMirror({
         signal: (m) => {
           if (open()) ws!.send(JSON.stringify(m))
         },
+        // In the Mac app, a signed-in /mirror may control this computer while
+        // it is shared: its mouse and key actions go to the app to replay
+        canControl: nativeBridge() !== null,
+        onInput: (m) => nativeBridge()?.postMessage({ input: m }),
       })
     : null
   const send = (data: { t: string } & Record<string, unknown>) => {

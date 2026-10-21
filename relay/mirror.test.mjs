@@ -500,3 +500,14 @@ test('direct connections: updates keep their sender and sequence number', () => 
   )
   assert.deepEqual(lastOf(viewer, 'phase'), { t: 'phase', phase: 'drafting' })
 })
+
+test("a link's viewer is marked, so Hi-chat never lets it control", () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  hub.join(app, 'send', { link: 'L'.repeat(24) })
+  const signedIn = fakeSocket()
+  hub.join(signedIn, 'view')
+  assert.equal(lastOf(app, 'peer').link, undefined)
+  hub.join(fakeSocket(), 'view', { link: 'L'.repeat(24) })
+  assert.equal(lastOf(app, 'peer').link, true)
+})

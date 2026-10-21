@@ -14,6 +14,7 @@ import {
   IconLoader2,
   IconMaximize,
   IconMessageCircle,
+  IconPencil,
   IconScreenShare,
   IconTool,
   IconVideo,
@@ -26,7 +27,18 @@ import { AccuracyReviewInfo } from '@/containers/ThreadContent'
 import ThinkingBlock from '@/containers/ThinkingBlock'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { markdownBlocks } from '@/lib/markdownBlocks'
-import { createDirectViewer, createSeqFilter } from '@/lib/mirrorDirect'
+import {
+  createDirectViewer,
+  createSeqFilter,
+  type RemoteInput,
+} from '@/lib/mirrorDirect'
+import {
+  createClickCounter,
+  keyAction,
+  macMods,
+  screenPoint,
+  wheelPixels,
+} from '@/lib/remoteInput'
 import { splitReasoning } from '@/lib/splitReasoning'
 import {
   RemoteCameraPanel,
@@ -64,6 +76,10 @@ function useMirror(link?: string) {
   // With a direct channel to Hi-chat open: the round trip over it
   const [directLag, setDirectLag] = useState<number | null>(null)
   const [direct, setDirect] = useState(false)
+  // Whether the Hi-chat app at the other end can be controlled from here
+  const [controllable, setControllable] = useState(false)
+  const sendInputRef = useRef<(m: RemoteInput) => boolean>(() => false)
+  const sendInput = useCallback((m: RemoteInput) => sendInputRef.current(m), [])
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -105,7 +121,9 @@ function useMirror(link?: string) {
         setDirect(open > 0)
         if (!open) setDirectLag(null)
       },
+      onControl: setControllable,
     })
+    sendInputRef.current = (m) => peer.sendInput(m)
     const ping = () => {
       const n = performance.now()
       peer.ping(n)
@@ -204,7 +222,14 @@ function useMirror(link?: string) {
     }
   }, [])
 
-  return { state, connected, lag: direct ? (directLag ?? lag) : lag, direct }
+  return {
+    state,
+    connected,
+    lag: direct ? (directLag ?? lag) : lag,
+    direct,
+    controllable,
+    sendInput,
+  }
 }
 
 /**
@@ -212,7 +237,8 @@ function useMirror(link?: string) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected, lag, direct } = useMirror(link)
+  const { state, connected, lag, direct, controllable, sendInput } =
+    useMirror(link)
   const cam = useCameraSender({ link })
   // Open as last left; at first, open on a computer that sends its camera
   const [panelOpen, setPanelOpen] = useState(() => {
@@ -510,6 +536,9 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
           <SharedScreen
             stream={cam.screen}
             width={wide ? screenWidth : undefined}
+            canEdit={controllable}
+            sendInput={sendInput}
+            onEditing={cam.setFastScreen}
           />
         )}
         {cam.screen && wide && bodyWidth > 0 && (
@@ -671,16 +700,164 @@ function Divider({
   )
 }
 
+/**
+ * While `on`: this page's mouse over the shared screen, its wheel and its
+ * keys go to the computer sharing it (lib/remoteInput.ts). Your own pointer
+ * moves at once; the picture follows a moment later. Shift+Esc stops.
+ */
+function useRemoteControl({
+  on,
+  video,
+  sendInput,
+  stop,
+}: {
+  on: boolean
+  video: RefObject<HTMLVideoElement | null>
+  sendInput: (m: RemoteInput) => boolean
+  stop: () => void
+}) {
+  const stopRef = useRef(stop)
+  stopRef.current = stop
+  useEffect(() => {
+    const el = video.current
+    if (!on || !el) return
+    const viewerIsMac = /Mac/.test(navigator.platform || navigator.userAgent)
+    const clicks = createClickCounter()
+    const held = new Set<number>()
+    const at = (e: { clientX: number; clientY: number }) =>
+      screenPoint(
+        e.clientX,
+        e.clientY,
+        el.getBoundingClientRect(),
+        el.videoWidth,
+        el.videoHeight
+      )
+    const aspect = () =>
+      el.videoHeight
+        ? Math.round((el.videoWidth / el.videoHeight) * 1000) / 1000
+        : 0
+    const mouse = (k: string, e: PointerEvent | MouseEvent, extra = {}) => {
+      const p = at(e)
+      if (!p) return false
+      sendInput({ k, ...p, m: macMods(e, viewerIsMac), a: aspect(), ...extra })
+      return true
+    }
+    // Browser button numbers: 0 left, 1 middle, 2 right; the Mac's: 0, 2, 1
+    const button = (b: number) => (b === 2 ? 1 : b === 1 ? 2 : 0)
+    const onMove = (e: PointerEvent) => {
+      mouse('m', e)
+    }
+    const onDown = (e: PointerEvent) => {
+      const p = at(e)
+      if (!p) return
+      e.preventDefault()
+      el.setPointerCapture?.(e.pointerId)
+      const b = button(e.button)
+      held.add(b)
+      mouse('d', e, { b, c: clicks(b, p.x, p.y) })
+    }
+    const onUp = (e: PointerEvent) => {
+      const b = button(e.button)
+      if (!held.delete(b)) return
+      const p = at(e)
+      sendInput({
+        k: 'u',
+        ...(p ?? {}),
+        b,
+        m: macMods(e, viewerIsMac),
+        a: aspect(),
+      })
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!at(e)) return
+      e.preventDefault()
+      sendInput({ k: 'w', ...wheelPixels(e), m: macMods(e, viewerIsMac) })
+    }
+    const noMenu = (e: Event) => e.preventDefault()
+    const onKey = (e: KeyboardEvent) => {
+      const down = e.type === 'keydown'
+      if (down && e.key === 'Escape' && e.shiftKey) {
+        e.preventDefault()
+        stopRef.current()
+        return
+      }
+      const action = keyAction(e, down, viewerIsMac)
+      if (!action) return
+      // The keys are the shared computer's now, not this page's
+      e.preventDefault()
+      e.stopPropagation()
+      sendInput(action)
+    }
+    // Nothing stays held down there when focus leaves here
+    const release = () => {
+      held.clear()
+      sendInput({ k: 'r' })
+    }
+    const onHidden = () => document.hidden && release()
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('contextmenu', noMenu)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('keyup', onKey, true)
+    window.addEventListener('blur', release)
+    document.addEventListener('visibilitychange', onHidden)
+    // In full screen, Chrome also passes keys like Ctrl+W and Ctrl+T on
+    const keyboard = (
+      navigator as Navigator & {
+        keyboard?: { lock?: () => Promise<void>; unlock?: () => void }
+      }
+    ).keyboard
+    keyboard?.lock?.().catch(() => {})
+    return () => {
+      release()
+      keyboard?.unlock?.()
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('contextmenu', noMenu)
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('keyup', onKey, true)
+      window.removeEventListener('blur', release)
+      document.removeEventListener('visibilitychange', onHidden)
+    }
+  }, [on, video, sendInput])
+}
+
 function SharedScreen({
   stream,
   width,
+  canEdit,
+  sendInput,
+  onEditing,
 }: {
   stream: MediaStream
   width?: number
+  /** The Hi-chat app sharing this screen can be controlled from here */
+  canEdit: boolean
+  sendInput: (m: RemoteInput) => boolean
+  /** Editing started or stopped (the picture goes quicker meanwhile) */
+  onEditing: (on: boolean) => void
 }) {
   const pane = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
   const [picture, setPicture] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const edit = editing && canEdit
+  useRemoteControl({
+    on: edit,
+    video,
+    sendInput,
+    stop: () => setEditing(false),
+  })
+  useEffect(() => {
+    onEditing(edit)
+    return () => onEditing(false)
+  }, [edit, onEditing])
   useEffect(() => {
     const el = video.current
     if (!el) return
@@ -709,12 +886,42 @@ function SharedScreen({
         playsInline
         onResize={() => setPicture(true)}
         onPlaying={() => setPicture(true)}
-        className="size-full object-contain"
+        className={cn(
+          'size-full object-contain',
+          edit && 'cursor-default touch-none select-none'
+        )}
       />
       {!picture && (
         <span className="absolute inset-0 flex items-center justify-center text-sm text-white/60">
           Waiting for the picture…
         </span>
+      )}
+      {edit && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-sky-400"
+        />
+      )}
+      {canEdit && (
+        <button
+          type="button"
+          aria-pressed={edit}
+          title={
+            edit
+              ? 'Stop editing (Shift+Esc)'
+              : 'Edit: use your mouse and keyboard on this screen'
+          }
+          onClick={() => setEditing((on) => !on)}
+          className={cn(
+            'absolute right-14 top-3 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium backdrop-blur transition outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+            edit
+              ? 'border-sky-300/60 bg-sky-500/90 text-white'
+              : 'border-white/10 bg-black/60 text-white/90 hover:bg-black/75'
+          )}
+        >
+          <IconPencil size={14} />
+          {edit ? 'Editing · Shift+Esc to stop' : 'Edit'}
+        </button>
       )}
       <StatusPill
         tone="live"

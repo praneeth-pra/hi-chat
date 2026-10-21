@@ -147,6 +147,8 @@ export function createCameraHub({
         : null
     // A Meet tab starting or stopping a presentation it sends to /mirror
     if (m.t === 'screen') return { t: 'screen', on: m.on === true }
+    // /mirror asking for a quicker screen while someone controls the computer
+    if (m.t === 'fast') return { t: 'fast', on: m.on === true }
     return null
   }
 
