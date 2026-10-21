@@ -68,23 +68,14 @@
     }
   }
 
-  // Remote audio only flows once something plays it. This element also lets
-  // you hear the remote speaker on this computer, as Meet never plays your own
-  // mic back to you. (Meant for laptops in different places: in one room the
-  // remote mic would pick this up and echo it into the call.)
+  // Remote audio only flows once something plays it. Played muted: the
+  // remote speaker's voice goes into the call as this computer's mic, but
+  // never out of its speakers, so Hi-chat's dictation (which listens to the
+  // call through this computer's mic) hears only the call, not the remote
+  // speaker. A muted element may play without a click first.
   const sink = new Audio()
-  // Chrome may block sound until the page has been clicked; play on the next
-  // click or key press then
-  const playSink = () =>
-    sink.play().catch(() => {
-      const retry = () => {
-        removeEventListener('pointerdown', retry, true)
-        removeEventListener('keydown', retry, true)
-        sink.play().catch(() => {})
-      }
-      addEventListener('pointerdown', retry, true)
-      addEventListener('keydown', retry, true)
-    })
+  sink.muted = true
+  const playSink = () => sink.play().catch(() => {})
 
   const send = (m) =>
     document.dispatchEvent(
