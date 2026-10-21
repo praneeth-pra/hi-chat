@@ -1,4 +1,4 @@
-// Passes messages between page.js (in Meet's page) and background.js.
+// Passes messages between page.js (in the call's page) and background.js.
 // Only one copy may run, as with page.js; a second would relay every message twice.
 ;(() => {
   if (document.documentElement.dataset.hichatCameraBridge) return

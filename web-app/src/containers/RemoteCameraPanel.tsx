@@ -118,8 +118,8 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           Remote camera
         </h2>
         <p className="text-sm leading-relaxed text-main-view-fg/60">
-          Send this laptop's camera and microphone to Meet on your other
-          computer.
+          Send this laptop's camera and microphone to Meet, Teams or Zoom (in
+          the browser) on your other computer.
         </p>
       </div>
 
@@ -219,7 +219,7 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
 
       <details className="group rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.02]">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-main-view-fg/80 [&::-webkit-details-marker]:hidden">
-          Set up Meet on the other computer
+          Set up the call on the other computer
           <IconChevronDown
             size={16}
             className="text-main-view-fg/50 transition-transform group-open:rotate-180"
@@ -246,16 +246,17 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           <ol className="list-decimal space-y-1.5 pl-5 leading-relaxed">
             <li>Unzip it.</li>
             <li>
-              In Chrome, open <code>chrome://extensions</code> and turn on
-              Developer mode.
+              In Chrome (or Brave, Edge), open <code>chrome://extensions</code>{' '}
+              and turn on Developer mode.
             </li>
             <li>
               Click <b>Load unpacked</b> and choose the{' '}
               <code>hichat-camera</code> folder.
             </li>
             <li>
-              In Meet, open Settings › Audio and Video and pick{' '}
-              <b>Hi-chat remote camera</b> and <b>Hi-chat remote mic</b>.
+              Join the call in the browser (Meet, Teams, or Zoom's web client).
+              In its audio and video settings pick <b>Hi-chat remote camera</b>{' '}
+              and <b>Hi-chat remote mic</b>.
             </li>
           </ol>
           <p className="text-xs text-main-view-fg/50">
