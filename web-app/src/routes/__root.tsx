@@ -38,6 +38,7 @@ import { ServiceHubProvider } from '@/providers/ServiceHubProvider'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
 import { startRemoteMirror } from '@/lib/remoteMirror'
+import { useRemoteSession } from '@/hooks/useRemoteSession'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -54,8 +55,13 @@ const AppLayout = () => {
   } = useLeftPanel()
   const isSmallScreen = useSmallScreen()
 
-  // Show the open conversation on /mirror in another signed-in browser
-  useEffect(() => startRemoteMirror(), [])
+  // Show the open conversation on /mirror in another signed-in browser,
+  // only while the remote session is on (the button in the chat header)
+  const remoteSession = useRemoteSession((s) => s.on)
+  useEffect(
+    () => (remoteSession ? startRemoteMirror() : undefined),
+    [remoteSession]
+  )
 
   // Minimum width threshold for auto-close (10% of screen width)
   const MIN_PANEL_WIDTH_THRESHOLD = 14
