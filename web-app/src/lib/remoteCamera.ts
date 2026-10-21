@@ -61,7 +61,17 @@ export function startCameraSender({
   let queue = Promise.resolve()
   // Each Meet tab's screen lane, and the tabs presenting, latest last
   const screens = new Map<string, MediaStream>()
+  // Each screen lane's receiver, to drop its playout delay while fast
+  const screenReceivers = new Map<string, RTCRtpReceiver>()
   let presenting: string[] = []
+  // Someone controls the shared computer from here: the screen comes at
+  // 30 fps and plays the moment it arrives
+  let fast = false
+  const tuneScreen = (id: string) => {
+    const r = screenReceivers.get(id) as
+      (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined
+    if (r && 'jitterBufferTarget' in r) r.jitterBufferTarget = fast ? 0 : null
+  }
   let shown: MediaStream | null = null
   // Each Meet tab's call sound; the latest tab to connect is heard
   const calls = new Map<string, MediaStream>()
@@ -97,6 +107,7 @@ export function startCameraSender({
     peers.get(id)?.close()
     peers.delete(id)
     screens.delete(id)
+    screenReceivers.delete(id)
     presenting = presenting.filter((p) => p !== id)
     showScreen()
     if (calls.delete(id)) hearCall()
@@ -126,6 +137,8 @@ export function startCameraSender({
       if (peers.get(id) !== pc) return
       if (e.transceiver === lane) {
         screens.set(id, new MediaStream([e.track]))
+        screenReceivers.set(id, e.receiver)
+        tuneScreen(id)
         showScreen()
       } else if (e.transceiver === callLane) {
         calls.delete(id) // the newest connection goes last
@@ -177,7 +190,11 @@ export function startCameraSender({
     else if (m.t === 'screen' && m.from) {
       const from = m.from
       presenting = presenting.filter((p) => p !== from)
-      if (m.on === true && peers.has(from)) presenting.push(from)
+      if (m.on === true && peers.has(from)) {
+        presenting.push(from)
+        // A presentation starting while someone controls: quick at once
+        if (fast) send({ t: 'fast', to: from, on: true })
+      }
       showScreen()
     } else if (m.t === 'answer' && m.from && m.sdp)
       await peers
@@ -235,6 +252,15 @@ export function startCameraSender({
   connect()
 
   return {
+    /** The shared screen quick (30 fps, no playout delay) or as usual. */
+    setFastScreen(on: boolean) {
+      if (fast === on) return
+      fast = on
+      for (const id of peers.keys()) {
+        send({ t: 'fast', to: id, on })
+        tuneScreen(id)
+      }
+    },
     /** Swaps in another camera or microphone without reconnecting. */
     replace(next: MediaStream) {
       current = next

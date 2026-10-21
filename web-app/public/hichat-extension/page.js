@@ -100,6 +100,26 @@
   // only m-section it receives on); the shared screen goes out on it.
   let shared = null // { source, copy }
   const SCREEN_BITRATE = 2_500_000
+  // While someone controls this computer from /mirror, the copy is quick:
+  // 30 fps, and frames kept over sharpness when the connection is tight
+  let fastScreen = false
+  const screenParams = (lane) => {
+    const params = lane.getParameters()
+    params.encodings = params.encodings?.length ? params.encodings : [{}]
+    params.encodings[0].maxBitrate = fastScreen ? 4_000_000 : SCREEN_BITRATE
+    params.encodings[0].maxFramerate = fastScreen ? 30 : 15
+    params.degradationPreference = fastScreen
+      ? 'maintain-framerate'
+      : 'maintain-resolution'
+    return lane.setParameters(params)
+  }
+  function tuneScreen() {
+    if (!shared) return
+    shared.copy
+      .applyConstraints({ frameRate: { max: fastScreen ? 30 : 15 } })
+      .catch(() => {})
+    if (screenSender) screenParams(screenSender).catch(() => {})
+  }
   let screenSender = null
 
   /** The mid of the offer's `kind` section that /mirror receives on. */
@@ -181,11 +201,7 @@
       .then(() => {
         if (!track) return
         // A steady bitrate from the start, so the first picture isn't starved
-        const params = lane.getParameters()
-        params.encodings = params.encodings?.length ? params.encodings : [{}]
-        params.encodings[0].maxBitrate = SCREEN_BITRATE
-        params.degradationPreference = 'maintain-resolution'
-        return lane.setParameters(params)
+        return screenParams(lane)
       })
       .catch(() => {})
   }
@@ -212,6 +228,11 @@
 
   async function onSignal(m) {
     if (m.t === 'hello') ice = Array.isArray(m.ice) ? m.ice : []
+    // Someone started or stopped controlling this computer from /mirror
+    else if (m.t === 'fast') {
+      fastScreen = m.on === true
+      tuneScreen()
+    }
     // The camera page lost Hi-chat's server: a connection that is up keeps
     // going (the media doesn't pass through the server), and ends on its own
     // if the page is really gone
@@ -340,7 +361,7 @@
           .applyConstraints({
             width: { max: 1920 },
             height: { max: 1080 },
-            frameRate: { max: 15 },
+            frameRate: { max: fastScreen ? 30 : 15 },
           })
           .catch(() => {})
         shared = { source, copy }

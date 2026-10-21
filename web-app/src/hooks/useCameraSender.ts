@@ -126,6 +126,12 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     }
   }, [key, link, open])
 
+  // Someone is controlling the shared computer from /mirror: its picture
+  // comes quicker meanwhile
+  const setFastScreen = useCallback((on: boolean) => {
+    sender.current?.setFastScreen(on)
+  }, [])
+
   const stop = useCallback(() => {
     sender.current?.stop()
     sender.current = null
@@ -229,6 +235,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
     status,
     replaced,
     screen,
+    setFastScreen,
     call,
     autostart,
     setAutostart,

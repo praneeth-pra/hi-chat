@@ -102,21 +102,33 @@ type RtcMessage = {
   ice?: RTCIceServer[]
 }
 
+/** A mouse or key action from /mirror, for the Mac app to replay. */
+export type RemoteInput = Record<string, unknown> & { k: string }
+
 /**
  * Hi-chat's side: a data channel to each viewer the server introduces.
  * `signal` sends setup through the server; `onOpen` is told when a channel
- * opens.
+ * opens. With `canControl` (the Mac app), signed-in viewers may also send
+ * mouse and key actions (`onInput`) on a second channel of their own, so
+ * they never wait behind a long update.
  */
 export function createDirectSender({
   signal,
   onOpen,
+  canControl = false,
+  onInput,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
   onOpen?: () => void
+  canControl?: boolean
+  onInput?: (m: RemoteInput) => void
   PeerConnection?: typeof RTCPeerConnection
 }) {
-  const peers = new Map<string, { pc: RTCPeerConnection; dc: RTCDataChannel }>()
+  const peers = new Map<
+    string,
+    { pc: RTCPeerConnection; dc: RTCDataChannel; input: RTCDataChannel }
+  >()
   let queue = Promise.resolve()
 
   function close(id: string) {
@@ -124,15 +136,20 @@ export function createDirectSender({
     if (!p) return
     peers.delete(id)
     p.dc.close()
+    p.input.close()
     p.pc.close()
   }
 
-  async function start(id: string, ice: RTCIceServer[]) {
+  async function start(id: string, ice: RTCIceServer[], link: boolean) {
     close(id)
     const pc = new PeerConnection({ iceServers: ice.length ? ice : STUN })
     // In order and reliable, as updates build on each other
     const dc = pc.createDataChannel('mirror', { ordered: true })
-    peers.set(id, { pc, dc })
+    // Mouse and keys from the viewer: in order (a key's up after its down)
+    const input = pc.createDataChannel('input', { ordered: true })
+    peers.set(id, { pc, dc, input })
+    // Never from a link's viewer (no login)
+    const control = canControl && !link
     const mine = () => peers.get(id)?.pc === pc
     pc.onicecandidate = (e) =>
       mine() &&
@@ -143,7 +160,23 @@ export function createDirectSender({
     const send = (data: string) => {
       if (dc.readyState === 'open') for (const c of chunks(data)) dc.send(c)
     }
-    dc.onopen = () => mine() && onOpen?.()
+    dc.onopen = () => {
+      if (!mine()) return
+      // Whether this viewer may control the computer
+      send(JSON.stringify({ t: 'hello', control }))
+      onOpen?.()
+    }
+    input.onmessage = (e) => {
+      if (!control || !mine()) return
+      const data = String(e.data)
+      if (data.length > 2000) return
+      try {
+        const m = JSON.parse(data)
+        if (m && typeof m === 'object' && typeof m.k === 'string') onInput?.(m)
+      } catch {
+        // not an action
+      }
+    }
     dc.onclose = () => mine() && close(id)
     // A viewer times the direct route with pings
     dc.onmessage = (e) => {
@@ -164,7 +197,12 @@ export function createDirectSender({
 
   async function handle(m: RtcMessage & { id?: string; on?: boolean }) {
     if (m.t === 'peer' && typeof m.id === 'string') {
-      if (m.on === true) await start(m.id, Array.isArray(m.ice) ? m.ice : [])
+      if (m.on === true)
+        await start(
+          m.id,
+          Array.isArray(m.ice) ? m.ice : [],
+          (m as { link?: unknown }).link === true
+        )
       else close(m.id)
       return
     }
@@ -208,23 +246,42 @@ export function createDirectSender({
  * channel brings: updates (`onMessage`), pongs (`onPong`), and how many
  * channels are open (`onChange`).
  */
+type ViewerPeer = {
+  pc: RTCPeerConnection
+  dc: RTCDataChannel | null
+  input: RTCDataChannel | null
+  /** The sender lets this page control its computer */
+  control: boolean
+}
+
 export function createDirectViewer({
   signal,
   onMessage,
   onPong,
   onChange,
+  onControl = () => {},
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
   onMessage: (m: Record<string, unknown>) => void
   onPong: (n: number) => void
   onChange: (open: number) => void
+  /** Whether a connected Hi-chat can be controlled from here */
+  onControl?: (can: boolean) => void
   PeerConnection?: typeof RTCPeerConnection
 }) {
-  const peers = new Map<
-    string,
-    { pc: RTCPeerConnection; dc: RTCDataChannel | null }
-  >()
+  const peers = new Map<string, ViewerPeer>()
+  // The channel mouse and key actions go on, if any
+  const controlChannel = () => {
+    for (const p of peers.values())
+      if (p.control && p.input?.readyState === 'open') return p.input
+    return null
+  }
+  let couldControl = false
+  const noteControl = () => {
+    const can = controlChannel() !== null
+    if (can !== couldControl) onControl((couldControl = can))
+  }
   let queue = Promise.resolve()
   const openCount = () => {
     let n = 0
@@ -237,17 +294,16 @@ export function createDirectViewer({
     if (!p) return
     peers.delete(id)
     p.dc?.close()
+    p.input?.close()
     p.pc.close()
     onChange(openCount())
+    noteControl()
   }
 
   async function answer(from: string, sdp: string, ice: RTCIceServer[]) {
     close(from)
     const pc = new PeerConnection({ iceServers: ice.length ? ice : STUN })
-    const entry: { pc: RTCPeerConnection; dc: RTCDataChannel | null } = {
-      pc,
-      dc: null,
-    }
+    const entry: ViewerPeer = { pc, dc: null, input: null, control: false }
     peers.set(from, entry)
     const mine = () => peers.get(from) === entry
     pc.onicecandidate = (e) =>
@@ -259,6 +315,13 @@ export function createDirectViewer({
     pc.ondatachannel = (e) => {
       if (!mine()) return
       const dc = e.channel
+      if (dc.label === 'input') {
+        entry.input = dc
+        dc.onopen = () => mine() && noteControl()
+        dc.onclose = () => mine() && noteControl()
+        if (dc.readyState === 'open') noteControl()
+        return
+      }
       entry.dc = dc
       const take = createUnchunker((data) => {
         let m
@@ -270,6 +333,9 @@ export function createDirectViewer({
         if (!m || typeof m !== 'object') return
         if (m.t === 'pong') {
           if (typeof m.n === 'number') onPong(m.n)
+        } else if (m.t === 'hello') {
+          entry.control = m.control === true
+          noteControl()
         } else onMessage(m)
       })
       dc.onmessage = (ev) => mine() && take(String(ev.data))
@@ -309,6 +375,13 @@ export function createDirectViewer({
     },
     get open() {
       return openCount()
+    },
+    /** Sends a mouse or key action to the Hi-chat that allows control. */
+    sendInput(m: RemoteInput) {
+      const dc = controlChannel()
+      if (!dc) return false
+      dc.send(JSON.stringify(m))
+      return true
     },
     closeAll() {
       for (const id of [...peers.keys()]) close(id)

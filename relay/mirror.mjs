@@ -260,9 +260,13 @@ export function createMirrorHub({
     for (const v of ch.viewers) v.send(out)
   }
   // A sender hears of each viewer (in any of its channels) it may connect to
-  const peerNote = (id, on) =>
+  // A link's viewer (no login) is marked, so Hi-chat never lets it control
+  // the computer (see the remote control on /mirror)
+  const peerNote = (id, on, name = '') =>
     JSON.stringify(
-      on ? { t: 'peer', id, on, ice: iceList() } : { t: 'peer', id, on }
+      on
+        ? { t: 'peer', id, on, ice: iceList(), ...(name ? { link: true } : {}) }
+        : { t: 'peer', id, on }
     )
   const status = (names) => {
     for (const name of names) {
@@ -476,7 +480,7 @@ export function createMirrorHub({
     // The viewers already watching, to connect to directly
     for (const name of names)
       for (const v of channels.get(name)?.viewers ?? [])
-        ws.send(peerNote(ids.get(v), true))
+        ws.send(peerNote(ids.get(v), true, name))
   }
 
   function joinViewer(ws, link) {
@@ -505,7 +509,7 @@ export function createMirrorHub({
     if (ch.phase) ws.send(JSON.stringify({ t: 'phase', phase: ch.phase }))
     if (ch.scroll) ws.send(ch.scroll)
     status([name])
-    for (const s of ch.senders) s.send(peerNote(id, true))
+    for (const s of ch.senders) s.send(peerNote(id, true, name))
   }
 
   return {

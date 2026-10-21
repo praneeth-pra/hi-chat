@@ -137,6 +137,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var keys: Keys?
   let shortcuts = ShortcutStore()
   lazy var updater = Updater(app: self)
+  /// /mirror's mouse and keys, while someone edits the shared screen there.
+  let remoteInput = RemoteInput()
   var mirrorTask: Process?
   var loginItems: [NSMenuItem] = []
   var statusItem: NSStatusItem?
@@ -809,6 +811,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     if body["checkForUpdates"] as? Bool == true { checkForUpdates(nil) }
     // Settings > App keys
     if let command = body["shortcuts"] as? String { shortcutCommand(command, body["id"] as? String) }
+    // Remote control: an action from /mirror's Edit mode, to replay here
+    if let input = body["input"] as? [String: Any] { remoteInput.handle(input) }
     if let status = body["dictation"] as? String {
       keys?.dictating = status == "recording" || status == "starting"
       // Started from the page's own mic button or a shortcut alike
@@ -1332,6 +1336,9 @@ final class Keys {
 
   func handle(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
     let pass = Unmanaged.passUnretained(event)
+    // Keys typed from /mirror are the shared computer's own, never Hi-chat's
+    // shortcuts
+    if event.getIntegerValueField(.eventSourceUserData) == RemoteInput.marker { return pass }
     switch type {
     case .tapDisabledByTimeout, .tapDisabledByUserInput:
       if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
@@ -1527,5 +1534,139 @@ struct HiChatMain {
     let dock = UserDefaults.standard.bool(forKey: AppController.showInDockKey)
     app.setActivationPolicy(dock ? .regular : .accessory)
     app.run()
+  }
+}
+
+// MARK: Remote control
+
+/// Replays /mirror's mouse and keys (web-app/src/lib/remoteInput.ts) while
+/// someone edits the shared screen there: they arrive from Hi-chat's page,
+/// which takes them only from a signed-in /mirror. Positions are 0 to 1
+/// across the shared screen; `a`, the picture's width / height, says which
+/// display that is. Needs Accessibility, as the shortcuts do.
+final class RemoteInput {
+  /// Marks the events posted here, so the shortcut listener lets them pass.
+  static let marker: Int64 = 0x4843_4D52
+  let source = CGEventSource(stateID: .hidSystemState)
+  var buttons: [Int] = []
+  var keys = Set<CGKeyCode>()
+  var last = CGPoint.zero
+  var display = CGMainDisplayID()
+  var aspect = 0.0
+
+  static func number(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
+
+  static func flags(_ v: Any?) -> CGEventFlags {
+    let m = Int(number(v) ?? 0)
+    var f = CGEventFlags()
+    if m & 1 != 0 { f.insert(.maskCommand) }
+    if m & 2 != 0 { f.insert(.maskShift) }
+    if m & 4 != 0 { f.insert(.maskAlternate) }
+    if m & 8 != 0 { f.insert(.maskControl) }
+    return f
+  }
+
+  func handle(_ m: [String: Any]) {
+    guard AXIsProcessTrusted(), let k = m["k"] as? String else { return }
+    let flags = Self.flags(m["m"])
+    switch k {
+    case "m":
+      if let p = point(m) { mouse(dragType() ?? .mouseMoved, p, button(buttons.first ?? 0), flags) }
+    case "d":
+      guard let p = point(m) else { return }
+      let b = Int(Self.number(m["b"]) ?? 0)
+      guard (0...2).contains(b) else { return }
+      if !buttons.contains(b) { buttons.append(b) }
+      let clicks = Int64(max(1, min(3, Int(Self.number(m["c"]) ?? 1))))
+      mouse(downType(b), p, button(b), flags, clicks: clicks)
+    case "u":
+      let b = Int(Self.number(m["b"]) ?? 0)
+      guard let i = buttons.firstIndex(of: b) else { return }
+      buttons.remove(at: i)
+      mouse(upType(b), point(m) ?? last, button(b), flags)
+    case "w":
+      let dx = Int32(clamping: Int(-(Self.number(m["dx"]) ?? 0)))
+      let dy = Int32(clamping: Int(-(Self.number(m["dy"]) ?? 0)))
+      guard let e = CGEvent(scrollWheelEvent2Source: source, units: .pixel,
+                            wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) else { return }
+      e.flags = flags
+      post(e)
+    case "kd", "ku":
+      guard let c = Self.number(m["c"]), c >= 0, c < 128 else { return }
+      let code = CGKeyCode(c)
+      let down = k == "kd"
+      if down { keys.insert(code) } else { keys.remove(code) }
+      key(code, down, flags, repeating: m["r"] != nil)
+    case "r":
+      releaseAll()
+    default:
+      break
+    }
+  }
+
+  /// Where on this Mac's screens a 0-to-1 position falls.
+  func point(_ m: [String: Any]) -> CGPoint? {
+    guard let x = Self.number(m["x"]), let y = Self.number(m["y"]) else { return nil }
+    if let a = Self.number(m["a"]), a > 0, abs(a - aspect) > 0.001 {
+      aspect = a
+      display = pickDisplay(aspect: a)
+    }
+    let b = CGDisplayBounds(display)
+    let p = CGPoint(x: b.minX + max(0, min(1, x)) * b.width,
+                    y: b.minY + max(0, min(1, y)) * b.height)
+    last = p
+    return p
+  }
+
+  /// The display whose shape matches the shared picture; the main one if
+  /// several do (or none).
+  func pickDisplay(aspect a: Double) -> CGDirectDisplayID {
+    var count: UInt32 = 0
+    guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return CGMainDisplayID() }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return CGMainDisplayID() }
+    let main = CGMainDisplayID()
+    func off(_ id: CGDirectDisplayID) -> Double {
+      let b = CGDisplayBounds(id)
+      return b.height > 0 ? abs(b.width / b.height - a) : .infinity
+    }
+    let best = ids.min { off($0) < off($1) } ?? main
+    return off(main) <= off(best) + 0.02 ? main : best
+  }
+
+  func button(_ b: Int) -> CGMouseButton { b == 1 ? .right : b == 2 ? .center : .left }
+  func downType(_ b: Int) -> CGEventType { b == 1 ? .rightMouseDown : b == 2 ? .otherMouseDown : .leftMouseDown }
+  func upType(_ b: Int) -> CGEventType { b == 1 ? .rightMouseUp : b == 2 ? .otherMouseUp : .leftMouseUp }
+  func dragType() -> CGEventType? {
+    guard let b = buttons.first else { return nil }
+    return b == 1 ? .rightMouseDragged : b == 2 ? .otherMouseDragged : .leftMouseDragged
+  }
+
+  func mouse(_ type: CGEventType, _ p: CGPoint, _ b: CGMouseButton, _ flags: CGEventFlags, clicks: Int64 = 1) {
+    guard let e = CGEvent(mouseEventSource: source, mouseType: type,
+                          mouseCursorPosition: p, mouseButton: b) else { return }
+    e.flags = flags
+    if type != .mouseMoved { e.setIntegerValueField(.mouseEventClickState, value: clicks) }
+    post(e)
+  }
+
+  func key(_ code: CGKeyCode, _ down: Bool, _ flags: CGEventFlags, repeating: Bool = false) {
+    guard let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return }
+    e.flags = flags
+    if repeating { e.setIntegerValueField(.keyboardEventAutorepeat, value: 1) }
+    post(e)
+  }
+
+  func post(_ e: CGEvent) {
+    e.setIntegerValueField(.eventSourceUserData, value: Self.marker)
+    e.post(tap: .cghidEventTap)
+  }
+
+  /// Nothing stays held down when the person on /mirror stops or leaves.
+  func releaseAll() {
+    for code in keys { key(code, false, []) }
+    keys.removeAll()
+    for b in buttons { mouse(upType(b), last, button(b), []) }
+    buttons.removeAll()
   }
 }
