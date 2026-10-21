@@ -503,4 +503,59 @@ describe('mirror: a reply goes out the moment it arrives', () => {
     expect(ws.seqs.length).toBeGreaterThan(2)
     expect(ws.seqs).toEqual(ws.seqs.map((_, i) => i + 1))
   })
+
+  it("doesn't lay the chat out again for every streamed piece", async () => {
+    // Measuring the scroll position forces a layout: only when the
+    // conversation changes, on the next frame, never per streamed piece
+    const raf = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 16)) as typeof requestAnimationFrame
+    const scroller = document.createElement('div')
+    scroller.setAttribute('data-thread-scroller', '')
+    document.body.appendChild(scroller)
+    // Reading scrollHeight is what makes the browser lay the chat out
+    const measure = vi.fn(() => 0)
+    Object.defineProperty(scroller, 'scrollHeight', { get: measure })
+    try {
+      stop = startRemoteMirror({
+        WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+        location: {
+          protocol: 'https:',
+          host: 'hi.example',
+          pathname: '/',
+        } as Location,
+      })
+      const ws = FakeSocket.last
+      ws.open()
+      ws.hear({ t: 'viewers', n: 1 })
+      await vi.advanceTimersByTimeAsync(50)
+      // A new viewer gets where the chat is
+      expect(ws.sent.some((m) => (m as { t: string }).t === 'scroll')).toBe(
+        true
+      )
+      measure.mockClear()
+      // An answer streams: many updates, no layout
+      for (let i = 1; i <= 30; i++) {
+        useAppState.setState({
+          streamingContent: msg('x1', 'assistant', 'word '.repeat(i)),
+        })
+        await vi.advanceTimersByTimeAsync(0)
+      }
+      await vi.advanceTimersByTimeAsync(50)
+      expect(measure).not.toHaveBeenCalled()
+      // The conversation changes: measured once, on the next frame
+      useMessages.setState({
+        messages: {
+          t1: [msg('u', 'user', 'Hi'), msg('a', 'assistant', 'Hello')],
+        },
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(measure).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(20)
+      expect(measure).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.requestAnimationFrame = raf
+      scroller.remove()
+    }
+  })
 })

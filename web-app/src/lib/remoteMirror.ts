@@ -381,7 +381,8 @@ export function startRemoteMirror({
       : undefined
     // Rebuild only when the conversation changed, not on every streamed word
     const key = [threadId, title, messages]
-    if (key.some((v, i) => v !== snapKey[i])) {
+    const changed = key.some((v, i) => v !== snapKey[i])
+    if (changed) {
       snapKey = key
       const msgs = mirrorMessages(messages ?? [])
       const json = msgs.map((m) => JSON.stringify(m))
@@ -426,7 +427,18 @@ export function startRemoteMirror({
       ))
         sendStream(text, live.id)
     }
-    sendScroll()
+    // Where the chat is scrolled to: measuring it makes the browser lay the
+    // chat out again, so not on every streamed piece (several a frame), only
+    // when the conversation changed or a viewer starts over, and on the next
+    // frame, once Hi-chat has drawn the change. Scrolling sends it itself
+    if (changed || sentScroll === '') scrollSoon()
+  }
+
+  const scrollSoon = () => {
+    if (scrollFrame) return
+    scrollFrame = globalThis.requestAnimationFrame
+      ? globalThis.requestAnimationFrame(sendScroll)
+      : (setTimeout(sendScroll, 16) as unknown as number)
   }
 
   // Where the chat is scrolled to, so the viewer scrolls with it
@@ -507,10 +519,7 @@ export function startRemoteMirror({
   const onScroll = (e: Event) => {
     const target = e.target as HTMLElement | null
     // Sent on the next frame rather than batched, so the viewer keeps up
-    if (!target?.matches?.('[data-thread-scroller]') || scrollFrame) return
-    scrollFrame = globalThis.requestAnimationFrame
-      ? globalThis.requestAnimationFrame(sendScroll)
-      : (setTimeout(sendScroll, 16) as unknown as number)
+    if (target?.matches?.('[data-thread-scroller]')) scrollSoon()
   }
   globalThis.document?.addEventListener('scroll', onScroll, true)
   const unsubscribe = [
