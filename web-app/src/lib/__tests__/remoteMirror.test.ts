@@ -30,6 +30,8 @@ class FakeSocket {
   static last: FakeSocket
   readyState = 0
   sent: unknown[] = []
+  /** Each update's sequence number, in order (kept out of `sent`) */
+  seqs: number[] = []
   onopen?: () => void
   onmessage?: (e: { data: string }) => void
   onclose?: () => void
@@ -37,7 +39,12 @@ class FakeSocket {
     FakeSocket.last = this
   }
   send(data: string) {
-    this.sent.push(JSON.parse(data))
+    const { s, q, ...m } = JSON.parse(data)
+    if (typeof q === 'number') {
+      expect(typeof s).toBe('string')
+      this.seqs.push(q)
+    }
+    this.sent.push(m)
   }
   close() {
     this.readyState = 3
@@ -492,5 +499,8 @@ describe('mirror: a reply goes out the moment it arrives', () => {
     })
     await vi.advanceTimersByTimeAsync(0)
     expect(ws.sent.at(-1)).toEqual({ t: 'phase', phase: 'verifying' })
+    // Every update is numbered in order, for the direct channel's viewers
+    expect(ws.seqs.length).toBeGreaterThan(2)
+    expect(ws.seqs).toEqual(ws.seqs.map((_, i) => i + 1))
   })
 })

@@ -26,6 +26,7 @@ import { AccuracyReviewInfo } from '@/containers/ThreadContent'
 import ThinkingBlock from '@/containers/ThinkingBlock'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { markdownBlocks } from '@/lib/markdownBlocks'
+import { createDirectViewer, createSeqFilter } from '@/lib/mirrorDirect'
 import { splitReasoning } from '@/lib/splitReasoning'
 import {
   RemoteCameraPanel,
@@ -60,6 +61,9 @@ function useMirror(link?: string) {
   const [connected, setConnected] = useState(false)
   // Round trip to Hi-chat's server, in ms, from the pings below
   const [lag, setLag] = useState<number | null>(null)
+  // With a direct channel to Hi-chat open: the round trip over it
+  const [directLag, setDirectLag] = useState<number | null>(null)
+  const [direct, setDirect] = useState(false)
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -85,9 +89,29 @@ function useMirror(link?: string) {
         ? (setTimeout(apply, 50) as unknown as number)
         : requestAnimationFrame(apply)
     }
+    // Each update once, from whichever route can bring it first: usually the
+    // direct channel to Hi-chat, else Hi-chat's server (lib/mirrorDirect.ts)
+    const seq = createSeqFilter()
+    const peer = createDirectViewer({
+      signal: (m) => {
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m))
+      },
+      onMessage: (m) => {
+        for (const x of seq.take(m, 'direct')) queue(x)
+      },
+      onPong: (n) =>
+        setDirectLag(Math.max(0, Math.round(performance.now() - n))),
+      onChange: (open) => {
+        setDirect(open > 0)
+        if (!open) setDirectLag(null)
+      },
+    })
     const ping = () => {
+      const n = performance.now()
+      peer.ping(n)
+      // The server too: it keeps the socket open, and is the fallback
       if (ws?.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ t: 'ping', n: performance.now() }))
+        ws.send(JSON.stringify({ t: 'ping', n }))
     }
     const connect = () => {
       const socket = new WebSocket(
@@ -111,12 +135,16 @@ function useMirror(link?: string) {
             setLag(Math.max(0, Math.round(performance.now() - m.n)))
           return
         }
-        queue(m)
+        // Hi-chat offering a direct channel
+        if (m.t === 'rtc') return peer.receive(m)
+        for (const x of seq.take(m, 'relay')) queue(x)
       }
       socket.onclose = () => {
         if (ws !== socket) return
         setConnected(false)
         setLag(null)
+        // Hi-chat offers again once the server introduces us again
+        peer.closeAll()
         if (stopped) return
         retry = setTimeout(connect, retryMs)
         retryMs = Math.min(retryMs * 2, 15_000)
@@ -153,6 +181,7 @@ function useMirror(link?: string) {
       }
       window.removeEventListener('online', fresh)
       document.removeEventListener('visibilitychange', onVisibility)
+      peer.closeAll()
       ws?.close()
     }
   }, [link])
@@ -175,7 +204,7 @@ function useMirror(link?: string) {
     }
   }, [])
 
-  return { state, connected, lag }
+  return { state, connected, lag: direct ? (directLag ?? lag) : lag, direct }
 }
 
 /**
@@ -183,7 +212,7 @@ function useMirror(link?: string) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected, lag } = useMirror(link)
+  const { state, connected, lag, direct } = useMirror(link)
   const cam = useCameraSender({ link })
   // Open as last left; at first, open on a computer that sends its camera
   const [panelOpen, setPanelOpen] = useState(() => {
@@ -261,15 +290,17 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
     state.stream && !state.msgs.some((m) => m.id === state.stream?.id)
       ? state.stream
       : null
-  // Live, with this page's round trip to the server; amber when it's slow
+  // Live, with the round trip: straight to Hi-chat when a direct channel is
+  // open ("Direct"), else to the server; amber when it's slow
+  const via = direct ? 'Direct' : 'Live'
   const mirror = !connected
     ? { label: 'Reconnecting…', tone: 'waiting' as const }
     : !state.senderOn
       ? { label: "Hi-chat isn't open", tone: 'off' as const }
       : lag === null
-        ? { label: 'Live', tone: 'live' as const }
+        ? { label: via, tone: 'live' as const }
         : {
-            label: `Live · ${lag} ms`,
+            label: `${via} · ${lag} ms`,
             tone: lag > 400 ? ('waiting' as const) : ('live' as const),
           }
   const camera = cameraState(cam)

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { cleanSnapshot, createMirrorHub } from './mirror.mjs'
 import { createRelay } from './server.mjs'
 
+// The last message of type `t` a socket got (others, like 'peer', may follow)
+const lastOf = (ws, t) => ws.got.filter((m) => m.t === t).at(-1)
+
 function fakeSocket() {
   const ws = {
     got: [],
@@ -24,7 +27,7 @@ test('viewers get the conversation and the reply as it streams', () => {
   const viewer = fakeSocket()
   hub.join(sender, 'send')
   hub.join(viewer, 'view')
-  assert.deepEqual(sender.got.at(-1), { t: 'viewers', n: 1 })
+  assert.deepEqual(lastOf(sender, 'viewers'), { t: 'viewers', n: 1 })
   assert.deepEqual(viewer.got.at(-1), { t: 'sender', on: true })
 
   sender.onmessage(snap([{ id: 'u1', role: 'user', text: 'Hi' }]))
@@ -51,7 +54,7 @@ test('viewers get the conversation and the reply as it streams', () => {
     },
     { t: 'stream', id: 'a1', text: 'Hello' },
   ])
-  assert.deepEqual(sender.got.at(-1), { t: 'viewers', n: 2 })
+  assert.deepEqual(lastOf(sender, 'viewers'), { t: 'viewers', n: 2 })
 
   // The finished reply ends the stream
   sender.onmessage(
@@ -71,7 +74,7 @@ test('viewers get the conversation and the reply as it streams', () => {
   viewer.onclose()
   late.onclose()
   again.onclose()
-  assert.deepEqual(sender.got.at(-1), { t: 'viewers', n: 0 })
+  assert.deepEqual(lastOf(sender, 'viewers'), { t: 'viewers', n: 0 })
   sender.onclose()
   assert.deepEqual(hub.counts, { senders: 0, viewers: 0 })
 })
@@ -235,8 +238,8 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
     'from B'
   )
   // App A hears both viewers, B only the signed-in one
-  assert.deepEqual(appA.got.at(-1), { t: 'viewers', n: 2 })
-  assert.deepEqual(appB.got.at(-1), { t: 'viewers', n: 1 })
+  assert.deepEqual(lastOf(appA, 'viewers'), { t: 'viewers', n: 2 })
+  assert.deepEqual(lastOf(appB, 'viewers'), { t: 'viewers', n: 1 })
 
   // Closing the app keeps the link for a while, so a restart keeps it
   appA.onclose()
@@ -383,4 +386,117 @@ test('pings get a pong that echoes their time', () => {
   assert.deepEqual(viewer.got.at(-1), { t: 'pong', n: 123.5 })
   app.onmessage('{"t":"ping"}')
   assert.deepEqual(app.got.at(-1), { t: 'pong' })
+})
+
+test('direct connections: the hub introduces each viewer and passes setup', () => {
+  const hub = createMirrorHub()
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  const app = fakeSocket()
+  hub.join(app, 'send')
+  // The app hears of the viewer already watching, with STUN to use
+  const note = lastOf(app, 'peer')
+  assert.equal(note.on, true)
+  assert.match(note.id, /^[0-9a-f]{16}$/)
+  assert.match(JSON.stringify(note.ice), /stun:/)
+
+  // Its offer reaches that viewer (with the ICE list), from the app's id
+  app.onmessage(
+    JSON.stringify({ t: 'rtc', to: note.id, type: 'offer', sdp: 'v=0 o', x: 1 })
+  )
+  const offer = lastOf(viewer, 'rtc')
+  assert.equal(offer.type, 'offer')
+  assert.equal(offer.sdp, 'v=0 o')
+  assert.equal(offer.x, undefined)
+  assert.ok(Array.isArray(offer.ice))
+  assert.match(offer.from, /^[0-9a-f]{16}$/)
+
+  // The viewer's answer and candidates reach the app, from the viewer's id
+  viewer.onmessage(
+    JSON.stringify({ t: 'rtc', to: offer.from, type: 'answer', sdp: 'v=0 a' })
+  )
+  assert.deepEqual(lastOf(app, 'rtc'), {
+    t: 'rtc',
+    from: note.id,
+    type: 'answer',
+    sdp: 'v=0 a',
+  })
+  viewer.onmessage(
+    JSON.stringify({
+      t: 'rtc',
+      to: offer.from,
+      candidate: {
+        candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host',
+        sdpMid: '0',
+        sdpMLineIndex: 0,
+      },
+    })
+  )
+  assert.equal(lastOf(app, 'rtc').candidate.sdpMid, '0')
+
+  // Nothing passes to an id that isn't there, or isn't the other side
+  const seen = app.got.length
+  viewer.onmessage(
+    JSON.stringify({ t: 'rtc', to: note.id, type: 'answer', sdp: 'x' })
+  )
+  viewer.onmessage(
+    JSON.stringify({
+      t: 'rtc',
+      to: '0000000000000000',
+      type: 'answer',
+      sdp: 'x',
+    })
+  )
+  viewer.onmessage(
+    JSON.stringify({ t: 'rtc', to: offer.from, type: 'bogus', sdp: 'x' })
+  )
+  assert.equal(app.got.length, seen)
+
+  // A new viewer is announced; one leaving too
+  const second = fakeSocket()
+  hub.join(second, 'view')
+  const joined = lastOf(app, 'peer')
+  assert.equal(joined.on, true)
+  assert.notEqual(joined.id, note.id)
+  second.onclose()
+  assert.deepEqual(lastOf(app, 'peer'), { t: 'peer', id: joined.id, on: false })
+})
+
+test('direct connections: updates keep their sender and sequence number', () => {
+  const hub = createMirrorHub()
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  const app = fakeSocket()
+  hub.join(app, 'send')
+  app.onmessage(
+    JSON.stringify({ t: 'stream', id: 'r1', text: 'Hel', s: 'tab-1', q: 7 })
+  )
+  assert.deepEqual(lastOf(viewer, 'stream'), {
+    t: 'stream',
+    s: 'tab-1',
+    q: 7,
+    id: 'r1',
+    text: 'Hel',
+  })
+  app.onmessage(JSON.stringify({ t: 'scroll', bottom: true, s: 'tab-1', q: 8 }))
+  assert.deepEqual(lastOf(viewer, 'scroll'), {
+    t: 'scroll',
+    s: 'tab-1',
+    q: 8,
+    bottom: true,
+  })
+  // A late viewer starts from the latest, untagged
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  assert.deepEqual(lastOf(late, 'scroll'), { t: 'scroll', bottom: true })
+  assert.deepEqual(lastOf(late, 'stream'), {
+    t: 'stream',
+    id: 'r1',
+    text: 'Hel',
+  })
+  // A bad tag is dropped, the update still passes
+  app.onmessage(
+    JSON.stringify({ t: 'phase', phase: 'drafting', s: 'a"b', q: 9 })
+  )
+  assert.deepEqual(lastOf(viewer, 'phase'), { t: 'phase', phase: 'drafting' })
 })

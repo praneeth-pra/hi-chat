@@ -22,7 +22,7 @@ import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
 import { createMirrorHub } from './mirror.mjs'
-import { createCameraHub } from './camera.mjs'
+import { createCameraHub, createIceSource } from './camera.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -629,10 +629,13 @@ export function createRelay(options = {}) {
   // (see wsProxy.mjs)
   const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
   // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
-  const mirror = createMirrorHub()
+  // STUN (and TURN, when set up) for direct connections: the camera's, and
+  // the mirror's between Hi-chat and /mirror
+  const ice = createIceSource({ env: options.env ?? process.env })
+  const mirror = createMirrorHub({ ice })
   // Remote camera (camera.mjs): reached from Meet tabs, so the camera key
   // stands in for the login cookie
-  const camera = createCameraHub({ env: options.env ?? process.env })
+  const camera = createCameraHub({ env: options.env ?? process.env, ice })
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://relay')
     if (url.pathname === '/api/camera') {
