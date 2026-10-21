@@ -1,5 +1,6 @@
-// Runs inside Meet's page. Adds "Hi-chat remote camera" and "Hi-chat remote
-// mic" to the devices Meet can pick, and answers Meet's requests for them
+// Runs inside the call page (Google Meet, Microsoft Teams or Zoom in the
+// browser). Adds "Hi-chat remote camera" and "Hi-chat remote mic" to the
+// devices the call can pick, and answers its requests for them
 // with the remote laptop's camera and microphone, received over WebRTC.
 // While this computer presents in Meet, it also sends the shared screen back
 // to the remote laptop's /mirror, which shows it beside the conversation,

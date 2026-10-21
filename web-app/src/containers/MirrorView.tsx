@@ -687,7 +687,7 @@ function SharedScreen({
       )}
       <StatusPill
         tone="live"
-        label="Presenting from Meet"
+        label="Presenting from the call"
         icon={<IconScreenShare size={14} />}
         className="absolute left-3 top-3 border-white/10 bg-black/60 text-white/90 backdrop-blur"
       />
