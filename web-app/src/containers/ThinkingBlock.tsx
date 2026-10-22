@@ -51,7 +51,7 @@ const ThinkingBlock = ({ id, text }: Props) => {
 
   return (
     <div
-      className="mx-auto w-full cursor-pointer break-words"
+      className="mx-auto w-full cursor-pointer break-words animate-in fade-in duration-200"
       onClick={handleClick}
     >
       <div className="mb-4 rounded-lg bg-main-view-fg/4 border border-dashed border-main-view-fg/10 p-2">

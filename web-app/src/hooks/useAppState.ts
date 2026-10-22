@@ -58,6 +58,16 @@ type AppState = {
   setActiveModels: (models: string[]) => void
 }
 
+/** A streamed update to the answer already streaming (not a new one). */
+const sameAnswer = (
+  current: ThreadMessage | undefined,
+  next: ThreadMessage
+): boolean =>
+  !!current &&
+  current.thread_id !== '' &&
+  current.thread_id === next.thread_id &&
+  current.role === next.role
+
 export const useAppState = create<AppState>()((set) => ({
   accuracyStatus: undefined,
   setAccuracyStatus: (accuracyStatus) => set({ accuracyStatus }),
@@ -78,10 +88,16 @@ export const useAppState = create<AppState>()((set) => ({
     const selectedAssistant =
       assistants.find((a) => a.id === currentAssistant?.id) || assistants[0]
 
-    set(() => ({
+    set((state) => ({
       streamingContent: content
         ? {
             ...content,
+            // One id for the whole answer (each streamed update is built
+            // with a new one), which the saved message then takes over, so
+            // the answer on screen is kept rather than drawn again
+            id: sameAnswer(state.streamingContent, content)
+              ? state.streamingContent!.id
+              : content.id,
             created_at: content.created_at || Date.now(),
             metadata: {
               ...content.metadata,

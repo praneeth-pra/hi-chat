@@ -119,7 +119,17 @@ const finalizeMessage = (
   if (continueFromMessageId && updateMessage) {
     updateMessage({ ...finalContent, id: continueFromMessageId })
   } else {
-    addMessage(finalContent)
+    // Saved under the streamed answer's id: the thread draws both in the
+    // same place by id, so the finished answer stays on screen as it is
+    // instead of being thrown away and drawn again
+    const streamed = useAppState.getState().streamingContent
+    addMessage(
+      streamed &&
+        streamed.thread_id === finalContent.thread_id &&
+        streamed.role === finalContent.role
+        ? { ...finalContent, id: streamed.id }
+        : finalContent
+    )
   }
   updateStreamingContent(emptyThreadContent)
   updatePromptProgress(undefined)
@@ -349,7 +359,8 @@ export const useChat = () => {
 
         // Get project metadata if projectId is provided
         let projectMetadata:
-          { id: string; name: string; updated_at: number } | undefined
+          | { id: string; name: string; updated_at: number }
+          | undefined
         if (projectId) {
           const project = await serviceHub.projects().getProjectById(projectId)
           if (project) {
@@ -931,7 +942,8 @@ export const useChat = () => {
               ? anthropicConfig(useModelProvider.getState().providers)
               : {}
           let claudeDirect:
-            Awaited<ReturnType<typeof claudeAccuracyAnswer>> | undefined
+            | Awaited<ReturnType<typeof claudeAccuracyAnswer>>
+            | undefined
           if (
             claudeKey.apiKey &&
             webEvidence &&

@@ -342,6 +342,18 @@ describe('code rendering latency', () => {
     expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
   })
 
+  it('keeps the same code block when the answer finishes (no rebuild)', async () => {
+    const code = 'print("kept")'
+    const md = '```python\n' + code + '\n```'
+    const { rerender } = render(<RenderMarkdown content={md} isStreaming />)
+    await waitFor(() =>
+      expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
+    )
+    const before = screen.getByTestId('highlighted-code')
+    rerender(<RenderMarkdown content={md} />)
+    expect(screen.getByTestId('highlighted-code')).toBe(before)
+  })
+
   it('keeps large finished blocks readable until highlighting is requested', async () => {
     const code = 'print("large code block")\n'.repeat(200).trimEnd()
     const { container } = render(
