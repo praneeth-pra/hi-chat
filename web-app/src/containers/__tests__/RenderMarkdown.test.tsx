@@ -326,32 +326,54 @@ describe('RenderMarkdown', () => {
 })
 
 describe('code rendering latency', () => {
-  it('colours code while it streams, so finishing redraws nothing', async () => {
+  it('shows code plain while it streams, coloured once finished, in the same box', async () => {
     const code = 'print("first")\nprint("second")'
+    const md = '```python\n' + code + '\n```'
     const { container, rerender } = render(
-      <RenderMarkdown content={'```python\n' + code + '\n```'} isStreaming />
+      <RenderMarkdown content={md} streamable isStreaming />
     )
     expect(container.querySelector('code')?.textContent).toBe(code)
+    expect(screen.queryByTestId('highlighted-code')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /copy/i }))
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(code)
+    const box = container.querySelector('[data-code-block]')
+    rerender(<RenderMarkdown content={md} streamable />)
     await waitFor(() =>
       expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
     )
-    rerender(<RenderMarkdown content={'```python\n' + code + '\n```'} />)
-    // Still coloured, with no plain-text frame in between
-    expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
+    // The same box: coloured in place, not rebuilt
+    expect(container.querySelector('[data-code-block]')).toBe(box)
   })
 
-  it('keeps the same code block when the answer finishes (no rebuild)', async () => {
-    const code = 'print("kept")'
-    const md = '```python\n' + code + '\n```'
-    const { rerender } = render(<RenderMarkdown content={md} isStreaming />)
-    await waitFor(() =>
-      expect(screen.getByTestId('highlighted-code').textContent).toBe(code)
+  it('keeps finished blocks as they are while the next one streams', () => {
+    const { container, rerender } = render(
+      <RenderMarkdown content={'First part.\n\nSec'} streamable isStreaming />
     )
-    const before = screen.getByTestId('highlighted-code')
-    rerender(<RenderMarkdown content={md} />)
-    expect(screen.getByTestId('highlighted-code')).toBe(before)
+    const first = container.querySelector('.markdown > p')
+    rerender(
+      <RenderMarkdown
+        content={'First part.\n\nSecond part grows'}
+        streamable
+        isStreaming
+      />
+    )
+    expect(container.querySelector('.markdown > p')).toBe(first)
+    expect(container.textContent).toContain('Second part grows')
+  })
+
+  it('fades in the words of the block being written, not finished ones', () => {
+    const { container, rerender } = render(
+      <RenderMarkdown
+        content={'Done here.\n\nNew words'}
+        streamable
+        isStreaming
+      />
+    )
+    const paragraphs = container.querySelectorAll('.markdown > p')
+    expect(paragraphs[0].querySelector('.stream-word')).toBeNull()
+    expect(paragraphs[1].querySelectorAll('.stream-word')).toHaveLength(2)
+    rerender(<RenderMarkdown content={'Done here.\n\nNew words'} streamable />)
+    expect(container.querySelector('.stream-word')).toBeNull()
   })
 
   it('keeps large finished blocks readable until highlighting is requested', async () => {

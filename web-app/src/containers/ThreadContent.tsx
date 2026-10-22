@@ -31,6 +31,7 @@ import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { splitReasoning } from '@/lib/splitReasoning'
+import { useSmoothText } from '@/lib/useSmoothText'
 import { createImageAttachment } from '@/types/attachment'
 import {
   Dialog,
@@ -148,6 +149,12 @@ export const ThreadContent = memo(
     const { reasoningSegment, textSegment } = useMemo(
       () => splitReasoning(text),
       [text]
+    )
+    // The answer as it streams in, revealed at a steady pace rather than in
+    // the bursts it arrives in (at most ~0.1 s behind)
+    const answerText = useSmoothText(
+      textSegment.replace('</think>', ''),
+      !!item.streamingThread && item.role !== 'user'
     )
 
     const getMessages = useMessages((state) => state.getMessages)
@@ -409,7 +416,8 @@ export const ThreadContent = memo(
               )}
 
             <RenderMarkdown
-              content={textSegment.replace('</think>', '')}
+              content={answerText}
+              streamable
               isStreaming={
                 !!item.streamingThread ||
                 (isStreamingThisThread && item.status === MessageStatus.Stopped)

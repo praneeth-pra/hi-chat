@@ -256,3 +256,22 @@
   font-size: 13.5px;
   line-height: 1.6;
 }
+
+/* Words of the answer being written fade in as they appear (rehypeFadeWords).
+   Opacity only: no layout or blur work, so it stays cheap at 60 fps. */
+.markdown .stream-word {
+  animation: stream-word-in 180ms ease-out both;
+}
+@keyframes stream-word-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .markdown .stream-word {
+    animation: none;
+  }
+}

@@ -765,6 +765,13 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   assert.equal(speechLogLine(body(full)), full)
   const noCache = full.replace(' cached=8960', '')
   assert.equal(speechLogLine(body(noCache)), noCache)
+  // With how it looked: the answer's place appearing, and stutters
+  const frames = full.replace(' route=', ' shown=16ms stalls=0 route=')
+  assert.equal(speechLogLine(body(frames)), frames)
+  assert.equal(
+    speechLogLine(body(frames.replace('stalls=0', 'stalls=x'))),
+    'speech diagnostic text omitted'
+  )
   assert.equal(
     speechLogLine(body(line.replace('hidden=no', 'hidden=no question=secret'))),
     'speech diagnostic text omitted'

@@ -13,7 +13,10 @@ import {
   useEffect,
   createContext,
   useContext,
+  useDeferredValue,
 } from 'react'
+import { splitMarkdownBlocks } from '@/lib/markdownBlocks'
+import { rehypeFadeWords } from '@/lib/rehypeFadeWords'
 import { getReadableLanguageName } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useCodeblock } from '@/hooks/useCodeblock'
@@ -85,6 +88,11 @@ if (typeof window !== 'undefined') {
 
 interface MarkdownProps {
   content: string
+  /**
+   * An answer that streams: drawn block by block (only the block being
+   * written is parsed again), with new words fading in.
+   */
+  streamable?: boolean
   className?: string
   components?: Components
   enableRawHtml?: boolean
@@ -171,15 +179,12 @@ export function sameCode(prev: CodeProps, next: CodeProps): boolean {
     'codeBlockStyle',
     'showLineNumbers',
     'isWrapping',
+    'isStreaming',
     'onCopy',
   ]
   if (keys.some((k) => prev[k] !== next[k])) return false
   const code = String(next.children)
   if (String(prev.children) !== code) return false
-  // Streaming only changes a large block (its "Highlight code" button), so
-  // an answer finishing doesn't redraw and re-colour every block in it
-  if (prev.isStreaming !== next.isStreaming && code.length > LARGE_CODE)
-    return false
   if (prev.copiedId === next.copiedId) return true
   const language = /language-([^\s]+)/.exec(next.className || '')?.[1] ?? ''
   const id = codeIdFor(code.replace(/\n$/, ''), language)
@@ -208,11 +213,12 @@ const CodeComponent = memo(
 
     const code = String(children).replace(/\n$/, '')
     const [highlightedCode, setHighlightedCode] = useState<string | null>(null)
-    // Tokenizing a large block creates thousands of spans on the UI thread.
-    // Smaller blocks are coloured while they stream, so nothing is redrawn
-    // when the answer finishes.
+    // A block still being written shows as plain text: colouring it again on
+    // every update was the heaviest work while streaming. It's coloured once,
+    // in the same box, as soon as it's complete. Tokenizing a large block
+    // creates thousands of spans, so those are coloured on request.
     const largeCode = code.length > LARGE_CODE
-    const highlight = !largeCode || highlightedCode === code
+    const highlight = !isStreaming && (!largeCode || highlightedCode === code)
 
     // Generate a stable ID based on content hash instead of position
     const codeId = useMemo(() => codeIdFor(code, language), [code, language])
@@ -357,7 +363,47 @@ function MarkdownCode(props: any) {
   return <CodeComponent {...props} {...options} />
 }
 
+type BlockProps = {
+  text: string
+  live: boolean
+  remarkPlugins: PluggableList
+  rehypePlugins: PluggableList
+  components: Components
+}
+
+/** One block of a streamable answer; a finished block is never redrawn. */
+const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  live,
+  remarkPlugins,
+  rehypePlugins,
+  components,
+}: BlockProps) {
+  const parent = useContext(CodeOptionsContext)
+  const options = useMemo(
+    () => (parent ? { ...parent, isStreaming: live } : null),
+    [parent, live]
+  )
+  const normalized = useMemo(() => normalizeLatex(text), [text])
+  const rehype = useMemo<PluggableList>(
+    () => (live ? [...rehypePlugins, rehypeFadeWords] : rehypePlugins),
+    [live, rehypePlugins]
+  )
+  return (
+    <CodeOptionsContext.Provider value={options}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehype}
+        components={components}
+      >
+        {normalized}
+      </ReactMarkdown>
+    </CodeOptionsContext.Provider>
+  )
+})
+
 function RenderMarkdownComponent({
+  streamable = false,
   content,
   enableRawHtml,
   className,
@@ -389,8 +435,19 @@ function RenderMarkdownComponent({
     }, 2000)
   }, [])
 
+  // Drawing the text yields to animations and typing: React may skip an
+  // update when a newer one is already waiting
+  const deferredContent = useDeferredValue(content)
+  const shownContent = streamable ? deferredContent : content
   // Memoize the normalized content to avoid reprocessing on every render
-  const normalizedContent = useMemo(() => normalizeLatex(content), [content])
+  const normalizedContent = useMemo(
+    () => (streamable ? '' : normalizeLatex(shownContent)),
+    [streamable, shownContent]
+  )
+  const blocks = useMemo(
+    () => (streamable ? splitMarkdownBlocks(shownContent) : []),
+    [streamable, shownContent]
+  )
 
   // Stable remarkPlugins reference
   const remarkPlugins = useMemo<PluggableList>(() => {
@@ -405,7 +462,7 @@ function RenderMarkdownComponent({
     return plugins
   }, [isUser, enableRawHtml])
 
-  const katex = useKatex(hasMath(normalizedContent))
+  const katex = useKatex(hasMath(streamable ? shownContent : normalizedContent))
 
   // Stable rehypePlugins reference
   const rehypePlugins = useMemo<PluggableList>(() => {
@@ -422,7 +479,8 @@ function RenderMarkdownComponent({
       codeBlockStyle,
       showLineNumbers,
       isWrapping,
-      isStreaming,
+      // A streamable answer's blocks say for themselves
+      isStreaming: streamable ? false : isStreaming,
       onCopy: handleCopy,
       copiedId,
     }),
@@ -432,6 +490,7 @@ function RenderMarkdownComponent({
       showLineNumbers,
       isWrapping,
       isStreaming,
+      streamable,
       handleCopy,
       copiedId,
     ]
@@ -445,16 +504,23 @@ function RenderMarkdownComponent({
   // The parsed answer only changes with its text: the answer finishing or a
   // copy reaches the code blocks through context, without parsing it again
   const tree = useMemo(
-    () => (
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={markdownComponents}
-      >
-        {normalizedContent}
-      </ReactMarkdown>
-    ),
-    [remarkPlugins, rehypePlugins, markdownComponents, normalizedContent]
+    () =>
+      streamable ? null : (
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={markdownComponents}
+        >
+          {normalizedContent}
+        </ReactMarkdown>
+      ),
+    [
+      streamable,
+      remarkPlugins,
+      rehypePlugins,
+      markdownComponents,
+      normalizedContent,
+    ]
   )
 
   // Render the markdown content
@@ -467,7 +533,19 @@ function RenderMarkdownComponent({
       )}
     >
       <CodeOptionsContext.Provider value={codeOptions}>
-        {tree}
+        {streamable
+          ? blocks.map((block, i) => (
+              <MarkdownBlock
+                // By position: a block keeps its place as the answer grows
+                key={i}
+                text={block}
+                live={isStreaming && i === blocks.length - 1}
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={markdownComponents}
+              />
+            ))
+          : tree}
       </CodeOptionsContext.Provider>
     </div>
   )
