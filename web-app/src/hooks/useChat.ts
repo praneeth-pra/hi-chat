@@ -82,6 +82,7 @@ import {
   type StreamTiming,
 } from '@/lib/replyTiming'
 import { recordReply } from '@/lib/replySpeed'
+import { startFrameWatch, stopFrameWatch } from '@/lib/frameWatch'
 
 // Helper to create thread content with consistent structure
 const createThreadContent = (
@@ -706,8 +707,15 @@ export const useChat = () => {
       const abortController = new AbortController()
       let accuracyRequested = false
       setAbortController(activeThread.id, abortController)
-      updateStreamingContent(emptyThreadContent)
+      // The answer's place shows at once, with its waiting dot, before any
+      // network round trip; the streamed answer then fills it (same id)
+      updateStreamingContent(
+        continueFromMessageId
+          ? emptyThreadContent
+          : newAssistantThreadContent(activeThread.id, '')
+      )
       updatePromptProgress(undefined)
+      startFrameWatch()
 
       // Find the message to continue from if provided
       const continueFromMessage = continueFromMessageId
@@ -1324,7 +1332,8 @@ export const useChat = () => {
 
           // Every reply outside Accuracy (which logs its own line): Auto ·
           // Speed and hand-picked models alike, so slow replies can be traced.
-          if (!accuracyRequested) reportSpeech(speedLogLine(timings))
+          const frames = stopFrameWatch()
+          if (!accuracyRequested) reportSpeech(speedLogLine(timings, frames))
           recordReply(timings)
 
           // Create a final content object for adding to the thread

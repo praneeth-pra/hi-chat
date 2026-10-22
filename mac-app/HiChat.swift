@@ -140,6 +140,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   /// /mirror's mouse and keys, while someone edits the shared screen there.
   let remoteInput = RemoteInput()
   var mirrorTask: Process?
+  /// Sends the text cursor's place to the mirror helper (fn + Left's
+  /// pointer view follows it while you type).
+  let caret = CaretReporter()
   var loginItems: [NSMenuItem] = []
   var statusItem: NSStatusItem?
   var dockItem: NSMenuItem!
@@ -797,6 +800,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
       return
     }
     mirrorTask = task
+    caret.start()
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: post)
   }
 
@@ -1668,5 +1672,85 @@ final class RemoteInput {
     keys.removeAll()
     for b in buttons { mouse(upType(b), last, button(b), []) }
     buttons.removeAll()
+  }
+}
+
+// MARK: Text cursor for the mirror
+
+/// Where the text cursor is in the app you're typing in, read here (Hi-chat
+/// has Accessibility for remote control; the mirror helper, a separate
+/// program, may not) and sent to the helper whenever it moves:
+/// { command = "caret", at = "x,y" } in screen points from the bottom left,
+/// or at = "" when there's no text cursor to follow.
+@MainActor
+final class CaretReporter {
+  let system = AXUIElementCreateSystemWide()
+  var askedApps = Set<pid_t>()
+  var last: String?
+  var timer: Timer?
+
+  init() {
+    // A busy app mustn't stall Hi-chat: give up on it quickly
+    AXUIElementSetMessagingTimeout(system, 0.05)
+  }
+
+  func start() {
+    guard timer == nil else { return }
+    timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated { self?.report() }
+    }
+  }
+
+  func report() {
+    let at = point().map { "\(Int($0.x)),\(Int($0.y))" } ?? ""
+    guard at != last else { return }
+    last = at
+    DistributedNotificationCenter.default().postNotificationName(
+      mirrorNote, object: nil, userInfo: ["command": "caret", "at": at], deliverImmediately: true)
+  }
+
+  func point() -> NSPoint? {
+    guard AXIsProcessTrusted() else { return nil }
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused)
+            == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
+    else { return nil }
+    let element = focused as! AXUIElement
+    askForText(element)
+    var range: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range)
+            == .success, let range
+    else { return nil }
+    var bounds: CFTypeRef?
+    guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXBoundsForRangeParameterizedAttribute as CFString, range, &bounds) == .success,
+          let bounds, CFGetTypeID(bounds) == AXValueGetTypeID()
+    else { return nil }
+    var rect = CGRect.zero
+    guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect),
+          rect.origin != .zero || rect.size != .zero,
+          let primary = NSScreen.screens.first
+    else { return nil }
+    // Accessibility measures from the top left of the main screen
+    return NSPoint(x: rect.midX, y: primary.frame.maxY - rect.midY)
+  }
+
+  /// Chrome-based browsers describe their pages' text boxes only once an
+  /// assistive app asks (AXEnhancedUserInterface); Electron apps (VS Code,
+  /// Slack) answer AXManualAccessibility. Asked once per app.
+  func askForText(_ element: AXUIElement) {
+    var pid: pid_t = 0
+    guard AXUIElementGetPid(element, &pid) == .success, !askedApps.contains(pid) else { return }
+    askedApps.insert(pid)
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.05)
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+    let chromium = ["com.google.Chrome", "com.brave.Browser", "com.microsoft.edgemac",
+                    "company.thebrowser.Browser", "org.chromium.Chromium", "com.vivaldi.Vivaldi",
+                    "com.operasoftware.Opera"]
+    if chromium.contains(where: { id.hasPrefix($0) }) {
+      AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
   }
 }

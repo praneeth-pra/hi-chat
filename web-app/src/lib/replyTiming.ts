@@ -93,9 +93,11 @@ export function describeTiming(
   const { firstChunkAt, firstAnswerAt, usage, providerCreated } = timing
   const u = usage ?? {}
   const details = u.completion_tokens_details as
-    { reasoning_tokens?: number } | undefined
+    | { reasoning_tokens?: number }
+    | undefined
   const promptDetails = u.prompt_tokens_details as
-    { cached_tokens?: number } | undefined
+    | { cached_tokens?: number }
+    | undefined
   return {
     total_s: seconds(end - start),
     wait_for_first_byte_s: seconds(firstChunkAt && firstChunkAt - start),
@@ -141,11 +143,14 @@ export function describeTiming(
  * One Railway log line per reply outside Accuracy, with timings only (no question
  * or answer text): `speed: model=… total=…ms first_byte=…ms first_words=…ms
  * answer=…ms tokens=N prompt_tokens=N cached=N queue=…ms prompt=…ms request=NKB
- * route=direct|server|none hidden=yes|no`. queue and prompt are the
+ * shown=…ms stalls=N route=direct|server|none hidden=yes|no`. queue and prompt are the
  * provider's own times (Groq, Cerebras): waiting its turn, and reading the
  * request, which is what grows with a long chat.
  */
-export function speedLogLine(timings: ReturnType<typeof describeTiming>) {
+export function speedLogLine(
+  timings: ReturnType<typeof describeTiming>,
+  frames?: { shownMs: number | undefined; stalls: number }
+) {
   const ms = (s: number | undefined) =>
     typeof s === 'number' && Number.isFinite(s)
       ? `${Math.max(0, Math.round(s * 1000))}ms`
@@ -167,6 +172,14 @@ export function speedLogLine(timings: ReturnType<typeof describeTiming>) {
     `queue=${ms(Number(timings.provider_queue_s))}`,
     `prompt=${ms(Number(timings.provider_prompt_s))}`,
     `request=${Math.round((timings.request_chars ?? 0) / 1024)}KB`,
+    // How it looked: the next frame after sending (the answer's place
+    // appearing) and stutters (drawing stalled over 50 ms) until it finished
+    ...(frames
+      ? [
+          `shown=${frames.shownMs === undefined ? 'none' : `${Math.max(0, Math.round(frames.shownMs))}ms`}`,
+          `stalls=${Math.max(0, Math.round(frames.stalls))}`,
+        ]
+      : []),
     `route=${route}`,
     `hidden=${timings.tab_hidden_at_send ? 'yes' : 'no'}`,
   ].join(' ')

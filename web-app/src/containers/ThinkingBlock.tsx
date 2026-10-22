@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Loader } from 'lucide-react'
+import { Brain, ChevronDown, ChevronUp, Loader } from 'lucide-react'
 import { create } from 'zustand'
 import { RenderMarkdown } from './RenderMarkdown'
 import { useAppState } from '@/hooks/useAppState'
@@ -56,10 +56,14 @@ const ThinkingBlock = ({ id, text }: Props) => {
     >
       <div className="mb-4 rounded-lg bg-main-view-fg/4 border border-dashed border-main-view-fg/10 p-2">
         <div className="flex items-center gap-3">
-          {loading && (
-            <Loader className="size-4 animate-spin text-main-view-fg/60" />
+          {/* One slot for the spinner and, once done, the icon: the label
+              doesn't shift sideways when thinking ends */}
+          {loading ? (
+            <Loader className="size-4 shrink-0 animate-spin text-main-view-fg/60" />
+          ) : (
+            <Brain className="size-4 shrink-0 text-main-view-fg/45 animate-in fade-in duration-200" />
           )}
-          <button className="flex items-center gap-2 focus:outline-none">
+          <button className="flex shrink-0 items-center gap-2 focus:outline-none">
             {isExpanded ? (
               <ChevronUp className="size-4 text-main-view-fg/60" />
             ) : (
@@ -69,6 +73,20 @@ const ThinkingBlock = ({ id, text }: Props) => {
               {loading ? t('common:thinking') : t('common:thought')}
             </span>
           </button>
+          {/* While it thinks: its latest words slide past on one line (the
+              box keeps its height), so something moves from the first
+              tokens instead of a still label */}
+          {loading && !isExpanded && (
+            <span
+              aria-hidden
+              data-test-id="thinking-ticker"
+              className="flex min-w-0 flex-1 justify-end overflow-hidden text-sm text-main-view-fg/45 [mask-image:linear-gradient(to_right,transparent,black_32px)]"
+            >
+              <span className="whitespace-nowrap">
+                {thinkingContent.slice(-240).replace(/\s+/g, ' ')}
+              </span>
+            </span>
+          )}
         </div>
 
         {isExpanded && (

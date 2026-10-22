@@ -10,8 +10,11 @@
 //   { command = "toggle", window = "<CGWindowID of Hi-chat>" }
 //     hidden -> shows Hi-chat; Hi-chat -> the screen around the pointer; and back
 // The pointer view follows whichever moved last: the mouse pointer, or the
-// text cursor while you type (read through Accessibility, which Hi-chat has
-// for remote control; apps that don't report it are followed by the mouse).
+// text cursor while you type. Hi-chat reads the text cursor (it has
+// Accessibility for remote control) and sends it here:
+//   { command = "caret", at = "x,y" }   (at = "" when there is none)
+// Without those reports this helper reads it itself, if it may. Apps that
+// don't report a text cursor are followed by the mouse.
 //   { command = "hide" }   { command = "quit" }
 // fn + Left sends "toggle", fn + Shift + Left sends "hide".
 //
@@ -157,6 +160,10 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   var lastCaret: NSPoint?
   var followingCaret = false
   var ticks = 0
+  /// The text cursor as Hi-chat reports it (it has Accessibility; this
+  /// helper may not). Once Hi-chat has reported, its reports are used.
+  var reportedCaret: NSPoint?
+  var caretReports = false
 
   override init() {
     panel = MirrorPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -206,7 +213,11 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       let command = info["command"] as? String ?? ""
       let window = (info["window"] as? String).flatMap { UInt32($0) }
         ?? (info["window"] as? NSNumber)?.uint32Value
-      MainActor.assumeIsolated { self.handle(command, window: window) }
+      let at = info["at"] as? String
+      MainActor.assumeIsolated {
+        if command == "caret" { self.caretReported(at ?? "") }
+        self.handle(command, window: window)
+      }
     }
     Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { _ in
       MainActor.assumeIsolated { self.followPointer() }
@@ -287,6 +298,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   func handle(_ command: String, window: CGWindowID?) {
     if let window, window != 0 { janWindow = window }
     switch command {
+    case "caret": return // handled with its position (caretNote)
     case "toggle":
       if !panel.isVisible {
         mode = .jan
@@ -312,6 +324,13 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     Task { try? await old?.stopCapture() }
   }
 
+  /// Hi-chat's report of the text cursor: "x,y", or "" for none.
+  func caretReported(_ at: String) {
+    caretReports = true
+    let parts = at.split(separator: ",").compactMap { Double($0) }
+    reportedCaret = parts.count == 2 ? NSPoint(x: parts[0], y: parts[1]) : nil
+  }
+
   /// What the pointer view follows: the text cursor if it moved since the
   /// mouse last did (you're typing), else the mouse pointer.
   func focusPoint() -> NSPoint {
@@ -322,7 +341,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     ticks += 1
     if ticks % caretEvery == 0 {
-      let caret = textCursor.point()
+      let caret = caretReports ? reportedCaret : textCursor.point()
       if let caret, let last = lastCaret, caret != last { followingCaret = true }
       if caret == nil { followingCaret = false }
       lastCaret = caret
