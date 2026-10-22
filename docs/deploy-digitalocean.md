@@ -14,7 +14,7 @@ Either:
   (reads `.do/deploy.template.yaml`), or
 - **By hand:** Apps → Create App → GitHub → `praneeth-pra/hi-chat`, branch
   `main`, autodeploy on. Region **Bangalore**, Dockerfile build, HTTP port
-  `8080`, health check `/healthz`, size 1 GB.
+  `8080`, health check `/healthz`, size 512 MB ($5; peak use is about 210 MB).
 
 Authorize DigitalOcean's GitHub app for the repo when asked.
 
