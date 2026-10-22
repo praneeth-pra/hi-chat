@@ -9,6 +9,9 @@
 // "dev.hitechie.janmirror":
 //   { command = "toggle", window = "<CGWindowID of Hi-chat>" }
 //     hidden -> shows Hi-chat; Hi-chat -> the screen around the pointer; and back
+// The pointer view follows whichever moved last: the mouse pointer, or the
+// text cursor while you type (read through Accessibility, which Hi-chat has
+// for remote control; apps that don't report it are followed by the mouse).
 //   { command = "hide" }   { command = "quit" }
 // fn + Left sends "toggle", fn + Shift + Left sends "hide".
 //
@@ -18,10 +21,62 @@
 @preconcurrency import CoreMedia
 @preconcurrency import ScreenCaptureKit
 @preconcurrency import IOSurface
+@preconcurrency import ApplicationServices
 
 let notificationName = Notification.Name("dev.hitechie.janmirror")
 let frameRate: Int32 = 120 // a cap only: frames come as fast as the display updates
 let edge: CGFloat = 0.2 // the pointer view pans only once the pointer is this close to its edge
+let caretEvery = 8 // ticks (of 1/120 s) between text cursor checks: about 15 a second
+
+/// Where the text cursor is in the app you're typing in, in screen
+/// coordinates (origin bottom left), or nil if it doesn't say.
+@MainActor
+final class TextCursor {
+  let system = AXUIElementCreateSystemWide()
+  var askedApps = Set<pid_t>()
+
+  init() {
+    // A busy app mustn't stall the mirror: give up on it quickly
+    AXUIElementSetMessagingTimeout(system, 0.05)
+  }
+
+  func point() -> NSPoint? {
+    guard AXIsProcessTrusted() else { return nil }
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused)
+            == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
+    else { return nil }
+    let element = focused as! AXUIElement
+    askForText(element)
+    var range: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range)
+            == .success, let range
+    else { return nil }
+    var bounds: CFTypeRef?
+    guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXBoundsForRangeParameterizedAttribute as CFString, range, &bounds) == .success,
+          let bounds, CFGetTypeID(bounds) == AXValueGetTypeID()
+    else { return nil }
+    var rect = CGRect.zero
+    guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect),
+          rect.origin != .zero || rect.size != .zero,
+          let primary = NSScreen.screens.first
+    else { return nil }
+    // Accessibility measures from the top left of the main screen
+    return NSPoint(x: rect.midX, y: primary.frame.maxY - rect.midY)
+  }
+
+  /// Chrome and Electron apps (VS Code, Slack) only describe their text to
+  /// Accessibility once asked; asked once per app.
+  func askForText(_ element: AXUIElement) {
+    var pid: pid_t = 0
+    guard AXUIElementGetPid(element, &pid) == .success, !askedApps.contains(pid) else { return }
+    askedApps.insert(pid)
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.05)
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+  }
+}
 
 func say(_ message: String) {
   FileHandle.standardError.write(("[jan mirror helper] " + message + "\n").data(using: .utf8)!)
@@ -96,6 +151,12 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   var area: NSRect?
   var janWindow: CGWindowID = 0
   var generation = 0
+  // The pointer view follows the mouse, or the text cursor while you type
+  let textCursor = TextCursor()
+  var lastMouse = NSPoint(x: -1, y: -1)
+  var lastCaret: NSPoint?
+  var followingCaret = false
+  var ticks = 0
 
   override init() {
     panel = MirrorPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -251,9 +312,28 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     Task { try? await old?.stopCapture() }
   }
 
-  /// The screen the pointer is on.
+  /// What the pointer view follows: the text cursor if it moved since the
+  /// mouse last did (you're typing), else the mouse pointer.
+  func focusPoint() -> NSPoint {
+    let mouse = NSEvent.mouseLocation
+    if mouse != lastMouse {
+      lastMouse = mouse
+      followingCaret = false
+    }
+    ticks += 1
+    if ticks % caretEvery == 0 {
+      let caret = textCursor.point()
+      if let caret, let last = lastCaret, caret != last { followingCaret = true }
+      if caret == nil { followingCaret = false }
+      lastCaret = caret
+    }
+    if followingCaret, let caret = lastCaret { return caret }
+    return mouse
+  }
+
+  /// The screen the pointer view follows (the pointer's, or the text cursor's).
   func pointerScreen() -> NSScreen? {
-    let p = NSEvent.mouseLocation
+    let p = mode == .pointer ? focusPoint() : NSEvent.mouseLocation
     return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.main
   }
 
@@ -322,15 +402,16 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     }
   }
 
-  /// Pointer view: show the part of the screen around the pointer, the size
-  /// of this window, holding still until the pointer nears its edge.
+  /// Pointer view: show the part of the screen around the pointer (or the
+  /// text cursor while typing), the size of this window, holding still until
+  /// it nears the view's edge.
   func followPointer() {
     guard mode == .pointer, panel.isVisible, let screen = pointerScreen() else { return }
     if let id = displayID(screen), id != streamDisplay {
       restart() // the pointer moved to another display
       return
     }
-    let p = NSEvent.mouseLocation
+    let p = followingCaret ? (lastCaret ?? NSEvent.mouseLocation) : NSEvent.mouseLocation
     let full = screen.frame
     let w = min(panel.frame.width, full.width), h = min(panel.frame.height, full.height)
     var a: NSRect
