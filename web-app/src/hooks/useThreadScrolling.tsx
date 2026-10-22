@@ -9,7 +9,7 @@ const MAX_DOM_RETRY_ATTEMPTS = 5 // Maximum attempts to find DOM elements before
 const DOM_RETRY_DELAY = 100 // Delay in ms between DOM element retry attempts
 const USER_MESSAGE_TOP_GAP = 16 // Space kept above the question once it is scrolled to the top
 const MAX_PADDING_WAIT_FRAMES = 30 // Frames to wait for the padding to reach the DOM before scrolling anyway
-const HOLD_QUESTION_FRAMES = 60 // Frames (about a second) the question is kept at the top while layout settles
+const HOLD_QUESTION_MS = 1000 // How long the question is kept at the top while layout settles
 
 export const useThreadScrolling = (
   threadId: string,
@@ -263,10 +263,14 @@ export const useThreadScrolling = (
         }
         // Layout can still shift for a moment (the answer appearing, older
         // messages sizing themselves); keep the question there until the
-        // person scrolls themselves.
-        const holdQuestionAtTop = () => {
+        // person scrolls themselves. Checked only when something changes
+        // size, not every frame: measuring makes the browser lay the chat
+        // out again, which made the thinking animation and the first words
+        // of the answer stutter.
+        let watcher: ResizeObserver | undefined
+        let holdTimer: ReturnType<typeof setTimeout> | undefined
+        const keepQuestionAtTop = () => {
           if (!lastUserMessage.isConnected || userScrolled) return finish()
-          if (frameCount++ >= HOLD_QUESTION_FRAMES) return finish()
           const { questionTop, maxTop } = questionTarget()
           const target = Math.max(
             0,
@@ -275,9 +279,20 @@ export const useThreadScrolling = (
           if (Math.abs(scrollContainer.scrollTop - target) > 4) {
             scrollContainer.scrollTo({ top: target, behavior: 'auto' })
           }
-          requestAnimationFrame(holdQuestionAtTop)
+        }
+        const holdQuestionAtTop = () => {
+          if (!lastUserMessage.isConnected || userScrolled) return finish()
+          const content = scrollContainer.firstElementChild
+          if (typeof ResizeObserver !== 'undefined' && content) {
+            watcher = new ResizeObserver(keepQuestionAtTop)
+            watcher.observe(content)
+          }
+          holdTimer = setTimeout(finish, HOLD_QUESTION_MS)
         }
         const finish = () => {
+          watcher?.disconnect()
+          watcher = undefined
+          clearTimeout(holdTimer)
           userInput.forEach((name) =>
             scrollContainer.removeEventListener(name, stopFollowing)
           )

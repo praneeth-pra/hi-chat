@@ -11,6 +11,8 @@ import {
   useMemo,
   useCallback,
   useEffect,
+  createContext,
+  useContext,
 } from 'react'
 import { getReadableLanguageName } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -153,6 +155,9 @@ function codeIdFor(code: string, language: string) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CodeProps = Record<string, any>
 
+/** Blocks longer than this are coloured on request, not while streaming. */
+const LARGE_CODE = 4000
+
 /**
  * react-markdown hands every block a new `node` on each streamed update, so
  * a plain memo redrew (and re-highlighted) every code block in the answer on
@@ -166,12 +171,15 @@ export function sameCode(prev: CodeProps, next: CodeProps): boolean {
     'codeBlockStyle',
     'showLineNumbers',
     'isWrapping',
-    'isStreaming',
     'onCopy',
   ]
   if (keys.some((k) => prev[k] !== next[k])) return false
   const code = String(next.children)
   if (String(prev.children) !== code) return false
+  // Streaming only changes a large block (its "Highlight code" button), so
+  // an answer finishing doesn't redraw and re-colour every block in it
+  if (prev.isStreaming !== next.isStreaming && code.length > LARGE_CODE)
+    return false
   if (prev.copiedId === next.copiedId) return true
   const language = /language-([^\s]+)/.exec(next.className || '')?.[1] ?? ''
   const id = codeIdFor(code.replace(/\n$/, ''), language)
@@ -203,7 +211,7 @@ const CodeComponent = memo(
     // Tokenizing a large block creates thousands of spans on the UI thread.
     // Smaller blocks are coloured while they stream, so nothing is redrawn
     // when the answer finishes.
-    const largeCode = code.length > 4000
+    const largeCode = code.length > LARGE_CODE
     const highlight = !largeCode || highlightedCode === code
 
     // Generate a stable ID based on content hash instead of position
@@ -326,6 +334,29 @@ const CodeComponent = memo(
 
 CodeComponent.displayName = 'CodeComponent'
 
+type CodeOptions = {
+  isUser?: boolean
+  codeBlockStyle: string
+  showLineNumbers: boolean
+  isWrapping?: boolean
+  isStreaming: boolean
+  onCopy: (code: string, id: string) => void
+  copiedId: string | null
+}
+const CodeOptionsContext = createContext<CodeOptions | null>(null)
+
+/**
+ * The one `code` component markdown is drawn with. It stays the same
+ * function for the life of the answer and reads the options from context:
+ * a new function each time an option changed (the answer finishing, a
+ * copy) made React throw every code block away and build it again.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function MarkdownCode(props: any) {
+  const options = useContext(CodeOptionsContext)
+  return <CodeComponent {...props} {...options} />
+}
+
 function RenderMarkdownComponent({
   content,
   enableRawHtml,
@@ -385,23 +416,15 @@ function RenderMarkdownComponent({
       : maths
   }, [enableRawHtml, katex])
 
-  // Memoized components with stable references
-  const markdownComponents: Components = useMemo(
+  const codeOptions = useMemo<CodeOptions>(
     () => ({
-      code: (props) => (
-        <CodeComponent
-          {...props}
-          isUser={isUser}
-          codeBlockStyle={codeBlockStyle}
-          showLineNumbers={showLineNumbers}
-          isWrapping={isWrapping}
-          isStreaming={isStreaming}
-          onCopy={handleCopy}
-          copiedId={copiedId}
-        />
-      ),
-      // Add other optimized components if needed
-      ...components,
+      isUser,
+      codeBlockStyle,
+      showLineNumbers,
+      isWrapping,
+      isStreaming,
+      onCopy: handleCopy,
+      copiedId,
     }),
     [
       isUser,
@@ -411,8 +434,27 @@ function RenderMarkdownComponent({
       isStreaming,
       handleCopy,
       copiedId,
-      components,
     ]
+  )
+
+  const markdownComponents: Components = useMemo(
+    () => ({ code: MarkdownCode, ...components }),
+    [components]
+  )
+
+  // The parsed answer only changes with its text: the answer finishing or a
+  // copy reaches the code blocks through context, without parsing it again
+  const tree = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={markdownComponents}
+      >
+        {normalizedContent}
+      </ReactMarkdown>
+    ),
+    [remarkPlugins, rehypePlugins, markdownComponents, normalizedContent]
   )
 
   // Render the markdown content
@@ -424,13 +466,9 @@ function RenderMarkdownComponent({
         className
       )}
     >
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={markdownComponents}
-      >
-        {normalizedContent}
-      </ReactMarkdown>
+      <CodeOptionsContext.Provider value={codeOptions}>
+        {tree}
+      </CodeOptionsContext.Provider>
     </div>
   )
 }

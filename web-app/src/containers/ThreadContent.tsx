@@ -401,7 +401,7 @@ export const ThreadContent = memo(
                 <span
                   data-test-id="answer-pending"
                   aria-label="Answer on its way"
-                  className="relative flex size-5 items-center justify-center text-main-view-fg/70"
+                  className="relative flex size-5 items-center justify-center text-main-view-fg/70 animate-in fade-in duration-200"
                 >
                   <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
                   <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />

@@ -16,7 +16,8 @@ import { useThreads } from '@/hooks/useThreads'
 import ChatInput from '@/containers/ChatInput'
 import { useShallow } from 'zustand/react/shallow'
 import { ThreadContent } from '@/containers/ThreadContent'
-import { StreamingContent } from '@/containers/StreamingContent'
+import { useStreamingItem } from '@/containers/StreamingContent'
+import { AccuracyProgress } from '@/containers/AccuracyProgress'
 
 import { useMessages } from '@/hooks/useMessages'
 import { useServiceHub } from '@/hooks/useServiceHub'
@@ -103,11 +104,13 @@ function ThreadDetail() {
   const isMobile = useMobileScreen()
   useTools()
 
+  const streaming = useStreamingItem(threadId)
   const { messages } = useMessages(
     useShallow((state) => ({
       messages: state.messages[threadId],
     }))
   )
+  const list = messages ?? []
 
   // Subscribe directly to the thread data to ensure updates when model changes
   const thread = useThreads(useShallow((state) => state.threads[threadId]))
@@ -285,10 +288,10 @@ function ThreadDetail() {
                   : 'w-full max-w-3xl'
               )}
             >
-              {messages &&
-                messages.map((item, index) => {
+              {[
+                ...list.map((item, index) => {
                   // Only pass isLastMessage to the last message in the array
-                  const isLastMessage = index === messages.length - 1
+                  const isLastMessage = index === list.length - 1
                   // Older off-screen messages skip layout and paint until
                   // scrolled to, so long chats open and stream lightly. The
                   // last few stay laid out, so a new question's jump to the
@@ -300,7 +303,7 @@ function ThreadDetail() {
                       data-message-author-role={item.role}
                       className={cn(
                         'mb-4',
-                        index < messages.length - 4 &&
+                        index < list.length - 4 &&
                           '[content-visibility:auto] [contain-intrinsic-size:auto_480px]'
                       )}
                     >
@@ -310,11 +313,10 @@ function ThreadDetail() {
                         showAssistant={
                           item.role === 'assistant' &&
                           (index === 0 ||
-                            messages[index - 1]?.role !== 'assistant' ||
+                            list[index - 1]?.role !== 'assistant' ||
                             !(
-                              messages[index - 1]?.metadata &&
-                              'tool_calls' in
-                                (messages[index - 1].metadata ?? {})
+                              list[index - 1]?.metadata &&
+                              'tool_calls' in (list[index - 1].metadata ?? {})
                             ))
                         }
                         index={index}
@@ -322,12 +324,26 @@ function ThreadDetail() {
                       />
                     </div>
                   )
-                })}
+                }),
+                // In the same list as the messages: React keeps an element
+                // only among siblings of one list
+                streaming?.kind === 'answer' && (
+                  // Same place, element and key (the answer's id) as the
+                  // saved message that replaces it, so finishing keeps it
+                  <div
+                    key={streaming.id}
+                    data-test-id="thread-content-text"
+                    data-message-author-role="assistant"
+                    className="mb-4"
+                  >
+                    <ThreadContent {...streaming.props} />
+                  </div>
+                ),
+              ]}
               <PromptProgress />
-              <StreamingContent
-                threadId={threadId}
-                data-test-id="thread-content-text"
-              />
+              {streaming?.kind === 'accuracy' && (
+                <AccuracyProgress key={threadId} phase={streaming.phase} />
+              )}
               {/* Persistent padding element for ChatGPT-style message positioning */}
               <ThreadPadding />
             </div>
