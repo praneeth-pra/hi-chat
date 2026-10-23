@@ -389,7 +389,17 @@ export function createMirrorHub({
     }
   }
 
+  // How much of the reply Hi-chat shows right now, each frame it reveals
+  // more, so viewers show exactly that. Passed on, not kept: a late viewer
+  // has the whole reply already
+  function onShown(ch, m) {
+    if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return
+    const n = Math.min(MAX_TEXT, Math.max(0, m.n))
+    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
+  }
+
   const HANDLERS = {
+    shown: onShown,
     snap: onSnap,
     ops: onOps,
     img: onImage,

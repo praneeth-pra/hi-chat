@@ -11,9 +11,16 @@ import { useEffect, useRef, useState } from 'react'
 const MIN_CHARS_PER_S = 1200
 const CATCH_UP_MS = 500
 
-export function useSmoothText(target: string, live: boolean): string {
-  const [shown, setShown] = useState(target.length)
-  const shownRef = useRef(target.length)
+export function useSmoothText(
+  target: string,
+  live: boolean,
+  // Reveal from the start even if text is already there when it mounts (a
+  // reply that first appears mid-burst)
+  fromStart = false
+): string {
+  const start = fromStart && live ? 0 : target.length
+  const [shown, setShown] = useState(start)
+  const shownRef = useRef(start)
   const targetRef = useRef(target)
   const wasLive = useRef(live)
   if (live) wasLive.current = true

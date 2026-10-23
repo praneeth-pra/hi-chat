@@ -531,6 +531,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
                     key={m.id}
                     msg={m}
                     images={m.images?.map((k) => state.images[k])}
+                    shown={state.shown?.id === m.id ? state.shown.n : undefined}
                   />
                 )),
                 streaming && (
@@ -538,6 +539,11 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
                     key={streaming.id}
                     msg={streamingMsg(streaming)}
                     streaming
+                    shown={
+                      state.shown?.id === streaming.id
+                        ? state.shown.n
+                        : undefined
+                    }
                   />
                 ),
               ]}
@@ -1057,11 +1063,14 @@ const MirrorMessage = memo(
     msg,
     images,
     streaming,
+    shown,
   }: {
     msg: MirrorMessageData
     /** Its screenshots, as they arrive (undefined until then) */
     images?: (string | undefined)[]
     streaming?: boolean
+    /** How much of its answer Hi-chat shows right now, while it reveals it */
+    shown?: number
   }) {
     if (msg.role === 'user')
       return (
@@ -1098,12 +1107,13 @@ const MirrorMessage = memo(
           )}
         </div>
       )
-    return <MirrorAnswer msg={msg} streaming={streaming} />
+    return <MirrorAnswer msg={msg} streaming={streaming} shown={shown} />
   },
   // The same message, the same screenshots: nothing to draw again
   (a, b) =>
     a.msg === b.msg &&
     a.streaming === b.streaming &&
+    a.shown === b.shown &&
     (a.images ?? []).length === (b.images ?? []).length &&
     (a.images ?? []).every((src, i) => src === b.images?.[i])
 )
@@ -1128,15 +1138,41 @@ function streamingMsg(s: { id: string; text: string }): MirrorMessageData {
 function MirrorAnswer({
   msg,
   streaming,
+  shown,
 }: {
   msg: MirrorMessageData
   streaming?: boolean
+  shown?: number
 }) {
   const { reasoningSegment, textSegment } = useMemo(
     () => splitReasoning(msg.text),
     [msg.text]
   )
-  const answer = useSmoothText(textSegment.replace('</think>', ''), !!streaming)
+  const full = textSegment.replace('</think>', '')
+  // Its own steady pace, for when Hi-chat isn't saying how much it shows (a
+  // window in the background barely draws)
+  const paced = useSmoothText(full, !!streaming, true)
+  const step = useInStep()
+  const { n, fresh } = inStepLength(
+    step,
+    full.length,
+    paced.length,
+    shown,
+    performance.now()
+  )
+  const answer = n >= full.length ? full : full.slice(0, n)
+  // If Hi-chat goes quiet partway (its window went to the background), look
+  // again shortly, then carry on at this page's own pace, a frame at a time
+  const [, recheck] = useState(0)
+  useEffect(() => {
+    if (shown === undefined || n >= full.length) return
+    if (fresh) {
+      const later = setTimeout(() => recheck((x) => x + 1), IN_STEP_MS)
+      return () => clearTimeout(later)
+    }
+    const frame = requestAnimationFrame(() => recheck((x) => x + 1))
+    return () => cancelAnimationFrame(frame)
+  }, [shown, n, fresh, full.length])
   return (
     <div data-mid={msg.id || undefined} className="w-full">
       {reasoningSegment && (
@@ -1178,6 +1214,41 @@ function MirrorAnswer({
     </div>
   )
 }
+
+/**
+ * What to show of an answer: exactly what Hi-chat shows while it keeps
+ * saying (each frame it reveals more), else this page's own pace; never
+ * less than already shown, never more than has arrived.
+ */
+const IN_STEP_MS = 150
+function useInStep() {
+  // What Hi-chat said last and when; the most this answer has shown
+  const heard = useRef({ n: -1, at: 0 })
+  const most = useRef(0)
+  return { heard, most }
+}
+function inStepLength(
+  state: ReturnType<typeof useInStep>,
+  fullLength: number,
+  pacedLength: number,
+  shown: number | undefined,
+  now: number
+) {
+  const { heard, most } = state
+  if (shown !== undefined && shown !== heard.current.n)
+    heard.current = { n: shown, at: now }
+  const fresh = shown !== undefined && now - heard.current.at < IN_STEP_MS
+  // On its own pace it moves on from where it is, a frame's worth at a time
+  // (as fast as Hi-chat catches up, at most), rather than jumping ahead
+  const want = fresh
+    ? shown
+    : shown === undefined
+      ? pacedLength
+      : Math.min(pacedLength, most.current + MAX_STEP)
+  most.current = Math.min(fullLength, Math.max(most.current, want))
+  return { n: most.current, fresh }
+}
+const MAX_STEP = 40
 
 /** A screenshot: small like Hi-chat's, full width with a click. */
 function MirrorImage({ src }: { src?: string }) {
