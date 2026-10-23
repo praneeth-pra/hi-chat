@@ -11,7 +11,7 @@ export function ThreadActions({ thread }: { thread: Thread }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const deleteThread = useThreads((state) => state.deleteThread)
   return (
-    <div className="relative z-20 flex items-center gap-1 text-main-view-fg/40">
+    <div className="relative z-20 flex shrink-0 items-center gap-1 text-main-view-fg/40">
       <DictationToggleButton />
       <RemoteSessionButton />
       <MirrorLinkButton />
