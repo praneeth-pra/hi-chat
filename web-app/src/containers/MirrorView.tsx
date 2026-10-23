@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -26,7 +27,7 @@ import { AccuracyProgress } from '@/containers/AccuracyProgress'
 import { AccuracyReviewInfo } from '@/containers/ThreadContent'
 import ThinkingBlock from '@/containers/ThinkingBlock'
 import type { AccuracyReview } from '@/lib/accuracyReview'
-import { markdownBlocks } from '@/lib/markdownBlocks'
+import { useSmoothText } from '@/lib/useSmoothText'
 import {
   createDirectViewer,
   createSeqFilter,
@@ -278,7 +279,15 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   useLayoutEffect(() => {
     following.current = true
   }, [state.scroll])
-  useLayoutEffect(() => {
+  // Where the followed message sits on screen. Hi-chat sends a point in a
+  // message only when it scrolls; while an answer grows its screen stays put,
+  // so between scrolls this page keeps that message where it was rather than
+  // working the point out again from a height that keeps changing (which
+  // drifted the page with every word)
+  const pinned = useRef<{ scroll: unknown; id: string; top: number } | null>(
+    null
+  )
+  const follow = useCallback(() => {
     const el = scroller.current
     if (!el) return
     const at = state.scroll
@@ -287,12 +296,15 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
         `[data-mid="${CSS.escape(at.id)}"]`
       )
       if (m) {
-        const top =
-          m.getBoundingClientRect().top -
-          el.getBoundingClientRect().top +
-          el.scrollTop
-        el.scrollTop = top + at.f * m.offsetHeight - 16
+        const box = el.getBoundingClientRect().top
+        const top = m.getBoundingClientRect().top - box + el.scrollTop
+        const pin = pinned.current
+        el.scrollTop =
+          pin && pin.scroll === at && pin.id === at.id
+            ? top - pin.top
+            : top + at.f * m.offsetHeight - 16
         placed.current = el.scrollTop
+        pinned.current = { scroll: at, id: at.id, top: top - el.scrollTop }
         atBottom.current = false
         return
       }
@@ -303,7 +315,18 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       atBottom.current = true
       setShowJump(false)
     } else setShowJump(true)
-  }, [state.msgs, state.stream, state.scroll])
+  }, [state.scroll])
+  useLayoutEffect(follow, [state.msgs, state.stream, state.scroll, follow])
+  // An answer keeps growing between updates (it is revealed a little each
+  // frame), so follow its height too, not only the updates
+  const content = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = content.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(() => follow())
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [follow])
 
   const jumpToLatest = () => {
     const el = scroller.current
@@ -494,26 +517,33 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             {/* A comfortable reading width; beside a shared screen the half
                 is narrower than this anyway */}
             <div
+              ref={content}
               style={text}
               className="mx-auto flex max-w-md flex-col gap-6 text-base lg:mx-0 lg:max-w-none"
             >
               {empty && <EmptyState tone={mirror.tone} />}
-              {state.msgs.map((m) => (
-                <MirrorMessage
-                  key={m.id}
-                  msg={m}
-                  images={m.images?.map((k) => state.images[k])}
-                />
-              ))}
+              {/* The reply being written sits in the list under the id the
+                  saved reply keeps, so when it finishes the same answer
+                  carries on rather than being drawn again */}
+              {[
+                ...state.msgs.map((m) => (
+                  <MirrorMessage
+                    key={m.id}
+                    msg={m}
+                    images={m.images?.map((k) => state.images[k])}
+                  />
+                )),
+                streaming && (
+                  <MirrorMessage
+                    key={streaming.id}
+                    msg={streamingMsg(streaming)}
+                    streaming
+                  />
+                ),
+              ]}
               {/* Accuracy mode's progress, as Hi-chat shows it */}
               {state.phase && !streaming && (
                 <AccuracyProgress phase={state.phase} />
-              )}
-              {streaming && (
-                <MirrorMessage
-                  msg={{ id: '', role: 'assistant', text: streaming.text }}
-                  streaming
-                />
               )}
               <div ref={end} aria-hidden />
               {/* Room to scroll the last answer up the page */}
@@ -1068,54 +1098,7 @@ const MirrorMessage = memo(
           )}
         </div>
       )
-    const { reasoningSegment, textSegment } = splitReasoning(msg.text)
-    const answer = textSegment.replace('</think>', '')
-    return (
-      <div data-mid={msg.id || undefined} className="w-full">
-        {reasoningSegment && (
-          <ThinkingBlock
-            id={`mirror-${msg.id || 'streaming'}`}
-            text={reasoningSegment}
-          />
-        )}
-        {streaming && !reasoningSegment && !answer.trim() && (
-          <span
-            aria-label="Answer on its way"
-            className="relative flex size-5 items-center justify-center text-main-view-fg/70"
-          >
-            <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
-            <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
-          </span>
-        )}
-        {streaming ? (
-          <StreamingMarkdown text={answer} />
-        ) : (
-          <RenderMarkdown content={answer} />
-        )}
-        {msg.review && (
-          <AccuracyReviewInfo
-            review={msg.review as unknown as AccuracyReview}
-          />
-        )}
-        {!!msg.tools?.length && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {msg.tools.map((tool, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1.5 rounded-md border border-main-view-fg/10 bg-main-view-fg/5 px-2 py-1 text-xs text-main-view-fg/70"
-              >
-                {tool.pending ? (
-                  <IconLoader2 size={12} className="animate-spin" />
-                ) : (
-                  <IconTool size={12} />
-                )}
-                {tool.name || 'Tool'}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    )
+    return <MirrorAnswer msg={msg} streaming={streaming} />
   },
   // The same message, the same screenshots: nothing to draw again
   (a, b) =>
@@ -1124,6 +1107,77 @@ const MirrorMessage = memo(
     (a.images ?? []).length === (b.images ?? []).length &&
     (a.images ?? []).every((src, i) => src === b.images?.[i])
 )
+
+/** The streamed reply's message object, kept while its text is the same. */
+const streamMsgs = new WeakMap<object, MirrorMessageData>()
+function streamingMsg(s: { id: string; text: string }): MirrorMessageData {
+  let m = streamMsgs.get(s)
+  if (!m) {
+    m = { id: s.id, role: 'assistant', text: s.text }
+    streamMsgs.set(s, m)
+  }
+  return m
+}
+
+/**
+ * An answer drawn exactly as Hi-chat's chat draws it (ThreadContent): the
+ * text revealed at a steady pace rather than in the bursts it arrives in,
+ * new words fading in, finished blocks never drawn again, and the same
+ * drawing once it is saved, so nothing jumps when it finishes.
+ */
+function MirrorAnswer({
+  msg,
+  streaming,
+}: {
+  msg: MirrorMessageData
+  streaming?: boolean
+}) {
+  const { reasoningSegment, textSegment } = useMemo(
+    () => splitReasoning(msg.text),
+    [msg.text]
+  )
+  const answer = useSmoothText(textSegment.replace('</think>', ''), !!streaming)
+  return (
+    <div data-mid={msg.id || undefined} className="w-full">
+      {reasoningSegment && (
+        <ThinkingBlock
+          id={`mirror-${msg.id || 'streaming'}`}
+          text={reasoningSegment}
+        />
+      )}
+      {streaming && !reasoningSegment && !answer.trim() && (
+        <span
+          aria-label="Answer on its way"
+          className="relative flex size-5 items-center justify-center text-main-view-fg/70"
+        >
+          <span className="absolute inset-0 rounded-full bg-current opacity-15 animate-[breathe_1.8s_ease-in-out_infinite]" />
+          <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
+        </span>
+      )}
+      <RenderMarkdown content={answer} streamable isStreaming={!!streaming} />
+      {msg.review && (
+        <AccuracyReviewInfo review={msg.review as unknown as AccuracyReview} />
+      )}
+      {!!msg.tools?.length && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {msg.tools.map((tool, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1.5 rounded-md border border-main-view-fg/10 bg-main-view-fg/5 px-2 py-1 text-xs text-main-view-fg/70"
+            >
+              {tool.pending ? (
+                <IconLoader2 size={12} className="animate-spin" />
+              ) : (
+                <IconTool size={12} />
+              )}
+              {tool.name || 'Tool'}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** A screenshot: small like Hi-chat's, full width with a click. */
 function MirrorImage({ src }: { src?: string }) {
@@ -1151,29 +1205,5 @@ function MirrorImage({ src }: { src?: string }) {
         )}
       />
     </button>
-  )
-}
-
-const MarkdownBlock = memo(function MarkdownBlock({
-  content,
-}: {
-  content: string
-}) {
-  return <RenderMarkdown content={content} />
-})
-
-function StreamingMarkdown({ text }: { text: string }) {
-  const blocks = markdownBlocks(text)
-  const last = blocks.length - 1
-  return (
-    <>
-      {blocks.map((block, i) =>
-        i < last ? (
-          <MarkdownBlock key={i} content={block} />
-        ) : (
-          <RenderMarkdown key={i} content={block} isStreaming />
-        )
-      )}
-    </>
   )
 }

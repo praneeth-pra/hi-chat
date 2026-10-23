@@ -359,7 +359,11 @@ export function startRemoteMirror({
   tap = (threadId, text) => {
     if (!viewers || !open() || notSending(location.pathname)) return
     if (threadId !== useThreads.getState().currentThreadId) return
-    sendStream(text)
+    // Under the reply's own id, which the saved reply keeps, so the viewer
+    // carries on with the same answer when it finishes instead of drawing it
+    // again
+    const live = useAppState.getState().streamingContent
+    sendStream(text, live?.thread_id === threadId ? live.id : undefined)
   }
 
   // Screenshots, sent once each, made small first

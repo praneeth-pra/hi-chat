@@ -504,6 +504,42 @@ describe('mirror: a reply goes out the moment it arrives', () => {
     expect(ws.seqs).toEqual(ws.seqs.map((_, i) => i + 1))
   })
 
+  it('streams a reply under the id its saved message keeps', async () => {
+    stop = startRemoteMirror({
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      location: {
+        protocol: 'https:',
+        host: 'hi.example',
+        pathname: '/',
+      } as Location,
+    })
+    const ws = FakeSocket.last
+    ws.open()
+    ws.hear({ t: 'viewers', n: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    const before = ws.sent.length
+    // The chat's placeholder for the reply carries the id it is saved under
+    useAppState.setState({
+      streamingContent: { ...msg('a1', 'assistant', ''), thread_id: 't1' },
+    })
+    mirrorStreamTap('t1', 'He')
+    mirrorStreamTap('t1', 'Hello')
+    expect(ws.sent.slice(before)).toEqual([
+      { t: 'stream', id: 'a1', text: 'He' },
+      { t: 'stream', id: 'a1', add: 'llo' },
+    ])
+    // So the viewer ends the stream into that same message
+    let view = applyMirrorMessage(emptyMirror, ws.sent[before])
+    view = applyMirrorMessage(view, ws.sent[before + 1])
+    view = applyMirrorMessage(view, {
+      t: 'ops',
+      set: [],
+      add: [{ id: 'a1', role: 'assistant', text: 'Hello' }],
+    })
+    expect(view.stream).toBeNull()
+    expect(view.msgs.map((m) => m.id)).toEqual(['a1'])
+  })
+
   it("doesn't lay the chat out again for every streamed piece", async () => {
     // Measuring the scroll position forces a layout: only when the
     // conversation changes, on the next frame, never per streamed piece
