@@ -1715,12 +1715,24 @@ final class CaretReporter {
   /// The text cursor's place, or nil and why not (shown in the mirror).
   func read() -> (NSPoint?, String) {
     guard AXIsProcessTrusted() else { return (nil, "no-permission") }
+    // Ask the app in front for its focused element. Chrome-based browsers
+    // (Brave, Chrome, Edge) only say which text box has focus once asked to
+    // describe their pages, so they're asked first, before reading it.
+    guard let front = NSWorkspace.shared.frontmostApplication else { return (nil, "no-focus") }
+    let app = AXUIElementCreateApplication(front.processIdentifier)
+    AXUIElementSetMessagingTimeout(app, 0.1)
+    askForText(front)
     var focused: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused)
-            == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
+    if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused)
+         != .success {
+      // Some apps answer only through the system-wide element
+      focused = nil
+      _ = AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused)
+    }
+    guard let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
     else { return (nil, "no-focus") }
     let element = focused as! AXUIElement
-    askForText(element)
+    AXUIElementSetMessagingTimeout(element, 0.1)
     var rangeRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
             == .success, let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID()
@@ -1764,14 +1776,14 @@ final class CaretReporter {
   /// Chrome-based browsers describe their pages' text boxes only once an
   /// assistive app asks (AXEnhancedUserInterface); Electron apps (VS Code,
   /// Slack) answer AXManualAccessibility. Asked once per app.
-  func askForText(_ element: AXUIElement) {
-    var pid: pid_t = 0
-    guard AXUIElementGetPid(element, &pid) == .success, !askedApps.contains(pid) else { return }
+  func askForText(_ front: NSRunningApplication) {
+    let pid = front.processIdentifier
+    guard !askedApps.contains(pid) else { return }
     askedApps.insert(pid)
     let app = AXUIElementCreateApplication(pid)
-    AXUIElementSetMessagingTimeout(app, 0.05)
+    AXUIElementSetMessagingTimeout(app, 0.1)
     AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-    let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
+    let id = front.bundleIdentifier ?? ""
     let chromium = ["com.google.Chrome", "com.brave.Browser", "com.microsoft.edgemac",
                     "company.thebrowser.Browser", "org.chromium.Chromium", "com.vivaldi.Vivaldi",
                     "com.operasoftware.Opera"]
