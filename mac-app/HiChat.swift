@@ -1702,37 +1702,63 @@ final class CaretReporter {
   }
 
   func report() {
-    let at = point().map { "\(Int($0.x)),\(Int($0.y))" } ?? ""
-    guard at != last else { return }
-    last = at
+    let (p, why) = read()
+    let at = p.map { "\(Int($0.x)),\(Int($0.y))" } ?? ""
+    let state = at + "|" + why
+    guard state != last else { return }
+    last = state
     DistributedNotificationCenter.default().postNotificationName(
-      mirrorNote, object: nil, userInfo: ["command": "caret", "at": at], deliverImmediately: true)
+      mirrorNote, object: nil, userInfo: ["command": "caret", "at": at, "why": why],
+      deliverImmediately: true)
   }
 
-  func point() -> NSPoint? {
-    guard AXIsProcessTrusted() else { return nil }
+  /// The text cursor's place, or nil and why not (shown in the mirror).
+  func read() -> (NSPoint?, String) {
+    guard AXIsProcessTrusted() else { return (nil, "no-permission") }
     var focused: CFTypeRef?
     guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused)
             == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
-    else { return nil }
+    else { return (nil, "no-focus") }
     let element = focused as! AXUIElement
     askForText(element)
-    var range: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range)
-            == .success, let range
-    else { return nil }
-    var bounds: CFTypeRef?
+    var rangeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
+            == .success, let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID()
+    else { return (nil, "no-text") }
+    var range = CFRange()
+    guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else { return (nil, "no-text") }
+    guard let primary = NSScreen.screens.first else { return (nil, "no-screen") }
+    // Accessibility measures from the top left of the main screen
+    let flip = { (x: CGFloat, y: CGFloat) in NSPoint(x: x, y: primary.frame.maxY - y) }
+    if let r = bounds(element, range) { return (flip(r.midX, r.midY), "") }
+    // A blinking cursor is a range of length 0, which Chrome (and others)
+    // often won't measure: measure the character before it (the cursor is
+    // at its right edge), else the one after it (at its left edge).
+    if range.length == 0 {
+      if range.location > 0,
+         let r = bounds(element, CFRange(location: range.location - 1, length: 1)) {
+        return (flip(r.maxX, r.midY), "")
+      }
+      if let r = bounds(element, CFRange(location: range.location, length: 1)) {
+        return (flip(r.minX, r.midY), "")
+      }
+    }
+    return (nil, "no-bounds")
+  }
+
+  func bounds(_ element: AXUIElement, _ range: CFRange) -> CGRect? {
+    var range = range
+    guard let value = AXValueCreate(.cfRange, &range) else { return nil }
+    var out: CFTypeRef?
     guard AXUIElementCopyParameterizedAttributeValue(
-            element, kAXBoundsForRangeParameterizedAttribute as CFString, range, &bounds) == .success,
-          let bounds, CFGetTypeID(bounds) == AXValueGetTypeID()
+            element, kAXBoundsForRangeParameterizedAttribute as CFString, value, &out) == .success,
+          let out, CFGetTypeID(out) == AXValueGetTypeID()
     else { return nil }
     var rect = CGRect.zero
-    guard AXValueGetValue(bounds as! AXValue, .cgRect, &rect),
-          rect.origin != .zero || rect.size != .zero,
-          let primary = NSScreen.screens.first
+    guard AXValueGetValue(out as! AXValue, .cgRect, &rect),
+          rect.origin != .zero || rect.size != .zero
     else { return nil }
-    // Accessibility measures from the top left of the main screen
-    return NSPoint(x: rect.midX, y: primary.frame.maxY - rect.midY)
+    return rect
   }
 
   /// Chrome-based browsers describe their pages' text boxes only once an
