@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { localStorageKey } from '@/constants/localStorage'
-import { RgbaColor } from 'react-colorful'
+type RgbaColor = { r: number; g: number; b: number; a: number }
 import { rgb, oklch, formatCss } from 'culori'
 import { useTheme } from './useTheme'
 import { useEffect, useState } from 'react'

@@ -5,7 +5,6 @@
  * then provides synchronous access to service instances throughout the app.
  */
 
-import { isPlatformTauri, isPlatformIOS, isPlatformAndroid } from '@/lib/platform/utils'
 
 // Import default services
 import { DefaultThemeService } from './theme/default'
@@ -108,139 +107,49 @@ class PlatformServiceHub implements ServiceHub {
   async initialize(): Promise<void> {
     if (this.initialized) return
 
-    console.log(
-      'Initializing service hub for platform:',
-      isPlatformTauri() && !isPlatformIOS() && !isPlatformAndroid() ? 'Tauri' :
-      isPlatformIOS() ? 'iOS' :
-      isPlatformAndroid() ? 'Android' : 'Web'
-    )
-
+    // Hi-chat runs in the browser only (the Mac and Windows apps wrap the
+    // site), so every service is the web one
     try {
-      if (isPlatformTauri() && !isPlatformIOS() && !isPlatformAndroid()) {
-        // Desktop Tauri
-        const [
-          themeModule,
-          windowModule,
-          eventsModule,
-          hardwareModule,
-          appModule,
-          mcpModule,
-          providersModule,
-          dialogModule,
-          openerModule,
-          updaterModule,
-          pathModule,
-          coreModule,
-          deepLinkModule,
-        ] = await Promise.all([
-          import('./theme/tauri'),
-          import('./window/tauri'),
-          import('./events/tauri'),
-          import('./hardware/tauri'),
-          import('./app/tauri'),
-          import('./mcp/tauri'),
-          import('./providers/tauri'),
-          import('./dialog/tauri'),
-          import('./opener/tauri'),
-          import('./updater/tauri'),
-          import('./path/tauri'),
-          import('./core/tauri'),
-          import('./deeplink/tauri'),
-        ])
+      const [
+        themeModule,
+        appModule,
+        pathModule,
+        coreModule,
+        dialogModule,
+        eventsModule,
+        windowModule,
+        deepLinkModule,
+        providersModule,
+        mcpModule,
+        projectsModule,
+        assistantsModule,
+      ] = await Promise.all([
+        import('./theme/web'),
+        import('./app/web'),
+        import('./path/web'),
+        import('./core/web'),
+        import('./dialog/web'),
+        import('./events/web'),
+        import('./window/web'),
+        import('./deeplink/web'),
+        import('./providers/web'),
+        import('./mcp/web'),
+        import('./projects/web'),
+        import('./assistants/web'),
+      ])
 
-        this.themeService = new themeModule.TauriThemeService()
-        this.windowService = new windowModule.TauriWindowService()
-        this.eventsService = new eventsModule.TauriEventsService()
-        this.hardwareService = new hardwareModule.TauriHardwareService()
-        this.appService = new appModule.TauriAppService()
-        this.mcpService = new mcpModule.TauriMCPService()
-        this.providersService = new providersModule.TauriProvidersService()
-        this.dialogService = new dialogModule.TauriDialogService()
-        this.openerService = new openerModule.TauriOpenerService()
-        this.updaterService = new updaterModule.TauriUpdaterService()
-        this.pathService = new pathModule.TauriPathService()
-        this.coreService = new coreModule.TauriCoreService()
-        this.deepLinkService = new deepLinkModule.TauriDeepLinkService()
-      } else if (isPlatformIOS() || isPlatformAndroid()) {
-        const [
-          themeModule,
-          windowModule,
-          eventsModule,
-          appModule,
-          mcpModule,
-          providersModule,
-          dialogModule,
-          openerModule,
-          pathModule,
-          coreModule,
-          deepLinkModule,
-        ] = await Promise.all([
-          import('./theme/tauri'),
-          import('./window/tauri'),
-          import('./events/tauri'),
-          import('./app/tauri'),
-          import('./mcp/tauri'),
-          import('./providers/tauri'),
-          import('./dialog/tauri'),
-          import('./opener/tauri'),
-          import('./path/tauri'),
-          import('./core/mobile'), // Use mobile-specific core service
-          import('./deeplink/tauri'),
-        ])
-
-        this.themeService = new themeModule.TauriThemeService()
-        this.windowService = new windowModule.TauriWindowService()
-        this.eventsService = new eventsModule.TauriEventsService()
-        this.appService = new appModule.TauriAppService()
-        this.mcpService = new mcpModule.TauriMCPService()
-        this.providersService = new providersModule.TauriProvidersService()
-        this.dialogService = new dialogModule.TauriDialogService()
-        this.openerService = new openerModule.TauriOpenerService()
-        this.pathService = new pathModule.TauriPathService()
-        this.coreService = new coreModule.MobileCoreService() // Mobile service with pre-loaded extensions
-        this.deepLinkService = new deepLinkModule.TauriDeepLinkService()
-      } else {
-        const [
-          themeModule,
-          appModule,
-          pathModule,
-          coreModule,
-          dialogModule,
-          eventsModule,
-          windowModule,
-          deepLinkModule,
-          providersModule,
-          mcpModule,
-          projectsModule,
-          assistantsModule,
-        ] = await Promise.all([
-          import('./theme/web'),
-          import('./app/web'),
-          import('./path/web'),
-          import('./core/web'),
-          import('./dialog/web'),
-          import('./events/web'),
-          import('./window/web'),
-          import('./deeplink/web'),
-          import('./providers/web'),
-          import('./mcp/web'),
-          import('./projects/web'),
-          import('./assistants/web'),
-        ])
-
-        this.themeService = new themeModule.WebThemeService()
-        this.appService = new appModule.WebAppService()
-        this.pathService = new pathModule.WebPathService()
-        this.coreService = new coreModule.WebCoreService()
-        this.dialogService = new dialogModule.WebDialogService()
-        this.eventsService = new eventsModule.WebEventsService()
-        this.windowService = new windowModule.WebWindowService()
-        this.deepLinkService = new deepLinkModule.WebDeepLinkService()
-        this.providersService = new providersModule.WebProvidersService()
-        this.mcpService = new mcpModule.WebMCPService()
-        this.projectsService = new projectsModule.WebProjectsService()
-        this.assistantsService = new assistantsModule.WebAssistantsService()
-      }
+      this.themeService = new themeModule.WebThemeService()
+      this.appService = new appModule.WebAppService()
+      this.pathService = new pathModule.WebPathService()
+      this.coreService = new coreModule.WebCoreService()
+      this.dialogService = new dialogModule.WebDialogService()
+      this.eventsService = new eventsModule.WebEventsService()
+      this.windowService = new windowModule.WebWindowService()
+      this.deepLinkService = new deepLinkModule.WebDeepLinkService()
+      this.providersService = new providersModule.WebProvidersService()
+      this.mcpService = new mcpModule.WebMCPService()
+      this.projectsService = new projectsModule.WebProjectsService()
+      this.assistantsService = new assistantsModule.WebAssistantsService()
 
       this.initialized = true
       console.log('Service hub initialized successfully')

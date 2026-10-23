@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { initializeServiceHub, type ServiceHub } from '../index'
-import { isPlatformTauri } from '@/lib/platform/utils'
 
 // Mock platform detection
 vi.mock('@/lib/platform/utils', () => ({
@@ -23,11 +22,6 @@ vi.mock('@janhq/core', () => ({
       engines: new Map()
     }))
   }
-}))
-
-// Mock token.js to avoid initialization issues
-vi.mock('token.js', () => ({
-  models: {}
 }))
 
 // Mock ExtensionManager to avoid initialization issues
@@ -82,65 +76,6 @@ vi.mock('../providers/web', () => ({
   WebProvidersService: vi.fn().mockImplementation(() => ({}))
 }))
 
-// Mock dynamic imports for Tauri services
-vi.mock('../theme/tauri', () => ({
-  TauriThemeService: vi.fn().mockImplementation(() => ({
-    setTheme: vi.fn(),
-    getCurrentWindow: vi.fn()
-  }))
-}))
-
-vi.mock('../window/tauri', () => ({
-  TauriWindowService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../events/tauri', () => ({
-  TauriEventsService: vi.fn().mockImplementation(() => ({
-    emit: vi.fn(),
-    listen: vi.fn()
-  }))
-}))
-
-vi.mock('../hardware/tauri', () => ({
-  TauriHardwareService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../app/tauri', () => ({
-  TauriAppService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../mcp/tauri', () => ({
-  TauriMCPService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../providers/tauri', () => ({
-  TauriProvidersService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../dialog/tauri', () => ({
-  TauriDialogService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../opener/tauri', () => ({
-  TauriOpenerService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../updater/tauri', () => ({
-  TauriUpdaterService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../path/tauri', () => ({
-  TauriPathService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../core/tauri', () => ({
-  TauriCoreService: vi.fn().mockImplementation(() => ({}))
-}))
-
-vi.mock('../deeplink/tauri', () => ({
-  TauriDeepLinkService: vi.fn().mockImplementation(() => ({}))
-}))
-
 // Mock console to avoid noise in tests
 vi.spyOn(console, 'log').mockImplementation(() => {})
 vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -154,28 +89,11 @@ describe('ServiceHub Integration Tests', () => {
   })
 
   describe('ServiceHub Initialization', () => {
-    it('should initialize with web services when not on Tauri', async () => {
-      vi.mocked(isPlatformTauri).mockReturnValue(false)
-
+    it('should initialize with the web services', async () => {
       serviceHub = await initializeServiceHub()
 
       expect(serviceHub).toBeDefined()
-      expect(console.log).toHaveBeenCalledWith(
-        'Initializing service hub for platform:',
-        'Web'
-      )
-    })
-
-    it('should initialize with Tauri services when on Tauri', async () => {
-      vi.mocked(isPlatformTauri).mockReturnValue(true)
-
-      serviceHub = await initializeServiceHub()
-
-      expect(serviceHub).toBeDefined()
-      expect(console.log).toHaveBeenCalledWith(
-        'Initializing service hub for platform:',
-        'Tauri'
-      )
+      expect(serviceHub.providers()).toBeDefined()
     })
   })
 

@@ -58,22 +58,6 @@ export function InterfaceProvider() {
     // Apply font size
     document.documentElement.style.setProperty('--font-size-base', fontSize)
 
-    // Hide alpha slider when blur is not supported
-    const shouldHideAlpha = !showAlphaSlider
-    let alphaStyleElement = document.getElementById('alpha-slider-style')
-
-    if (shouldHideAlpha) {
-      if (!alphaStyleElement) {
-        alphaStyleElement = document.createElement('style')
-        alphaStyleElement.id = 'alpha-slider-style'
-        document.head.appendChild(alphaStyleElement)
-      }
-      alphaStyleElement.textContent =
-        '.react-colorful__alpha { display: none !important; }'
-    } else if (alphaStyleElement) {
-      alphaStyleElement.remove()
-    }
-
     // Apply app background color
     // Import culori functions dynamically to avoid SSR issues
     import('culori').then(({ rgb, oklch, formatCss }) => {

@@ -109,20 +109,17 @@ describe('SettingsMenu', () => {
 
     expect(screen.getByText('common:general')).toBeInTheDocument()
     expect(screen.getByText('common:interface')).toBeInTheDocument()
-    expect(screen.getByText('common:privacy')).toBeInTheDocument()
     expect(screen.getByText('common:modelProviders')).toBeInTheDocument()
+    // Desktop-only pages are gone from the web app
+    expect(screen.queryByText('common:privacy')).not.toBeInTheDocument()
     // Platform-specific features tested separately
   })
 
-  it('renders keyboard shortcuts on desktop platforms', () => {
-    // This test assumes desktop platform (mocked in setup with shortcut: true)
+  it('renders keyboard shortcuts and no desktop-only pages', () => {
     render(<SettingsMenu />)
     expect(screen.getByText('common:keyboardShortcuts')).toBeInTheDocument()
-    expect(screen.getByText('common:hardware')).toBeInTheDocument()
-    expect(screen.getByText('common:local_api_server')).toBeInTheDocument()
-    expect(screen.getByText('common:https_proxy')).toBeInTheDocument()
-    expect(screen.getByText('common:extensions')).toBeInTheDocument()
-    expect(screen.getByText('common:mcp-servers')).toBeInTheDocument()
+    expect(screen.queryByText('common:hardware')).not.toBeInTheDocument()
+    expect(screen.queryByText('common:mcp-servers')).not.toBeInTheDocument()
   })
 
   it('shows provider expansion chevron when providers are active', () => {

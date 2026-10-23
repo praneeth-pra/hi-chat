@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useTheme, checkOSDarkMode } from '@/hooks/useTheme'
-import { isPlatformTauri } from '@/lib/platform/utils'
 
 /**
  * ThemeProvider ensures theme settings are applied on every page load
@@ -48,34 +47,10 @@ export function ThemeProvider() {
     // Add event listener for browser/web
     mediaQuery.addEventListener('change', handleThemeChange)
 
-    // Listen to Tauri native theme events (uses XDG Desktop Portal on Linux)
-    let unlistenTauri: (() => void) | undefined
-
-    if (isPlatformTauri()) {
-      import('@tauri-apps/api/event')
-        .then(({ listen }) => {
-          return listen<string>('theme-changed', (event) => {
-            if (activeTheme === 'auto') {
-              const isDark = event.payload === 'dark'
-              setIsDark(isDark)
-            }
-          })
-        })
-        .then((unlisten) => {
-          unlistenTauri = unlisten
-        })
-        .catch((err) => {
-          console.error('Failed to setup Tauri theme listener:', err)
-        })
-    }
-
     // Clean up
     return () => {
       clearTimeout(timeoutId)
       mediaQuery.removeEventListener('change', handleThemeChange)
-      if (unlistenTauri) {
-        unlistenTauri()
-      }
     }
   }, [activeTheme, setIsDark, setTheme])
 

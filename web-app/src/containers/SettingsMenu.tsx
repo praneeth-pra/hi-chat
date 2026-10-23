@@ -87,12 +87,6 @@ const SettingsMenu = () => {
       isEnabled: true,
     },
     {
-      title: 'common:privacy',
-      route: route.settings.privacy,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.ANALYTICS],
-    },
-    {
       title: 'common:modelProviders',
       route: route.settings.model_providers,
       hasSubMenu: activeProviders.length > 0,
@@ -115,36 +109,6 @@ const SettingsMenu = () => {
       route: route.settings.app_keys,
       hasSubMenu: false,
       isEnabled: inHiChatApp(),
-    },
-    {
-      title: 'common:hardware',
-      route: route.settings.hardware,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.HARDWARE_MONITORING],
-    },
-    {
-      title: 'common:mcp-servers',
-      route: route.settings.mcp_servers,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.MCP_SERVERS_SETTINGS],
-    },
-    {
-      title: 'common:local_api_server',
-      route: route.settings.local_api_server,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.LOCAL_API_SERVER],
-    },
-    {
-      title: 'common:https_proxy',
-      route: route.settings.https_proxy,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.HTTPS_PROXY],
-    },
-    {
-      title: 'common:extensions',
-      route: route.settings.extensions,
-      hasSubMenu: false,
-      isEnabled: PlatformFeatures[PlatformFeature.EXTENSIONS_SETTINGS],
     },
   ]
 

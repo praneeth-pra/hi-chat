@@ -13,14 +13,6 @@ vi.mock('@/containers/HeaderPage', () => ({
   ),
 }))
 
-vi.mock('@/containers/ColorPickerAppBgColor', () => ({
-  ColorPickerAppBgColor: () => <div data-testid="color-picker-bg">Color Picker BG</div>,
-}))
-
-vi.mock('@/containers/ColorPickerAppMainView', () => ({
-  ColorPickerAppMainView: () => <div data-testid="color-picker-main-view">Color Picker Main View</div>,
-}))
-
 vi.mock('@/containers/Card', () => ({
   Card: ({ title, children }: { title?: string; children: React.ReactNode }) => (
     <div data-testid="card" data-title={title}>
@@ -43,18 +35,6 @@ vi.mock('@/containers/ThemeSwitcher', () => ({
 
 vi.mock('@/containers/FontSizeSwitcher', () => ({
   FontSizeSwitcher: () => <div data-testid="font-size-switcher">Font Size Switcher</div>,
-}))
-
-vi.mock('@/containers/ColorPickerAppPrimaryColor', () => ({
-  ColorPickerAppPrimaryColor: () => <div data-testid="color-picker-primary">Color Picker Primary</div>,
-}))
-
-vi.mock('@/containers/ColorPickerAppAccentColor', () => ({
-  ColorPickerAppAccentColor: () => <div data-testid="color-picker-accent">Color Picker Accent</div>,
-}))
-
-vi.mock('@/containers/ColorPickerAppDestructiveColor', () => ({
-  ColorPickerAppDestructiveColor: () => <div data-testid="color-picker-destructive">Color Picker Destructive</div>,
 }))
 
 vi.mock('@/containers/ChatWidthSwitcher', () => ({
@@ -146,11 +126,7 @@ describe('Interface Settings Route', () => {
 
     expect(screen.getByTestId('theme-switcher')).toBeInTheDocument()
     expect(screen.getByTestId('font-size-switcher')).toBeInTheDocument()
-    expect(screen.getByTestId('color-picker-bg')).toBeInTheDocument()
-    expect(screen.getByTestId('color-picker-main-view')).toBeInTheDocument()
-    expect(screen.getByTestId('color-picker-primary')).toBeInTheDocument()
-    expect(screen.getByTestId('color-picker-accent')).toBeInTheDocument()
-    expect(screen.getByTestId('color-picker-destructive')).toBeInTheDocument()
+    expect(screen.queryByTestId('color-picker-bg')).not.toBeInTheDocument()
   })
 
   it('should render chat width controls', () => {
@@ -215,21 +191,6 @@ describe('Interface Settings Route', () => {
     // Check that cards have proper structure
     const cards = screen.getAllByTestId('card')
     expect(cards.length).toBeGreaterThan(0)
-  })
-
-  it('should have proper responsive layout classes', () => {
-    const Component = InterfaceRoute.component as React.ComponentType
-    render(<Component />)
-
-    const cardItems = screen.getAllByTestId('card-item')
-    
-    // Check that some card items have responsive classes
-    const responsiveItems = cardItems.filter(item => 
-      item.className?.includes('flex-col') || 
-      item.className?.includes('sm:flex-row')
-    )
-    
-    expect(responsiveItems.length).toBeGreaterThan(0)
   })
 
   it('should render main layout structure', () => {

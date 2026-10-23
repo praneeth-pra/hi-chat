@@ -145,11 +145,6 @@ vi.mock('@/hooks/useServiceHub', () => ({
   useServiceHub: () => mockServiceHub,
 }))
 
-vi.mock('../MovingBorder', () => ({
-  MovingBorder: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="moving-border">{children}</div>
-  ),
-}))
 
 vi.mock('../DropdownModelProvider', () => ({
   __esModule: true,

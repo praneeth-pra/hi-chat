@@ -52,9 +52,10 @@
     line-height: 1.5;
   }
 
-  /* Paragraphs and text */
+  /* Paragraphs and text: 1.65 suits the sans-serif fonts (1.75 was set for
+     serifs and read loose) */
   p {
-    line-height: 1.75;
+    line-height: 1.65;
     margin-bottom: 1em;
   }
 
@@ -80,7 +81,7 @@
   /* Lists */
   ul,
   ol {
-    line-height: 1.75;
+    line-height: 1.65;
     margin-bottom: 1em;
     padding-left: 1.5em;
   }
