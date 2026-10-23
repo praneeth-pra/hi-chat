@@ -98,6 +98,28 @@ test('a reply saved under a new id still ends the stream', () => {
   assert.equal(late.got.filter((m) => m.t === 'stream').length, 0)
 })
 
+test('viewers hear how much of the reply Hi-chat shows', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(
+    JSON.stringify({ t: 'shown', id: 'a1', n: 42, s: 'abcdefgh12', q: 7 })
+  )
+  assert.deepEqual(lastOf(viewer, 'shown'), {
+    t: 'shown',
+    id: 'a1',
+    n: 42,
+    s: 'abcdefgh12',
+    q: 7,
+  })
+  // Nonsense is dropped
+  sender.onmessage(JSON.stringify({ t: 'shown', id: 'a1', n: 'lots' }))
+  sender.onmessage(JSON.stringify({ t: 'shown', n: 5 }))
+  assert.equal(viewer.got.filter((m) => m.t === 'shown').length, 1)
+})
+
 test('viewers scroll with Hi-chat, late ones too', () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()
@@ -512,7 +534,7 @@ test("a link's viewer is marked, so Hi-chat never lets it control", () => {
   assert.equal(lastOf(app, 'peer').link, true)
 })
 
-test("viewers get Hi-chat's look, reveal and message box, late ones too", () => {
+test("viewers get Hi-chat's look and message box, late ones too", () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()
   const viewer = fakeSocket()
@@ -542,13 +564,6 @@ test("viewers get Hi-chat's look, reveal and message box, late ones too", () => 
       '--app-main-view': 'rgba(23, 23, 23, 1)',
     },
   })
-  sender.onmessage(JSON.stringify({ t: 'shown', id: 'a1', n: 42 }))
-  assert.deepEqual(lastOf(viewer, 'shown'), { t: 'shown', id: 'a1', n: 42 })
-  sender.onmessage(JSON.stringify({ t: 'shown', id: 'a1', n: -1 }))
-  sender.onmessage(JSON.stringify({ t: 'shown', id: 'a1', n: 1.5 }))
-  assert.deepEqual(lastOf(viewer, 'shown'), { t: 'shown', id: 'a1', n: 42 })
-  sender.onmessage(JSON.stringify({ t: 'shown', id: null }))
-  assert.deepEqual(lastOf(viewer, 'shown'), { t: 'shown', id: null })
   sender.onmessage(JSON.stringify({ t: 'typing', text: 'What is' }))
   assert.deepEqual(lastOf(viewer, 'typing'), { t: 'typing', text: 'What is' })
 

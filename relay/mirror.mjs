@@ -16,9 +16,6 @@ import { randomBytes } from 'node:crypto'
 //   scroll where the chat is scrolled to
 //   look   how Hi-chat looks: its colours, font and size (CSS variables),
 //          dark or light, and the chat column's width, so /mirror matches it
-//   shown  how much of the reply being written Hi-chat shows so far, so
-//          /mirror reveals the same words at the same moment (id null: not
-//          following, Hi-chat's window is hidden)
 //   typing what is in Hi-chat's message box
 //
 // The hub keeps the latest of each in memory, so a viewer that joins late
@@ -426,19 +423,20 @@ export function createMirrorHub({
     }
   }
 
+  // How much of the reply Hi-chat shows right now, each frame it reveals
+  // more, so viewers show exactly that. Passed on, not kept: a late viewer
+  // has the whole reply already
+  function onShown(ch, m) {
+    if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return
+    const n = Math.min(MAX_TEXT, Math.max(0, m.n))
+    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
+  }
+
   function onLook(ch, m) {
     const clean = cleanLook(m)
     if (!clean) return
     ch.look = JSON.stringify(clean)
     toViewers(ch, ch.look)
-  }
-
-  function onShown(ch, m) {
-    if (m.id === null)
-      return toViewers(ch, JSON.stringify({ t: 'shown', id: null }))
-    const n = m.n
-    if (typeof m.id !== 'string' || !Number.isInteger(n) || n < 0) return
-    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
   }
 
   function onTyping(ch, m) {
@@ -449,8 +447,8 @@ export function createMirrorHub({
 
   const HANDLERS = {
     look: onLook,
-    shown: onShown,
     typing: onTyping,
+    shown: onShown,
     snap: onSnap,
     ops: onOps,
     img: onImage,

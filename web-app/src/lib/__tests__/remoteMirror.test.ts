@@ -301,24 +301,17 @@ describe('remote mirror', () => {
       expect(s.msgs.map((m) => m.text)).toEqual(['Hi', 'Hello there'])
     })
 
-    it("sends how far the chat has revealed the reply, and what's typed", async () => {
+    it("sends what's typed in the message box", async () => {
       const ws = start()
       ws.hear({ t: 'viewers', n: 1 })
       await vi.advanceTimersByTimeAsync(100)
-      useAppState.setState({
-        streamingContent: msg('a', 'assistant', 'Hello there'),
-      })
-      await vi.advanceTimersByTimeAsync(100)
-      mirrorShownTap('a', 5)
-      mirrorShownTap('a', 5)
-      mirrorShownTap('a', 11)
       usePrompt.setState({ prompt: 'And then' })
       await vi.advanceTimersByTimeAsync(100)
+      usePrompt.setState({ prompt: 'And then?' })
+      await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent.slice(1)).toEqual([
-        { t: 'stream', id: 'a', text: 'Hello there' },
-        { t: 'shown', id: 'a', n: 5 },
-        { t: 'shown', id: 'a', n: 11 },
         { t: 'typing', text: 'And then' },
+        { t: 'typing', text: 'And then?' },
       ])
       usePrompt.setState({ prompt: '' })
     })
@@ -565,6 +558,49 @@ describe('mirror: a reply goes out the moment it arrives', () => {
     expect(view.msgs.map((m) => m.id)).toEqual(['a1'])
   })
 
+  it('tells viewers how much of the reply Hi-chat shows, in step', async () => {
+    stop = startRemoteMirror({
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      location: {
+        protocol: 'https:',
+        host: 'hi.example',
+        pathname: '/',
+      } as Location,
+    })
+    const ws = FakeSocket.last
+    ws.open()
+    ws.hear({ t: 'viewers', n: 1 })
+    await vi.advanceTimersByTimeAsync(0)
+    useAppState.setState({
+      streamingContent: { ...msg('a1', 'assistant', ''), thread_id: 't1' },
+    })
+    mirrorStreamTap('t1', 'Hello there')
+    const before = ws.sent.length
+    mirrorShownTap('t1', 'a1', 5)
+    mirrorShownTap('t1', 'a1', 5) // the same again: nothing new
+    mirrorShownTap('t1', 'old', 3) // an older answer: not followed
+    mirrorShownTap('t2', 'a1', 7) // another chat
+    mirrorShownTap('t1', 'a1', 11)
+    expect(ws.sent.slice(before)).toEqual([
+      { t: 'shown', id: 'a1', n: 5 },
+      { t: 'shown', id: 'a1', n: 11 },
+    ])
+    // Numbered with the rest, so each arrives once by either route
+    expect(ws.seqs.at(-1)).toBe(ws.seqs.length)
+  })
+
+  it('viewer state keeps how much is shown, never going back', () => {
+    let view = applyMirrorMessage(emptyMirror, { t: 'shown', id: 'a1', n: 9 })
+    expect(view.shown).toEqual({ id: 'a1', n: 9 })
+    // A late copy from the other route says less: ignored
+    expect(applyMirrorMessage(view, { t: 'shown', id: 'a1', n: 4 })).toBe(view)
+    view = applyMirrorMessage(view, { t: 'shown', id: 'a2', n: 2 })
+    expect(view.shown).toEqual({ id: 'a2', n: 2 })
+    expect(applyMirrorMessage(view, { t: 'shown', id: 'a2', n: 'x' })).toBe(
+      view
+    )
+  })
+
   it("doesn't lay the chat out again for every streamed piece", async () => {
     // Measuring the scroll position forces a layout: only when the
     // conversation changes, on the next frame, never per streamed piece
@@ -620,7 +656,7 @@ describe('mirror: a reply goes out the moment it arrives', () => {
     }
   })
 
-  it("viewer takes Hi-chat's look, its reveal and its message box", () => {
+  it("viewer takes Hi-chat's look and its message box", () => {
     let s = applyMirrorMessage(emptyMirror, {
       t: 'look',
       width: 768,
@@ -632,12 +668,6 @@ describe('mirror: a reply goes out the moment it arrives', () => {
       dark: true,
       vars: { '--font-size-base': '16px' },
     })
-    s = applyMirrorMessage(s, { t: 'shown', id: 'a', n: 7 })
-    expect(s.shown).toEqual({ id: 'a', n: 7 })
-    s = applyMirrorMessage(s, { t: 'shown', id: 'a', n: -2 })
-    expect(s.shown).toEqual({ id: 'a', n: 7 })
-    s = applyMirrorMessage(s, { t: 'shown', id: null })
-    expect(s.shown).toBeNull()
     s = applyMirrorMessage(s, { t: 'typing', text: 'Why' })
     expect(s.typing).toBe('Why')
   })

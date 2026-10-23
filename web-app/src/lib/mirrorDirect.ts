@@ -14,8 +14,8 @@ export const SEQUENCED = new Set([
   'stream',
   'phase',
   'scroll',
-  'look',
   'shown',
+  'look',
   'typing',
 ])
 

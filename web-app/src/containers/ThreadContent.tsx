@@ -6,7 +6,7 @@ import React, {
   Fragment,
   memo,
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from 'react'
@@ -164,12 +164,12 @@ export const ThreadContent = memo(
       textSegment.replace('</think>', ''),
       !!item.streamingThread && item.role !== 'user'
     )
-    // /mirror shows the same words as they are revealed here
-    const mirrorsReveal =
-      item.role !== 'user' && (!!item.streamingThread || !!item.isLastMessage)
-    useEffect(() => {
-      if (mirrorsReveal) mirrorShownTap(item.id, answerText.length)
-    }, [mirrorsReveal, item.id, answerText])
+    // The mirror shows exactly as much as this, in step (lib/remoteMirror.ts)
+    const answerLength = answerText.length
+    useLayoutEffect(() => {
+      if (item.role !== 'user')
+        mirrorShownTap(item.thread_id, item.id, answerLength)
+    }, [answerLength, item.id, item.thread_id, item.role])
 
     const getMessages = useMessages((state) => state.getMessages)
     const deleteMessage = useMessages((state) => state.deleteMessage)

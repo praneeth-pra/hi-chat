@@ -30,7 +30,7 @@ import { AccuracyProgress } from '@/containers/AccuracyProgress'
 import { AccuracyReviewInfo } from '@/containers/ThreadContent'
 import ThinkingBlock from '@/containers/ThinkingBlock'
 import type { AccuracyReview } from '@/lib/accuracyReview'
-import { useSmoothText, wholeWords } from '@/lib/useSmoothText'
+import { useSmoothText } from '@/lib/useSmoothText'
 import {
   createDirectViewer,
   createSeqFilter,
@@ -1104,7 +1104,7 @@ const MirrorMessage = memo(
     /** Its screenshots, as they arrive (undefined until then) */
     images?: (string | undefined)[]
     streaming?: boolean
-    /** How much of its answer Hi-chat shows, while it reveals it */
+    /** How much of its answer Hi-chat shows right now, while it reveals it */
     shown?: number
     /** The last message (its buttons show, as in Hi-chat) */
     last?: boolean
@@ -1193,14 +1193,31 @@ function MirrorAnswer({
     () => splitReasoning(msg.text),
     [msg.text]
   )
-  const target = textSegment.replace('</think>', '')
-  // Hi-chat's own reveal while it says how far it is (the same words at the
-  // same moment), else the same steady pace worked out here
-  const smooth = useSmoothText(target, !!streaming)
-  const answer =
-    shown !== undefined && shown < target.length
-      ? wholeWords(target, shown)
-      : smooth
+  const full = textSegment.replace('</think>', '')
+  // Its own steady pace, for when Hi-chat isn't saying how much it shows (a
+  // window in the background barely draws)
+  const paced = useSmoothText(full, !!streaming, true)
+  const step = useInStep()
+  const { n, fresh } = inStepLength(
+    step,
+    full.length,
+    paced.length,
+    shown,
+    performance.now()
+  )
+  const answer = n >= full.length ? full : full.slice(0, n)
+  // If Hi-chat goes quiet partway (its window went to the background), look
+  // again shortly, then carry on at this page's own pace, a frame at a time
+  const [, recheck] = useState(0)
+  useEffect(() => {
+    if (shown === undefined || n >= full.length) return
+    if (fresh) {
+      const later = setTimeout(() => recheck((x) => x + 1), IN_STEP_MS)
+      return () => clearTimeout(later)
+    }
+    const frame = requestAnimationFrame(() => recheck((x) => x + 1))
+    return () => cancelAnimationFrame(frame)
+  }, [shown, n, fresh, full.length])
   return (
     <div data-mid={msg.id || undefined} className="group/answer mb-4 w-full">
       {reasoningSegment && (
@@ -1222,7 +1239,7 @@ function MirrorAnswer({
       <RenderMarkdown
         content={answer}
         streamable
-        isStreaming={!!streaming || answer.length < target.length}
+        isStreaming={!!streaming || answer.length < full.length}
       />
       {msg.review && (
         <AccuracyReviewInfo review={msg.review as unknown as AccuracyReview} />
@@ -1254,7 +1271,7 @@ function MirrorAnswer({
               'md:opacity-0 md:group-hover/answer:opacity-100 focus-within:opacity-100 transition-opacity'
           )}
         >
-          {!streaming && <MirrorCopy text={msg.text} />}
+          {!streaming && <MirrorCopy text={full} />}
         </div>
       )}
     </div>
@@ -1270,7 +1287,7 @@ function MirrorCopy({ text }: { text: string }) {
       aria-label="Copy the answer"
       onClick={() =>
         navigator.clipboard
-          ?.writeText(splitReasoning(text).textSegment.replace('</think>', ''))
+          ?.writeText(text)
           .then(() => {
             setCopied(true)
             setTimeout(() => setCopied(false), 1500)
@@ -1322,6 +1339,41 @@ function MirrorComposer({
     </div>
   )
 }
+
+/**
+ * What to show of an answer: exactly what Hi-chat shows while it keeps
+ * saying (each frame it reveals more), else this page's own pace; never
+ * less than already shown, never more than has arrived.
+ */
+const IN_STEP_MS = 150
+function useInStep() {
+  // What Hi-chat said last and when; the most this answer has shown
+  const heard = useRef({ n: -1, at: 0 })
+  const most = useRef(0)
+  return { heard, most }
+}
+function inStepLength(
+  state: ReturnType<typeof useInStep>,
+  fullLength: number,
+  pacedLength: number,
+  shown: number | undefined,
+  now: number
+) {
+  const { heard, most } = state
+  if (shown !== undefined && shown !== heard.current.n)
+    heard.current = { n: shown, at: now }
+  const fresh = shown !== undefined && now - heard.current.at < IN_STEP_MS
+  // On its own pace it moves on from where it is, a frame's worth at a time
+  // (as fast as Hi-chat catches up, at most), rather than jumping ahead
+  const want = fresh
+    ? shown
+    : shown === undefined
+      ? pacedLength
+      : Math.min(pacedLength, most.current + MAX_STEP)
+  most.current = Math.min(fullLength, Math.max(most.current, want))
+  return { n: most.current, fresh }
+}
+const MAX_STEP = 40
 
 /** A screenshot: small like Hi-chat's, full width with a click. */
 function MirrorImage({ src }: { src?: string }) {

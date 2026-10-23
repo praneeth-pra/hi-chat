@@ -186,13 +186,13 @@ export function mirrorStreamTap(threadId: string, text: string) {
   tap?.(threadId, text)
 }
 
-// Hi-chat's chat reveals a reply at a steady pace (useSmoothText); it says
-// how much it shows each time that grows, so /mirror shows the same words
-let shownTap: ((id: string, n: number) => void) | null = null
+// The chat reports how much of a reply's answer it shows each time it
+// reveals more (ThreadContent), so viewers show exactly that, in step
+let shownTap: ((threadId: string, id: string, n: number) => void) | null = null
 
-/** How many characters of the answer being written the chat shows (`n`). */
-export function mirrorShownTap(id: string, n: number) {
-  shownTap?.(id, n)
+/** How many characters of a reply's answer Hi-chat shows right now. */
+export function mirrorShownTap(threadId: string, id: string, n: number) {
+  shownTap?.(threadId, id, n)
 }
 
 /** How Hi-chat looks, so /mirror can look the same. */
@@ -324,10 +324,13 @@ export function startRemoteMirror({
   let sentStream: { id: string | null; text: string } = { id: null, text: '' }
   let sentScroll = ''
   let sentLook = ''
-  let sentShown = ''
+  // What the viewers have in the message box (a new one starts empty)
   let sentTyping: string | undefined = ''
   let scrollFrame: number | undefined
   let streamCount = 0
+  // The reply viewers follow, and how much of it they were told is shown
+  let shownId: string | null = null
+  let sentShown = -1
   // While someone watches, a held Web Lock keeps Chrome from freezing or
   // discarding this tab when it is in the background
   let releaseAwake: (() => void) | undefined
@@ -382,9 +385,8 @@ export function startRemoteMirror({
     sentPhase = undefined
     sentStream = { id: null, text: '' }
     sentScroll = ''
+    sentShown = -1
     sentLook = ''
-    sentShown = ''
-    // A new viewer starts with an empty box
     sentTyping = ''
   }
 
@@ -398,6 +400,10 @@ export function startRemoteMirror({
         : sentStream.id !== null && text.startsWith(sentStream.text)
           ? sentStream.id
           : (liveId ?? `reply-${++streamCount}`)
+    if (id !== null && id !== shownId) {
+      shownId = id
+      sentShown = -1
+    }
     const update = streamUpdate(sentStream, id, text ?? '')
     if (update) {
       send(update as { t: string })
@@ -416,13 +422,15 @@ export function startRemoteMirror({
     sendStream(text, live?.thread_id === threadId ? live.id : undefined)
   }
 
-  // How much of the reply the chat shows, as it reveals it. Not while this
-  // window is hidden: it draws nothing then, and the mirror goes its own pace
-  shownTap = (id, n) => {
-    if (!viewers || !open() || globalThis.document?.hidden) return
-    const key = `${id}:${n}`
-    if (key === sentShown) return
-    sentShown = key
+  // How much of the reply Hi-chat shows: sent each time it reveals more, for
+  // the reply being written (and its last words after it is saved). Not from
+  // a background window, which barely draws; viewers pace it themselves then
+  shownTap = (threadId, id, n) => {
+    if (!viewers || !open() || notSending(location.pathname)) return
+    if (id !== shownId || n === sentShown) return
+    if (globalThis.document?.hidden) return
+    if (threadId !== useThreads.getState().currentThreadId) return
+    sentShown = n
     send({ t: 'shown', id, n })
   }
 
@@ -609,12 +617,7 @@ export function startRemoteMirror({
 
   // Coming to the front: send this window's conversation in full
   const onVisible = () => {
-    if (globalThis.document?.hidden) {
-      // The chat stops drawing: the mirror reveals the reply itself
-      if (sentShown) send({ t: 'shown', id: null })
-      sentShown = ''
-      return
-    }
+    if (globalThis.document?.hidden) return
     resend()
     // Another window may have been typing: send this one's box either way
     sentTyping = undefined
@@ -700,10 +703,10 @@ export type MirrorState = {
   images: Record<string, string>
   /** Accuracy mode's progress, while it runs */
   phase: 'searching' | 'drafting' | 'verifying' | null
+  /** How much of a reply's answer Hi-chat shows right now */
+  shown: { id: string; n: number } | null
   /** How Hi-chat looks */
   look: Omit<MirrorLook, 't'> | null
-  /** How much of the streamed reply Hi-chat shows, while it says */
-  shown: { id: string; n: number } | null
   /** What is in Hi-chat's message box */
   typing: string
 }
@@ -716,8 +719,8 @@ export const emptyMirror: MirrorState = {
   scroll: null,
   images: {},
   phase: null,
-  look: null,
   shown: null,
+  look: null,
   typing: '',
 }
 
@@ -784,6 +787,14 @@ export function applyMirrorMessage(
       return { ...state, stream: { id: m.id, text: stream.text + m.add } }
     return state
   }
+  if (m?.t === 'shown') {
+    if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return state
+    // Never back: a copy arriving late by the other route says less
+    const same = state.shown?.id === m.id
+    const n = same ? Math.max(state.shown!.n, m.n) : m.n
+    if (same && n === state.shown!.n) return state
+    return { ...state, shown: { id: m.id, n } }
+  }
   if (m?.t === 'look' && m.vars && typeof m.vars === 'object') {
     const vars: Record<string, string> = {}
     for (const [k, v] of Object.entries(m.vars))
@@ -797,12 +808,6 @@ export function applyMirrorMessage(
         vars,
       },
     }
-  }
-  if (m?.t === 'shown') {
-    if (m.id === null) return { ...state, shown: null }
-    if (typeof m.id === 'string' && Number.isInteger(m.n) && m.n >= 0)
-      return { ...state, shown: { id: m.id, n: m.n } }
-    return state
   }
   if (m?.t === 'typing' && typeof m.text === 'string')
     return m.text === state.typing ? state : { ...state, typing: m.text }
