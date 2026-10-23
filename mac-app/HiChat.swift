@@ -1733,29 +1733,68 @@ final class CaretReporter {
     else { return (nil, "no-focus") }
     let element = focused as! AXUIElement
     AXUIElementSetMessagingTimeout(element, 0.1)
+    guard let primary = NSScreen.screens.first else { return (nil, "no-screen") }
+    // Accessibility measures from the top left of the main screen
+    let flip = { (p: CGPoint) in NSPoint(x: p.x, y: primary.frame.maxY - p.y) }
+    let (byRange, hasRange) = rangeCaret(element)
+    if let p = byRange { return (flip(p), "") }
+    // Web pages in Chrome-based browsers (and Safari) give the cursor as a
+    // text marker rather than a character number
+    if let p = markerCaret(element) { return (flip(p), "") }
+    return (nil, hasRange ? "no-bounds" : "no-text")
+  }
+
+  /// The cursor by character number (most apps). Also says whether the
+  /// element had a text range at all.
+  func rangeCaret(_ element: AXUIElement) -> (CGPoint?, Bool) {
     var rangeRef: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
             == .success, let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID()
-    else { return (nil, "no-text") }
+    else { return (nil, false) }
     var range = CFRange()
-    guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else { return (nil, "no-text") }
-    guard let primary = NSScreen.screens.first else { return (nil, "no-screen") }
-    // Accessibility measures from the top left of the main screen
-    let flip = { (x: CGFloat, y: CGFloat) in NSPoint(x: x, y: primary.frame.maxY - y) }
-    if let r = bounds(element, range) { return (flip(r.midX, r.midY), "") }
-    // A blinking cursor is a range of length 0, which Chrome (and others)
-    // often won't measure: measure the character before it (the cursor is
-    // at its right edge), else the one after it (at its left edge).
+    guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else { return (nil, false) }
+    if let r = bounds(element, range) { return (CGPoint(x: r.midX, y: r.midY), true) }
+    // A blinking cursor is a range of length 0, which some apps won't
+    // measure: measure the character before it (the cursor is at its right
+    // edge), else the one after it (at its left edge).
     if range.length == 0 {
       if range.location > 0,
          let r = bounds(element, CFRange(location: range.location - 1, length: 1)) {
-        return (flip(r.maxX, r.midY), "")
+        return (CGPoint(x: r.maxX, y: r.midY), true)
       }
       if let r = bounds(element, CFRange(location: range.location, length: 1)) {
-        return (flip(r.minX, r.midY), "")
+        return (CGPoint(x: r.minX, y: r.midY), true)
       }
     }
-    return (nil, "no-bounds")
+    return (nil, true)
+  }
+
+  /// The cursor as a text marker range (web pages), asked of the focused
+  /// element and then of the elements around it up to the page.
+  func markerCaret(_ element: AXUIElement) -> CGPoint? {
+    var current: AXUIElement? = element
+    for _ in 0..<12 {
+      guard let el = current else { return nil }
+      var marker: CFTypeRef?
+      if AXUIElementCopyAttributeValue(el, "AXSelectedTextMarkerRange" as CFString, &marker)
+           == .success, let marker {
+        var out: CFTypeRef?
+        if AXUIElementCopyParameterizedAttributeValue(
+             el, "AXBoundsForTextMarkerRange" as CFString, marker, &out) == .success,
+           let out, CFGetTypeID(out) == AXValueGetTypeID() {
+          var rect = CGRect.zero
+          if AXValueGetValue(out as! AXValue, .cgRect, &rect), rect.height > 0 {
+            return CGPoint(x: rect.maxX, y: rect.midY)
+          }
+        }
+      }
+      var parent: CFTypeRef?
+      guard AXUIElementCopyAttributeValue(el, kAXParentAttribute as CFString, &parent) == .success,
+            let parent, CFGetTypeID(parent) == AXUIElementGetTypeID()
+      else { return nil }
+      current = (parent as! AXUIElement)
+    }
+    return nil
   }
 
   func bounds(_ element: AXUIElement, _ range: CFRange) -> CGRect? {
