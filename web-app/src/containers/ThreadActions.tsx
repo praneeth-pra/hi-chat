@@ -5,12 +5,14 @@ import { DeleteThreadDialog } from './dialogs/DeleteThreadDialog'
 import { ChatQuestionsDialog } from './dialogs/ChatQuestionsDialog'
 import { MirrorLinkButton } from './MirrorLinkButton'
 import { RemoteSessionButton } from './RemoteSessionButton'
+import { DictationAutoStopButton } from './DictationAutoStopButton'
 
 export function ThreadActions({ thread }: { thread: Thread }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const deleteThread = useThreads((state) => state.deleteThread)
   return (
     <div className="relative z-20 flex items-center gap-1 text-main-view-fg/40">
+      <DictationAutoStopButton />
       <RemoteSessionButton />
       <MirrorLinkButton />
       <ChatQuestionsDialog key={thread.id} thread={thread} />

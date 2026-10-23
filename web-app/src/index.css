@@ -64,6 +64,17 @@
   --app-surface: #2a2a2a;
 }
 
+/* The "Thinking" label while the model thinks: a soft, slow pulse */
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @keyframes breathe {
   0%,
   100% {

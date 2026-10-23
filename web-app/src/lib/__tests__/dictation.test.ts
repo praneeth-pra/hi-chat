@@ -772,3 +772,32 @@ describe('dictation', () => {
     })
   })
 })
+
+describe('auto-stop on silence', () => {
+  it('stops only after 2 minutes without sound, and only when on', async () => {
+    const { silentTooLong, SILENCE_STOP_MS } = await import('../dictation')
+    const rec = { lastSound: 1_000 }
+    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS - 1, true)).toBe(false)
+    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS, true)).toBe(true)
+    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS, false)).toBe(false)
+    expect(silentTooLong({}, 10 * SILENCE_STOP_MS, true)).toBe(false)
+  })
+
+  it('counts a voice as sound and a quiet room as silence', async () => {
+    const { onBlock } = await import('../dictation')
+    vi.useFakeTimers()
+    const rec = {
+      rate: 16000,
+      engine: 'elevenlabs',
+      audio: [],
+    } as unknown as Recording
+    onBlock(rec, new Float32Array(2048))
+    const first = rec.lastSound!
+    vi.setSystemTime(first + 5000)
+    onBlock(rec, new Float32Array(2048).fill(0.001)) // quiet room
+    expect(rec.lastSound).toBe(first)
+    onBlock(rec, new Float32Array(2048).fill(0.1)) // speaking
+    expect(rec.lastSound).toBe(first + 5000)
+    vi.useRealTimers()
+  })
+})
