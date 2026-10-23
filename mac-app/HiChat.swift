@@ -1792,5 +1792,3 @@ final class CaretReporter {
     }
   }
 }
-  }
-}
