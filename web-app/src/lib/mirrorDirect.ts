@@ -8,7 +8,16 @@
 // channel failing, or never opening, loses nothing.
 
 /** Updates that carry a sequence number (images go by key, server only). */
-export const SEQUENCED = new Set(['snap', 'ops', 'stream', 'phase', 'scroll'])
+export const SEQUENCED = new Set([
+  'snap',
+  'ops',
+  'stream',
+  'phase',
+  'scroll',
+  'look',
+  'shown',
+  'typing',
+])
 
 // Data channel messages much over 64 KB aren't safe everywhere: a longer one
 // goes in pieces, `~` for each but the last and `!` for the last

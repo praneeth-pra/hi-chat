@@ -14,6 +14,12 @@ import { randomBytes } from 'node:crypto'
 //   img    an image a message shows (screenshots), sent once, by `key`
 //   phase  Accuracy mode's progress (searching, drafting, verifying) or null
 //   scroll where the chat is scrolled to
+//   look   how Hi-chat looks: its colours, font and size (CSS variables),
+//          dark or light, and the chat column's width, so /mirror matches it
+//   shown  how much of the reply being written Hi-chat shows so far, so
+//          /mirror reveals the same words at the same moment (id null: not
+//          following, Hi-chat's window is hidden)
+//   typing what is in Hi-chat's message box
 //
 // The hub keeps the latest of each in memory, so a viewer that joins late
 // starts from it. Senders hear how many viewers there are and send nothing
@@ -78,6 +84,8 @@ function cleanMessage(raw, room) {
   const images = strings(raw?.images, 10, 120)?.filter((k) => KEY_RE.test(k))
   if (images?.length) msg.images = images
   if (raw?.stopped === true) msg.stopped = true
+  if (typeof raw?.thinking === 'number' && Number.isFinite(raw.thinking))
+    msg.thinking = Math.min(36_000, Math.max(0, raw.thinking))
   const review = cleanReview(raw?.review)
   if (review) msg.review = review
   if (Array.isArray(raw?.tools)) {
@@ -100,6 +108,33 @@ function cleanMessages(list) {
     if (room <= 0) break
   }
   return msgs
+}
+
+const MAX_TYPING = 20_000
+const VAR_RE = /^--[\w-]{1,60}$/
+
+/**
+ * How Hi-chat looks, kept to CSS variables with plain values (colours, sizes,
+ * font names; nothing that loads anything), dark or not, and the chat
+ * column's width in px. Null if it isn't one.
+ */
+export function cleanLook(m) {
+  if (!m || typeof m !== 'object') return null
+  const vars = {}
+  if (m.vars && typeof m.vars === 'object')
+    for (const [k, v] of Object.entries(m.vars).slice(0, 80))
+      if (
+        VAR_RE.test(k) &&
+        typeof v === 'string' &&
+        v.length <= 300 &&
+        !/url\(|[;{}<>\\]|@import|expression/i.test(v)
+      )
+        vars[k] = v
+  const width =
+    typeof m.width === 'number' && Number.isFinite(m.width)
+      ? Math.round(Math.min(4000, Math.max(0, m.width)))
+      : 0
+  return { t: 'look', width, dark: m.dark === true, vars }
 }
 
 /** The conversation a sender sent, kept to known fields, or null. */
@@ -244,6 +279,8 @@ export function createMirrorHub({
         stream: null,
         scroll: null,
         phase: null,
+        look: null,
+        typing: null,
         images: new Map(), // key -> JSON of its 'img' message
       }
       channels.set(name, ch)
@@ -389,7 +426,31 @@ export function createMirrorHub({
     }
   }
 
+  function onLook(ch, m) {
+    const clean = cleanLook(m)
+    if (!clean) return
+    ch.look = JSON.stringify(clean)
+    toViewers(ch, ch.look)
+  }
+
+  function onShown(ch, m) {
+    if (m.id === null)
+      return toViewers(ch, JSON.stringify({ t: 'shown', id: null }))
+    const n = m.n
+    if (typeof m.id !== 'string' || !Number.isInteger(n) || n < 0) return
+    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
+  }
+
+  function onTyping(ch, m) {
+    const text = str(m.text, MAX_TYPING)
+    ch.typing = text ? JSON.stringify({ t: 'typing', text }) : null
+    toViewers(ch, JSON.stringify({ t: 'typing', text }))
+  }
+
   const HANDLERS = {
+    look: onLook,
+    shown: onShown,
+    typing: onTyping,
     snap: onSnap,
     ops: onOps,
     img: onImage,
@@ -508,6 +569,8 @@ export function createMirrorHub({
     if (ch.stream) ws.send(JSON.stringify({ t: 'stream', ...ch.stream }))
     if (ch.phase) ws.send(JSON.stringify({ t: 'phase', phase: ch.phase }))
     if (ch.scroll) ws.send(ch.scroll)
+    if (ch.look) ws.send(ch.look)
+    if (ch.typing) ws.send(ch.typing)
     status([name])
     for (const s of ch.senders) s.send(peerNote(id, true, name))
   }
