@@ -3,7 +3,8 @@ import { create } from 'zustand'
 import { RenderMarkdown } from './RenderMarkdown'
 import { useAppState } from '@/hooks/useAppState'
 import { useTranslation } from '@/i18n/react-i18next-compat'
-import { extractThinkingContent } from '@/lib/utils'
+import { cn, extractThinkingContent } from '@/lib/utils'
+import { useSmoothText } from '@/lib/useSmoothText'
 
 interface Props {
   text: string
@@ -47,6 +48,12 @@ const ThinkingBlock = ({ id, text }: Props) => {
   }
 
   const thinkingContent = extractThinkingContent(text)
+  // The thinking glides along the line at a steady pace, rather than
+  // jumping by a burst of words at a time
+  const tickerText = useSmoothText(
+    thinkingContent.replace(/\s+/g, ' '),
+    loading
+  ).slice(-240)
   if (!thinkingContent) return null
 
   return (
@@ -69,7 +76,12 @@ const ThinkingBlock = ({ id, text }: Props) => {
             ) : (
               <ChevronDown className="size-4 text-main-view-fg/60" />
             )}
-            <span className="font-medium">
+            <span
+              className={cn(
+                'font-medium',
+                loading && 'animate-[thinking-pulse_1.6s_ease-in-out_infinite]'
+              )}
+            >
               {loading ? t('common:thinking') : t('common:thought')}
             </span>
           </button>
@@ -82,9 +94,7 @@ const ThinkingBlock = ({ id, text }: Props) => {
               data-test-id="thinking-ticker"
               className="flex min-w-0 flex-1 justify-end overflow-hidden text-sm text-main-view-fg/45 [mask-image:linear-gradient(to_right,transparent,black_32px)]"
             >
-              <span className="whitespace-nowrap">
-                {thinkingContent.slice(-240).replace(/\s+/g, ' ')}
-              </span>
+              <span className="whitespace-nowrap">{tickerText}</span>
             </span>
           )}
         </div>

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 
 /**
- * Streamed text arrives in uneven bursts; this reveals it at a steady pace
- * instead, a little more each frame. The pace follows the backlog (a fifth
- * of what's waiting every ~16 ms), so it never runs more than about 0.1 s
- * behind what has arrived, and a burst is spread over a few frames rather
- * than landing at once. Text already there when it mounts is shown at once.
+ * Streamed text arrives in bursts (Groq sends a whole answer in ~0.25 s);
+ * this reveals it at a steady pace instead, so it flows rather than
+ * landing a paragraph at a time. At least MIN_CHARS_PER_S, faster when
+ * text piles up, catching up over ~CATCH_UP_MS: it never falls more than
+ * about half a second behind. Text already there when it mounts is shown
+ * at once.
  */
-const CATCH_UP_MS = 80
+const MIN_CHARS_PER_S = 1200
+const CATCH_UP_MS = 500
 
 export function useSmoothText(target: string, live: boolean): string {
   const [shown, setShown] = useState(target.length)
@@ -38,7 +40,12 @@ export function useSmoothText(target: string, live: boolean): string {
       const total = targetRef.current.length
       const backlog = total - shownRef.current
       if (backlog <= 0) return
-      const step = Math.max(1, Math.ceil((backlog * dt) / CATCH_UP_MS))
+      const step = Math.max(
+        1,
+        Math.ceil(
+          Math.max((MIN_CHARS_PER_S * dt) / 1000, (backlog * dt) / CATCH_UP_MS)
+        )
+      )
       shownRef.current = Math.min(total, shownRef.current + step)
       setShown(shownRef.current)
       if (shownRef.current < total) frame = requestAnimationFrame(tick)
