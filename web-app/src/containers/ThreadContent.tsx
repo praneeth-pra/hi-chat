@@ -398,6 +398,13 @@ export const ThreadContent = memo(
                     : `${item.thread_id}-${item.index ?? item.id}`
                 }
                 text={reasoningSegment}
+                seconds={
+                  (
+                    item.metadata?.timings as
+                      | { thinking_s?: number }
+                      | undefined
+                  )?.thinking_s
+                }
               />
             )}
 
