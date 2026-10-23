@@ -40,8 +40,9 @@ const DropdownAssistant = () => {
       <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
         <DropdownMenuTrigger asChild>
           <button
-            className="cursor-pointer flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-main-view-fg/[0.05] transition-colors relative z-20 min-w-0 text-lg"
+            className="cursor-pointer flex items-center gap-1.5 px-2 py-1 rounded-xl hover:bg-main-view-fg/[0.05] transition-colors relative z-20 min-w-0 max-w-full text-lg"
             aria-label={`Assistant: ${selectedAssistant?.name || 'Hi-chat'}`}
+            title={selectedAssistant?.name || 'Hi-chat'}
           >
             <span className="truncate text-main-view-fg">
               {selectedAssistant?.name || 'Hi-chat'}

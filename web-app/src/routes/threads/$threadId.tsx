@@ -255,12 +255,14 @@ function ThreadDetail() {
       <div className="flex flex-col h-[calc(100dvh-(env(safe-area-inset-bottom)+env(safe-area-inset-top)))] md:h-[calc(100dvh-18px)]">
         <HeaderPage>
           <div className="flex items-center justify-between w-full gap-2">
-            <div className="min-w-0">
+            {/* The title takes the room the buttons leave, ending in "…"
+                rather than running under them */}
+            <div className="flex min-w-0 flex-1">
               {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
                 <DropdownAssistant />
               )}
             </div>
-            <div className="flex-1 flex justify-center">
+            <div className="flex shrink-0 justify-center">
               {threadId === TEMPORARY_CHAT_ID && (
                 <TemporaryChatIndicator t={t} />
               )}
