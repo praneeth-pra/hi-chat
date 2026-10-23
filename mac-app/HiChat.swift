@@ -1783,7 +1783,7 @@ final class CaretReporter {
              el, "AXBoundsForTextMarkerRange" as CFString, marker, &out) == .success,
            let out, CFGetTypeID(out) == AXValueGetTypeID() {
           var rect = CGRect.zero
-          if AXValueGetValue(out as! AXValue, .cgRect, &rect), rect.height > 0 {
+          if AXValueGetValue(out as! AXValue, .cgRect, &rect), caretSized(rect, in: el) {
             return CGPoint(x: rect.maxX, y: rect.midY)
           }
         }
@@ -1807,9 +1807,34 @@ final class CaretReporter {
     else { return nil }
     var rect = CGRect.zero
     guard AXValueGetValue(out as! AXValue, .cgRect, &rect),
-          rect.origin != .zero || rect.size != .zero
+          rect.origin != .zero || rect.size != .zero,
+          caretSized(rect, in: element)
     else { return nil }
     return rect
+  }
+
+  /// Whether a measured rectangle can be the cursor (or a character next to
+  /// it): about a line tall and not the whole text box. Some web editors in
+  /// Chrome answer with the text box's own frame, whose centre never moves
+  /// as you type, so the mirror never switched to following the typing.
+  func caretSized(_ rect: CGRect, in element: AXUIElement) -> Bool {
+    guard rect.height > 0, rect.height <= 80, rect.width <= 400 else { return false }
+    var posRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    var pos = CGPoint.zero
+    var size = CGSize.zero
+    if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
+       AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+       let posRef, let sizeRef,
+       AXValueGetValue(posRef as! AXValue, .cgPoint, &pos),
+       AXValueGetValue(sizeRef as! AXValue, .cgSize, &size),
+       size.height > 30 {
+      let frame = CGRect(origin: pos, size: size)
+      let same = abs(frame.minX - rect.minX) < 3 && abs(frame.minY - rect.minY) < 3
+        && abs(frame.width - rect.width) < 3 && abs(frame.height - rect.height) < 3
+      if same { return false }
+    }
+    return true
   }
 
   /// Chrome-based browsers describe their pages' text boxes only once an
