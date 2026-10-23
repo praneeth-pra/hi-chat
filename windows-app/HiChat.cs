@@ -789,6 +789,13 @@ sealed class ChatWindow : Form
   }
   public void HideMirror() => mirror.HideMirror();
 
+  /// A key was typed (not a shortcut): the mirror's pointer view may look
+  /// for where the screen changed, in apps that don't report a text cursor.
+  public void KeyTyped()
+  {
+    if (mirror.InPointerView) BeginInvoke(new Action(mirror.Typed));
+  }
+
   /// Right Ctrl: the laptop's own screen, wherever the pointer is (a PC with
   /// no built-in screen, or its lid closed: the screen the pointer is on),
   /// without a sound or a flash, saved to Pictures\Screenshots, copied for
@@ -1323,6 +1330,7 @@ sealed class Shortcuts(ChatWindow app)
       return pass;
     }
     lone = null;
+    if (!repeating && !Ctrl && !Alt && !Win) app.KeyTyped();
     if (recording is { } r)
     {
       // Escape on its own cancels; scrolling waits for a modifier
@@ -1897,6 +1905,12 @@ sealed class Mirror : Form
     var i = d / 3;
     g.DrawLine(pen, disc.Left + i, disc.Top + i, disc.Right - i, disc.Bottom - i);
     g.DrawLine(pen, disc.Right - i, disc.Top + i, disc.Left + i, disc.Bottom - i);
+    if (status.Length > 0)
+    {
+      var text = new Rectangle(Border * 2, 0, Math.Max(0, box.Left - Border * 3), Bar);
+      TextRenderer.DrawText(g, status, Font, text, Color.FromArgb(200, 200, 200),
+        TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+    }
   }
 
   protected override void OnResize(EventArgs e)
@@ -1984,6 +1998,8 @@ sealed class Mirror : Form
   void Restart()
   {
     area = null;
+    source = Source.Mouse;
+    ShowStatus(); // the chat view shows no status
     if (mode == Mode.Chat)
     {
       StopFrames();
@@ -2111,7 +2127,7 @@ sealed class Mirror : Form
       }
       return;
     }
-    Native.GetCursorPos(out var p);
+    var p = FocusPoint();
     var full = Screen.FromPoint(new Point(p.X, p.Y)).Bounds;
     var pic = Picture;
     int w = Math.Min(pic.Width, full.Width), h = Math.Min(pic.Height, full.Height);
@@ -2138,6 +2154,176 @@ sealed class Mirror : Form
     if (!ShowMagnifier(true)) return;
     Native.MagSetWindowSource(magnifier, new Native.RECT { Left = a.Left, Top = a.Top, Right = a.Right, Bottom = a.Bottom });
     Native.InvalidateRect(magnifier, IntPtr.Zero, true); // redraw: the screen behind keeps changing
+  }
+
+  // ---- What the pointer view follows: the mouse, or your typing ----
+
+  enum Source { Mouse, Caret, Screen }
+  Source source = Source.Mouse;
+  Point lastMouse = new(int.MinValue, int.MinValue);
+  Point? lastCaret, seenTyping;
+  int focusTicks;
+  bool comparing;
+
+  /// The mouse pointer, or where you're typing if the text cursor moved
+  /// since the mouse last did. In apps that don't report a text cursor,
+  /// where the screen changed as you typed (Typed).
+  Native.POINT FocusPoint()
+  {
+    Native.GetCursorPos(out var m);
+    var mouse = new Point(m.X, m.Y);
+    if (mouse != lastMouse) { lastMouse = mouse; source = Source.Mouse; }
+    if (++focusTicks % 4 == 0) // ~15 times a second
+    {
+      var caret = Caret();
+      if (caret is { } c)
+      {
+        if (lastCaret is { } was && was != c) source = Source.Caret;
+      }
+      else if (source == Source.Caret) source = Source.Mouse;
+      lastCaret = caret;
+      ShowStatus();
+    }
+    var at = source switch
+    {
+      Source.Caret => lastCaret ?? mouse,
+      Source.Screen => seenTyping ?? mouse,
+      _ => mouse,
+    };
+    return new Native.POINT { X = at.X, Y = at.Y };
+  }
+
+  /// The text cursor in the app in front, in screen pixels, or null: the
+  /// system caret (classic apps: Notepad, Office), else the caret it
+  /// describes to accessibility (what Windows Magnifier follows).
+  static Point? Caret()
+  {
+    var front = Native.GetForegroundWindow();
+    if (front == IntPtr.Zero || Native.IsHungAppWindow(front)) return null;
+    var thread = Native.GetWindowThreadProcessId(front, out _);
+    var info = new Native.GUITHREADINFO { cbSize = Marshal.SizeOf<Native.GUITHREADINFO>() };
+    if (Native.GetGUIThreadInfo(thread, ref info) && info.hwndCaret != IntPtr.Zero)
+    {
+      var r = info.rcCaret;
+      var top = new Native.POINT { X = r.Left, Y = r.Top };
+      if (r.Bottom > r.Top && Native.ClientToScreen(info.hwndCaret, ref top))
+      {
+        var h = r.Bottom - r.Top;
+        if (h is > 2 and < 120) return new Point(top.X, top.Y + h / 2);
+      }
+    }
+    try
+    {
+      var target = info.hwndFocus != IntPtr.Zero ? info.hwndFocus : front;
+      var iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); // IAccessible
+      if (Native.AccessibleObjectFromWindow(target, Native.OBJID_CARET, ref iid, out var obj) == 0
+          && obj is Accessibility.IAccessible acc)
+      {
+        acc.accLocation(out var l, out var t, out var w, out var h, 0);
+        if (h is > 2 and < 120 && w < 60 && (l != 0 || t != 0)) return new Point(l, t + h / 2);
+      }
+    }
+    catch (Exception e) when (e is COMException or InvalidCastException or ArgumentException) { }
+    return null;
+  }
+
+  /// A key was typed. When the app in front doesn't report a text cursor,
+  /// compare its screen now with a moment later and go to the small patch
+  /// that changed: the letters appearing.
+  public void Typed()
+  {
+    if (!InPointerView || lastCaret != null || comparing) return;
+    var screen = Screen.FromPoint(lastMouse).Bounds;
+    var before = Snapshot(screen);
+    if (before == null) return;
+    comparing = true;
+    var later = new System.Windows.Forms.Timer { Interval = 120 };
+    later.Tick += (_, _) =>
+    {
+      later.Stop();
+      later.Dispose();
+      comparing = false;
+      CompareTyping(screen, before);
+    };
+    later.Start();
+  }
+
+  const int SampleStep = 4;
+
+  /// The screen, grey, one sample every SampleStep pixels.
+  static byte[]? Snapshot(Rectangle screen)
+  {
+    try
+    {
+      using var shot = new Bitmap(screen.Width, screen.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+      using (var g = Graphics.FromImage(shot))
+        g.CopyFromScreen(screen.Location, Point.Empty, screen.Size);
+      var data = shot.LockBits(new Rectangle(Point.Empty, shot.Size),
+        System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+      try
+      {
+        int cols = screen.Width / SampleStep, rows = screen.Height / SampleStep;
+        var lum = new byte[cols * rows];
+        var row = new byte[data.Stride];
+        for (var r = 0; r < rows; r++)
+        {
+          Marshal.Copy(data.Scan0 + r * SampleStep * data.Stride, row, 0, data.Stride);
+          for (var c = 0; c < cols; c++)
+          {
+            var i = c * SampleStep * 4; // BGRA
+            lum[r * cols + c] = (byte)((row[i] + 2 * row[i + 1] + row[i + 2]) >> 2);
+          }
+        }
+        return lum;
+      }
+      finally { shot.UnlockBits(data); }
+    }
+    catch (Exception e) when (e is System.ComponentModel.Win32Exception or ArgumentException or ExternalException)
+    {
+      return null; // the screen can't be read just now (locked, secure desktop)
+    }
+  }
+
+  void CompareTyping(Rectangle screen, byte[] before)
+  {
+    var after = Snapshot(screen);
+    if (after == null || after.Length != before.Length) return;
+    int cols = screen.Width / SampleStep, rows = screen.Height / SampleStep;
+    // This window shows the screen, so it changes too: leave it out
+    var own = Bounds;
+    int minC = int.MaxValue, minR = int.MaxValue, maxC = -1, maxR = -1, changed = 0;
+    for (var i = 0; i < after.Length; i++)
+    {
+      if (Math.Abs(after[i] - before[i]) <= 24) continue;
+      int c = i % cols, r = i / cols;
+      if (own.Contains(screen.X + c * SampleStep, screen.Y + r * SampleStep)) continue;
+      changed++;
+      minC = Math.Min(minC, c); maxC = Math.Max(maxC, c);
+      minR = Math.Min(minR, r); maxR = Math.Max(maxR, r);
+    }
+    // Typing changes a small patch; scrolling or a new page changes a lot
+    if (changed < 3 || changed >= after.Length / 50 || maxC - minC >= cols / 3 || maxR - minR >= rows / 4)
+      return;
+    // The right end of what changed: where the newest letter is
+    seenTyping = new Point(screen.X + maxC * SampleStep, screen.Y + (minR + maxR) / 2 * SampleStep);
+    source = Source.Screen;
+    ShowStatus();
+  }
+
+  string status = "";
+
+  /// The top bar says what the pointer view follows.
+  void ShowStatus()
+  {
+    var text = mode != Mode.Pointer ? "" : source switch
+    {
+      Source.Caret => "Following your typing",
+      Source.Screen => "Following your typing (from the screen)",
+      _ => "Following the mouse",
+    };
+    if (text == status) return;
+    status = text;
+    Invalidate(new Rectangle(0, 0, ClientSize.Width, Bar));
   }
 
   bool ShowMagnifier(bool show)
@@ -2459,6 +2645,21 @@ static class Native
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int w, int h, bool repaint);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct GUITHREADINFO
+  {
+    public int cbSize;
+    public uint flags;
+    public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+    public RECT rcCaret;
+  }
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
+  [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hwnd);
+  public const uint OBJID_CARET = 0xFFFFFFF8;
+  [DllImport("oleacc.dll")]
+  public static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid,
+    [MarshalAs(UnmanagedType.Interface)] out object acc);
   [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO info);
   [DllImport("user32.dll")] public static extern bool DrawIconEx(IntPtr dc, int x, int y, IntPtr icon, int w, int h, uint step, IntPtr brush, uint flags);
   [DllImport("user32.dll")] public static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);

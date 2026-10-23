@@ -32,6 +32,7 @@ import {
   warmJudges,
 } from '@/lib/dictationJudge'
 import { withCodingTerms } from '@/lib/keyTerms'
+import { useDictationAutoStop } from '@/hooks/useDictationAutoStop'
 
 /**
  * Dictation: speech heard by your selected microphone, streamed to live
@@ -178,6 +179,31 @@ let failedAudio: Float32Array | undefined
 
 /** A dictation stops by itself after this long. */
 export const MAX_DICTATION_MS = 9.5 * 60 * 1000
+/**
+ * With auto-stop on (the header button), a dictation stops by itself after
+ * this long without sound: one left running streams to all three paid
+ * engines the whole time (23 Oct: sessions left on for 7 to 100+ minutes).
+ */
+export const SILENCE_STOP_MS = 2 * 60 * 1000
+/** Quieter than this (RMS) counts as silence: a quiet room, not a voice. */
+const SOUND_RMS = 0.015
+
+/**
+ * Whether this recording has been silent too long and should stop: auto-stop
+ * on, and no sound for SILENCE_STOP_MS.
+ */
+export function silentTooLong(
+  rec: Pick<Recording, 'lastSound'>,
+  now: number,
+  autoStop: boolean
+): boolean {
+  return (
+    autoStop &&
+    rec.lastSound !== undefined &&
+    now - rec.lastSound >= SILENCE_STOP_MS
+  )
+}
+
 /** Shorter than this is a slip of the key: nothing is sent. */
 const MIN_DICTATION_MS = 400
 
@@ -254,6 +280,10 @@ export type Recording = {
    */
   audio: Float32Array[]
   limit: ReturnType<typeof setTimeout>
+  /** When the mic last heard sound (ms), for auto-stop on silence */
+  lastSound?: number
+  /** Auto-stop has already stopped it */
+  autoStopped?: boolean
 }
 
 let recording: Recording | undefined
@@ -528,8 +558,20 @@ export function dotLevel(block: Float32Array): number {
 
 /** Takes one block from the mic; exported for tests. */
 export function onBlock(rec: Recording, block: Float32Array) {
-  const level = dotLevel(block)
+  const loudness = rms(block)
+  const level = Math.round(Math.min(1, loudness * 8) * 10) / 10
   if (useDictation.getState().level !== level) useDictation.setState({ level })
+  const now = Date.now()
+  if (rec.lastSound === undefined || loudness >= SOUND_RMS) rec.lastSound = now
+  else if (
+    rec === recording &&
+    !rec.autoStopped &&
+    silentTooLong(rec, now, useDictationAutoStop.getState().on)
+  ) {
+    rec.autoStopped = true
+    toast('Dictation stopped after 2 minutes of silence')
+    void stopDictation()
+  }
   const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
   rec.audio.push(down)
   rec.live?.push(down)
@@ -729,6 +771,7 @@ function begin(m: Mic) {
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
     audio: [],
     limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
+    lastSound: Date.now(),
   }
   recording = rec
   for (const block of m.preroll.splice(0)) onBlock(rec, block)
