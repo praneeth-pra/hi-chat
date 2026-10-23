@@ -164,6 +164,8 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   /// helper may not). Once Hi-chat has reported, its reports are used.
   var reportedCaret: NSPoint?
   var caretReports = false
+  var caretWhy = ""
+  let status = NSTextField(labelWithString: "")
 
   override init() {
     panel = MirrorPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -205,6 +207,19 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     close.autoresizingMask = [.minXMargin, .minYMargin]
     close.toolTip = "Close the mirror (fn + Shift + Left)"
     view.addSubview(close)
+    // What the pointer view follows (updateStatus)
+    status.font = .systemFont(ofSize: 11, weight: .medium)
+    status.textColor = .white
+    status.drawsBackground = true
+    status.backgroundColor = NSColor(white: 0, alpha: 0.55)
+    status.isBezeled = false
+    status.isHidden = true
+    status.frame = NSRect(x: 8, y: 8, width: size.width - 40, height: 16)
+    status.autoresizingMask = [.width, .maxYMargin]
+    status.wantsLayer = true
+    status.layer?.cornerRadius = 4
+    status.layer?.zPosition = 10
+    view.addSubview(status)
 
     DistributedNotificationCenter.default().addObserver(
       forName: notificationName, object: nil, queue: .main
@@ -214,8 +229,9 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       let window = (info["window"] as? String).flatMap { UInt32($0) }
         ?? (info["window"] as? NSNumber)?.uint32Value
       let at = info["at"] as? String
+      let why = info["why"] as? String
       MainActor.assumeIsolated {
-        if command == "caret" { self.caretReported(at ?? "") }
+        if command == "caret" { self.caretReported(at ?? "", why: why ?? "") }
         self.handle(command, window: window)
       }
     }
@@ -324,11 +340,30 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     Task { try? await old?.stopCapture() }
   }
 
-  /// Hi-chat's report of the text cursor: "x,y", or "" for none.
-  func caretReported(_ at: String) {
+  /// Hi-chat's report of the text cursor: "x,y", or "" for none (and why).
+  func caretReported(_ at: String, why: String) {
     caretReports = true
+    caretWhy = why
     let parts = at.split(separator: ",").compactMap { Double($0) }
     reportedCaret = parts.count == 2 ? NSPoint(x: parts[0], y: parts[1]) : nil
+  }
+
+  /// A small label in the pointer view: what it follows, and if it's the
+  /// mouse while a text cursor might be expected, why.
+  func updateStatus() {
+    guard mode == .pointer else { status.isHidden = true; return }
+    let text: String
+    if followingCaret {
+      text = "Following your typing"
+    } else {
+      switch caretWhy {
+      case "no-permission": text = "Following the mouse · Hi-chat needs Accessibility"
+      case "no-text", "no-bounds": text = "Following the mouse · this app doesn't report its text cursor"
+      default: text = "Following the mouse"
+      }
+    }
+    if status.stringValue != text { status.stringValue = text }
+    status.isHidden = false
   }
 
   /// What the pointer view follows: the text cursor if it moved since the
@@ -425,6 +460,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   /// text cursor while typing), the size of this window, holding still until
   /// it nears the view's edge.
   func followPointer() {
+    updateStatus()
     guard mode == .pointer, panel.isVisible, let screen = pointerScreen() else { return }
     if let id = displayID(screen), id != streamDisplay {
       restart() // the pointer moved to another display
