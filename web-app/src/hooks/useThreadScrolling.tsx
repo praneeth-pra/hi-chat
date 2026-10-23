@@ -350,12 +350,21 @@ export const useThreadScrolling = (
         const elements = getDOMElements()
         const currentAssistantMessage = elements?.lastAssistantMessage
 
-        // Check if a new assistant message has appeared (different from the one before streaming)
-        const hasNewAssistantMessage =
-          currentAssistantMessage &&
-          currentAssistantMessage !== lastAssistantMessageRef.current
+        // The answer to the question: the assistant message after it. The
+        // streamed answer stays the same element when it's saved, so this
+        // can't wait for a new element to appear: it never would, and the
+        // fallback below removed all the padding, dropping the page down
+        // as the answer finished.
+        const answersQuestion =
+          !!currentAssistantMessage &&
+          !!elements?.lastUserMessage &&
+          !!(
+            elements.lastUserMessage.compareDocumentPosition(
+              currentAssistantMessage
+            ) & Node.DOCUMENT_POSITION_FOLLOWING
+          )
 
-        if (hasNewAssistantMessage && elements?.lastUserMessage) {
+        if (answersQuestion && elements?.lastUserMessage) {
           const userRect = elements.lastUserMessage.getBoundingClientRect()
           const assistantRect = currentAssistantMessage.getBoundingClientRect()
           const actualSpacing = assistantRect.top - userRect.bottom

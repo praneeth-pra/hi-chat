@@ -44,6 +44,36 @@ function Thread() {
   )
 }
 
+// Like the thread page since #201: the streaming answer is drawn in the same
+// list as the messages, keyed by its id, which the saved message keeps, so
+// it stays the same element when it finishes.
+function ThreadWithStream() {
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const messages = useMessages((state) => state.messages[THREAD_ID] ?? [])
+  const streaming = useAppState((state) => state.streamingContent)
+  const live =
+    streaming?.thread_id === THREAD_ID &&
+    !messages.some((m) => m.id === streaming.id)
+  return (
+    <ThreadScrollProvider
+      threadId={THREAD_ID}
+      scrollContainerRef={scrollContainerRef}
+    >
+      <div ref={scrollContainerRef} data-testid="scroll-container">
+        {[
+          ...messages.map((item) => (
+            <div key={item.id} data-message-author-role={item.role} />
+          )),
+          live && (
+            <div key={streaming!.id} data-message-author-role="assistant" />
+          ),
+        ]}
+        <ThreadPadding />
+      </div>
+    </ThreadScrollProvider>
+  )
+}
+
 /** jsdom has no layout, so give every message a fixed height. */
 function mockLayout(container: HTMLElement) {
   const padding = () =>
@@ -88,7 +118,8 @@ function mockLayout(container: HTMLElement) {
   HTMLElement.prototype.getBoundingClientRect = function () {
     if (this === container) return { top: 0 } as DOMRect
     const index = messages().indexOf(this)
-    return { top: index * MESSAGE_HEIGHT - scrollTop } as DOMRect
+    const top = index * MESSAGE_HEIGHT - scrollTop
+    return { top, bottom: top + MESSAGE_HEIGHT } as DOMRect
   }
 
   return {
@@ -169,6 +200,53 @@ describe('useThreadScrolling (flow)', () => {
       top: scrollTop,
       behavior: 'auto',
     })
+  })
+
+  it('keeps the question in place when the answer finishes (same element)', () => {
+    vi.useFakeTimers()
+    const { getByTestId, container } = render(<ThreadWithStream />)
+    const layout = mockLayout(getByTestId('scroll-container'))
+    restoreLayout = layout.restore
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb)
+      return 0
+    })
+    const padding = () =>
+      (container.querySelector('[data-testid="chat-padding"]') as HTMLElement)
+        .style.height
+
+    act(() => {
+      const current = useMessages.getState().messages[THREAD_ID]
+      useMessages.setState({
+        messages: { [THREAD_ID]: [...current, message('question', 'user')] },
+      })
+    })
+    act(() => {
+      while (frames.length) frames.shift()!(0)
+    })
+    // Room below the question: viewport 600 - 40 - question 100
+    expect(padding()).toBe('460px')
+
+    const answer = { ...message('answer', 'assistant') }
+    act(() => {
+      useAppState.setState({ streamingContent: answer })
+    })
+    act(() => {
+      // Saved under the same id, and the stream cleared, together
+      const current = useMessages.getState().messages[THREAD_ID]
+      useMessages.setState({ messages: { [THREAD_ID]: [...current, answer] } })
+      useAppState.setState({
+        streamingContent: { ...answer, id: 'empty', thread_id: '' },
+      })
+    })
+    act(() => {
+      vi.runAllTimers()
+    })
+    // Shrunk by the answer's height, not dropped to 0 (which made the page
+    // shorter and the view jump down as the answer finished)
+    expect(padding()).toBe('360px')
+    useAppState.setState({ streamingContent: undefined })
+    vi.useRealTimers()
   })
 
   it('does not scroll for a new assistant message', () => {
