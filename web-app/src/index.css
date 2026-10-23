@@ -64,14 +64,38 @@
   --app-surface: #2a2a2a;
 }
 
-/* The "Thinking" label while the model thinks: a soft, slow pulse */
-@keyframes thinking-pulse {
-  0%,
-  100% {
-    opacity: 1;
+/* The "Thinking" label while the model thinks: a band of light sweeping
+   across it. A mask, so it works with any text colour and theme. */
+.thinking-shimmer {
+  -webkit-mask-image: linear-gradient(
+    100deg,
+    rgb(0 0 0 / 0.45) 40%,
+    #000 50%,
+    rgb(0 0 0 / 0.45) 60%
+  );
+  mask-image: linear-gradient(
+    100deg,
+    rgb(0 0 0 / 0.45) 40%,
+    #000 50%,
+    rgb(0 0 0 / 0.45) 60%
+  );
+  -webkit-mask-size: 250% 100%;
+  mask-size: 250% 100%;
+  animation: thinking-shimmer 1.8s linear infinite;
+}
+@keyframes thinking-shimmer {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
   }
-  50% {
-    opacity: 0.45;
+  to {
+    -webkit-mask-position: -150% 0;
+    mask-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-shimmer {
+    animation: none;
   }
 }
 
