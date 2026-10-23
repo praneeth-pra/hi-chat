@@ -359,6 +359,8 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       switch caretWhy {
       case "no-permission": text = "Following the mouse · Hi-chat needs Accessibility"
       case "no-text", "no-bounds": text = "Following the mouse · this app doesn't report its text cursor"
+      case "no-focus": text = "Following the mouse · no text box in focus"
+      case "": text = caretReports ? "Following the mouse" : "Following the mouse · waiting for Hi-chat"
       default: text = "Following the mouse"
       }
     }
