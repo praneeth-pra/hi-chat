@@ -98,6 +98,28 @@ test('a reply saved under a new id still ends the stream', () => {
   assert.equal(late.got.filter((m) => m.t === 'stream').length, 0)
 })
 
+test('viewers hear how much of the reply Hi-chat shows', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(
+    JSON.stringify({ t: 'shown', id: 'a1', n: 42, s: 'abcdefgh12', q: 7 })
+  )
+  assert.deepEqual(lastOf(viewer, 'shown'), {
+    t: 'shown',
+    id: 'a1',
+    n: 42,
+    s: 'abcdefgh12',
+    q: 7,
+  })
+  // Nonsense is dropped
+  sender.onmessage(JSON.stringify({ t: 'shown', id: 'a1', n: 'lots' }))
+  sender.onmessage(JSON.stringify({ t: 'shown', n: 5 }))
+  assert.equal(viewer.got.filter((m) => m.t === 'shown').length, 1)
+})
+
 test('viewers scroll with Hi-chat, late ones too', () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()

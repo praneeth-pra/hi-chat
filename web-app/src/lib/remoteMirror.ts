@@ -179,6 +179,16 @@ export function mirrorStreamTap(threadId: string, text: string) {
   tap?.(threadId, text)
 }
 
+// The chat reports how much of a reply's answer it shows each time it
+// reveals more (ThreadContent), so viewers show exactly that, in step
+let shownTap: ((threadId: string, id: string, n: number) => void) | null =
+  null
+
+/** How many characters of a reply's answer Hi-chat shows right now. */
+export function mirrorShownTap(threadId: string, id: string, n: number) {
+  shownTap?.(threadId, id, n)
+}
+
 /**
  * Where the chat is scrolled to: at the bottom, or at a message (`id`) and how
  * far into it the top of the view is (`f`, 0 to 1). By message rather than in
@@ -282,6 +292,9 @@ export function startRemoteMirror({
   let sentScroll = ''
   let scrollFrame: number | undefined
   let streamCount = 0
+  // The reply viewers follow, and how much of it they were told is shown
+  let shownId: string | null = null
+  let sentShown = -1
   // While someone watches, a held Web Lock keeps Chrome from freezing or
   // discarding this tab when it is in the background
   let releaseAwake: (() => void) | undefined
@@ -336,6 +349,7 @@ export function startRemoteMirror({
     sentPhase = undefined
     sentStream = { id: null, text: '' }
     sentScroll = ''
+    sentShown = -1
   }
 
   // The reply being written. The chat gives it a new id on every update (and
@@ -348,6 +362,10 @@ export function startRemoteMirror({
         : sentStream.id !== null && text.startsWith(sentStream.text)
           ? sentStream.id
           : (liveId ?? `reply-${++streamCount}`)
+    if (id !== null && id !== shownId) {
+      shownId = id
+      sentShown = -1
+    }
     const update = streamUpdate(sentStream, id, text ?? '')
     if (update) {
       send(update as { t: string })
@@ -364,6 +382,18 @@ export function startRemoteMirror({
     // again
     const live = useAppState.getState().streamingContent
     sendStream(text, live?.thread_id === threadId ? live.id : undefined)
+  }
+
+  // How much of the reply Hi-chat shows: sent each time it reveals more, for
+  // the reply being written (and its last words after it is saved). Not from
+  // a background window, which barely draws; viewers pace it themselves then
+  shownTap = (threadId, id, n) => {
+    if (!viewers || !open() || notSending(location.pathname)) return
+    if (id !== shownId || n === sentShown) return
+    if (globalThis.document?.hidden) return
+    if (threadId !== useThreads.getState().currentThreadId) return
+    sentShown = n
+    send({ t: 'shown', id, n })
   }
 
   // Screenshots, sent once each, made small first
@@ -573,6 +603,7 @@ export function startRemoteMirror({
   return () => {
     stopped = true
     tap = null
+    shownTap = null
     stayAwake(false)
     unsubscribe.forEach((u) => u())
     clearInterval(ping)
@@ -597,6 +628,8 @@ export type MirrorState = {
   images: Record<string, string>
   /** Accuracy mode's progress, while it runs */
   phase: 'searching' | 'drafting' | 'verifying' | null
+  /** How much of a reply's answer Hi-chat shows right now */
+  shown: { id: string; n: number } | null
 }
 
 export const emptyMirror: MirrorState = {
@@ -607,6 +640,7 @@ export const emptyMirror: MirrorState = {
   scroll: null,
   images: {},
   phase: null,
+  shown: null,
 }
 
 const PHASES = ['searching', 'drafting', 'verifying'] as const
@@ -671,6 +705,14 @@ export function applyMirrorMessage(
     if (typeof m.add === 'string' && stream && stream.id === m.id)
       return { ...state, stream: { id: m.id, text: stream.text + m.add } }
     return state
+  }
+  if (m?.t === 'shown') {
+    if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return state
+    // Never back: a copy arriving late by the other route says less
+    const same = state.shown?.id === m.id
+    const n = same ? Math.max(state.shown!.n, m.n) : m.n
+    if (same && n === state.shown!.n) return state
+    return { ...state, shown: { id: m.id, n } }
   }
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
   if (m?.t === 'scroll') {
