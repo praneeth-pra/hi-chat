@@ -15,16 +15,14 @@ import { getServiceHub } from '@/hooks/useServiceHub'
 import { useAttachments } from '@/hooks/useAttachments'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
-import {
+import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
   CompletionResponse,
   CompletionResponseChunk,
-  models,
   StreamCompletionResponse,
-  TokenJS,
-  ConfigOptions,
 } from 'token.js'
+import OpenAI from 'openai'
 
 import { getModelCapabilities } from '@/lib/models'
 import {
@@ -33,10 +31,6 @@ import {
   routesImages,
 } from '@/lib/visionModels'
 
-// Extended config options to include custom fetch function
-type ExtendedConfigOptions = ConfigOptions & {
-  fetch?: typeof fetch
-}
 import { ulid } from 'ulidx'
 import { MCPTool } from '@/types/completion'
 import { CompletionMessagesBuilder, ToolResult } from './messages'
@@ -52,6 +46,8 @@ import { chatCacheParams, chatThinkingParams } from '@/lib/chatThinking'
 
 export type ChatCompletionResponse =
   | chatCompletion
+  | AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+  | OpenAI.Chat.Completions.ChatCompletion
   | AsyncIterable<chatCompletionChunk>
   | StreamCompletionResponse
   | CompletionResponse
@@ -219,71 +215,23 @@ export const sendCompletion = async (
   }
   if (track) track.sent = { model: modelId, messages }
 
-  let providerName = provider.provider as unknown as keyof typeof models
-
-  // token.js's Groq handler ignores baseURL and checks model ids against its
-  // own list, so send Groq (and Cerebras) through the generic
-  // OpenAI-compatible handler.
-  if (
-    providerName === 'groq' ||
-    providerName === ('cerebras' as typeof providerName) ||
-    !Object.keys(models).some((key) => key === providerName)
-  )
-    providerName = 'openai-compatible'
-
   const tracked = (base: typeof fetch) =>
     track ? trackFetch(base, track.attempts, track.start) : base
 
-  const tokenJS = new TokenJS({
+  // Every provider here speaks the OpenAI chat format (Groq and Cerebras go
+  // direct first, through this site's server if that is slow)
+  const client = new OpenAI({
     apiKey:
       provider.api_key ?? (await getServiceHub().core().getAppToken()) ?? '',
-    // TODO: Retrieve from extension settings
     baseURL: viaBackupRoute(provider.base_url),
-    // Use Tauri's fetch to avoid CORS issues only for openai-compatible provider
-    // Groq and Cerebras go direct first, through this site's server if that is slow
     fetch: tracked(
       withGroqHedge(IS_DEV ? fetch : getServiceHub().providers().fetch())
     ),
-    // OpenRouter identification headers for Jan
-    // ref: https://openrouter.ai/docs/api-reference/overview#headers
+    dangerouslyAllowBrowser: true,
     ...(provider.provider === 'openrouter' && {
-      defaultHeaders: {
-        'HTTP-Referer': 'https://jan.ai',
-        'X-Title': 'Hi-chat',
-      },
+      defaultHeaders: { 'HTTP-Referer': 'https://jan.ai', 'X-Title': 'Hi-chat' },
     }),
-    // Add Origin header for local providers to avoid CORS issues
-    ...((provider.base_url?.includes('localhost:') ||
-      provider.base_url?.includes('127.0.0.1:')) && {
-      fetch: tracked(getServiceHub().providers().fetch()),
-      defaultHeaders: {
-        Origin: 'tauri://localhost',
-      },
-    }),
-  } as ExtendedConfigOptions)
-
-  if (
-    modelId &&
-    models[providerName]?.models !== true && // Skip if provider accepts any model (models: true)
-    !Object.values(models[providerName]).flat().includes(modelId) &&
-    !tokenJS.extendedModelExist(providerName as any, modelId) &&
-    provider.provider !== 'llamacpp'
-  ) {
-    try {
-      tokenJS.extendModelList(
-        providerName as any,
-        modelId,
-        // This is to inherit the model capabilities from another built-in model
-        // Can be anything that support all model capabilities
-        models.anthropic.models[0]
-      )
-    } catch (error) {
-      console.error(
-        `Failed to extend model list for ${providerName} with model ${modelId}:`,
-        error
-      )
-    }
-  }
+  })
 
   const providerModelConfig = provider.models?.find(
     (model) => model.id === modelId || model.model === modelId
@@ -314,11 +262,9 @@ export const sendCompletion = async (
         abortController
       )
     : stream
-      ? await tokenJS.chat.completions.create(
+      ? await client.chat.completions.create(
           {
             stream: true,
-
-            provider: providerName as any,
             model: modelId,
             messages,
             tools: normalizeTools(usableTools),
@@ -331,10 +277,9 @@ export const sendCompletion = async (
             signal: abortController.signal,
           }
         )
-      : await tokenJS.chat.completions.create(
+      : await client.chat.completions.create(
           {
             stream: false,
-            provider: providerName,
             model: modelId,
             messages,
             tools: normalizeTools(usableTools),

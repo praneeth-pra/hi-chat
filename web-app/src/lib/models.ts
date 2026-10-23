@@ -1,19 +1,35 @@
-import { models } from 'token.js'
 import { ModelCapabilities } from '@/types/models'
 
-export const defaultModel = (provider?: string) => {
-  if (!provider || !Object.keys(models).includes(provider)) {
-    return models.openai.models[0]
-  }
-  return (
-    models[provider as unknown as keyof typeof models]
-      .models as unknown as string[]
-  )[0]
+/**
+ * What the built-in providers' models can do. Only Groq and Cerebras are
+ * built in; image questions go to each provider's vision model.
+ */
+const PROVIDER_MODELS: Record<
+  string,
+  { models: string[]; supportsImages: string[]; supportsToolCalls: string[] }
+> = {
+  groq: {
+    models: [
+      'openai/gpt-oss-120b',
+      'meta-llama/llama-4-maverick-17b-128e-instruct',
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+    ],
+    supportsImages: [
+      'meta-llama/llama-4-maverick-17b-128e-instruct',
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+    ],
+    supportsToolCalls: [],
+  },
+  cerebras: { models: ['gpt-oss-120b'], supportsImages: [], supportsToolCalls: [] },
 }
 
+export const defaultModel = (provider?: string) =>
+  PROVIDER_MODELS[provider ?? '']?.models[0] ??
+  PROVIDER_MODELS.groq.models[0]
+
 /**
- * Determines model capabilities based on provider configuration from token.js
- * @param providerName - The provider name (e.g., 'openai', 'anthropic', 'openrouter')
+ * Determines model capabilities for a built-in provider's model
+ * @param providerName - The provider name (e.g. 'groq', 'cerebras')
  * @param modelId - The model ID to check capabilities for
  * @returns Array of model capabilities
  */
@@ -21,25 +37,15 @@ export const getModelCapabilities = (
   providerName: string,
   modelId: string
 ): string[] => {
-  const providerConfig =
-    models[providerName as unknown as keyof typeof models]
-
-  const supportsToolCalls = Array.isArray(
-    providerConfig?.supportsToolCalls as unknown
-  )
-    ? (providerConfig.supportsToolCalls as unknown as string[])
-    : []
-
-  const supportsImages = Array.isArray(
-    providerConfig?.supportsImages as unknown
-  )
-    ? (providerConfig.supportsImages as unknown as string[])
-    : []
-
+  const providerConfig = PROVIDER_MODELS[providerName]
   return [
     ModelCapabilities.COMPLETION,
-    supportsToolCalls.includes(modelId) ? ModelCapabilities.TOOLS : undefined,
-    supportsImages.includes(modelId) ? ModelCapabilities.VISION : undefined,
+    providerConfig?.supportsToolCalls.includes(modelId)
+      ? ModelCapabilities.TOOLS
+      : undefined,
+    providerConfig?.supportsImages.includes(modelId)
+      ? ModelCapabilities.VISION
+      : undefined,
   ].filter(Boolean) as string[]
 }
 

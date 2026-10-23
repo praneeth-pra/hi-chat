@@ -13,6 +13,7 @@ import {
 } from '../completion'
 
 const completionCreate = vi.hoisted(() => vi.fn())
+const clientOptions = vi.hoisted(() => [] as Record<string, unknown>[])
 
 // Mock dependencies
 vi.mock('@janhq/core', () => ({
@@ -38,17 +39,13 @@ vi.mock('@janhq/core', () => ({
   chatCompletionChunk: vi.fn(),
 }))
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
-}))
-
-vi.mock('@tauri-apps/plugin-http', () => ({
-  fetch: vi.fn(),
-}))
-
-vi.mock('token.js', () => ({
-  models: { 'openai-compatible': { models: true } },
-  TokenJS: class MockTokenJS { chat = { completions: { create: completionCreate } } },
+vi.mock('openai', () => ({
+  default: class MockOpenAI {
+    chat = { completions: { create: completionCreate } }
+    constructor(options: Record<string, unknown>) {
+      clientOptions.push(options)
+    }
+  },
 }))
 
 vi.mock('ulidx', () => ({
@@ -776,6 +773,13 @@ describe('completion transport cancellation', () => {
       expect.objectContaining({ model: 'test-model', stream: false }),
       { signal: controller.signal }
     )
+    // The provider's key and address reach the OpenAI-format client
+    expect(clientOptions.at(-1)).toMatchObject({
+      apiKey: 'test',
+      baseURL: 'https://provider.example',
+      dangerouslyAllowBrowser: true,
+    })
+    expect(completionCreate.mock.calls.at(-1)?.[0]).not.toHaveProperty('provider')
     vi.unstubAllGlobals()
   })
 })

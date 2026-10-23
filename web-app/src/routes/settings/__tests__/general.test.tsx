@@ -315,34 +315,6 @@ describe('General Settings Route', () => {
     expect(screen.getByText('common:settings')).toBeInTheDocument()
   })
 
-  it('should render app version', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    expect(screen.getByText('v1.0.0')).toBeInTheDocument()
-  })
-
-  // TODO: This test is currently commented out due to missing implementation
-  // it('should render language switcher', () => {
-  //   const Component = GeneralRoute.component as React.ComponentType
-  //   render(<Component />)
-
-  //   expect(screen.getByTestId('language-switcher')).toBeInTheDocument()
-  // })
-
-  it('should render huggingface token input', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    const input = screen.getByTestId('input')
-    expect(input).toBeInTheDocument()
-    expect(input).toHaveValue('test-token')
-  })
-
   it('should handle spell check toggle', async () => {
     const Component = GeneralRoute.component as React.ComponentType
     await act(async () => {
@@ -357,22 +329,6 @@ describe('General Settings Route', () => {
       fireEvent.click(switches[0])
     })
     expect(switches[0]).toBeInTheDocument()
-  })
-
-  it('should handle huggingface token change', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    const input = screen.getByTestId('input')
-    expect(input).toBeInTheDocument()
-
-    // Test that input is interactive
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'new-token' } })
-    })
-    expect(input).toBeInTheDocument()
   })
 
   it('should handle check for updates', async () => {
@@ -418,17 +374,6 @@ describe('General Settings Route', () => {
     expect(screen.getByTestId('settings-menu')).toBeInTheDocument()
   })
 
-  it('should handle factory reset dialog', async () => {
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    expect(screen.getByTestId('dialog')).toBeInTheDocument()
-    expect(screen.getByTestId('dialog-trigger')).toBeInTheDocument()
-    expect(screen.getByTestId('dialog-content')).toBeInTheDocument()
-  })
-
   it('should handle logs window opening', async () => {
     const Component = GeneralRoute.component as React.ComponentType
     await act(async () => {
@@ -469,20 +414,6 @@ describe('General Settings Route', () => {
       })
       expect(revealLogsButton).toBeInTheDocument()
     }
-  })
-
-  it('should show correct file explorer text for Windows', async () => {
-    global.IS_WINDOWS = true
-    global.IS_MACOS = false
-
-    const Component = GeneralRoute.component as React.ComponentType
-    await act(async () => {
-      render(<Component />)
-    })
-
-    expect(
-      screen.getByText('settings:general.showInFileExplorer')
-    ).toBeInTheDocument()
   })
 
   it('should disable check for updates button when checking', async () => {

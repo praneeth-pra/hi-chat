@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   defaultModel,
   extractDescription,
@@ -9,46 +9,18 @@ import {
 } from '../models'
 import { ModelCapabilities } from '@/types/models'
 
-// Mock the token.js module
-vi.mock('token.js', () => ({
-  models: {
-    openai: {
-      models: ['gpt-3.5-turbo', 'gpt-4'],
-      supportsToolCalls: ['gpt-3.5-turbo', 'gpt-4'],
-      supportsImages: ['gpt-4-vision-preview'],
-    },
-    anthropic: {
-      models: ['claude-3-sonnet', 'claude-3-haiku'],
-      supportsToolCalls: ['claude-3-sonnet'],
-      supportsImages: ['claude-3-sonnet', 'claude-3-haiku'],
-    },
-    mistral: {
-      models: ['mistral-7b', 'mistral-8x7b'],
-      supportsToolCalls: ['mistral-8x7b'],
-    },
-    // Provider with no capability arrays
-    cohere: {
-      models: ['command', 'command-light'],
-    },
-  },
-}))
-
 describe('defaultModel', () => {
-  it('returns first OpenAI model when no provider is given', () => {
-    expect(defaultModel()).toBe('gpt-3.5-turbo')
+  it('returns the first Groq model when no provider is given', () => {
+    expect(defaultModel()).toBe('openai/gpt-oss-120b')
+    expect(defaultModel('')).toBe('openai/gpt-oss-120b')
   })
 
-  it('returns first OpenAI model when unknown provider is given', () => {
-    expect(defaultModel('unknown')).toBe('gpt-3.5-turbo')
+  it('falls back to Groq for an unknown provider', () => {
+    expect(defaultModel('unknown')).toBe('openai/gpt-oss-120b')
   })
 
-  it('returns first model for known providers', () => {
-    expect(defaultModel('anthropic')).toBe('claude-3-sonnet')
-    expect(defaultModel('mistral')).toBe('mistral-7b')
-  })
-
-  it('handles empty string provider', () => {
-    expect(defaultModel('')).toBe('gpt-3.5-turbo')
+  it('returns the first model of a built-in provider', () => {
+    expect(defaultModel('cerebras')).toBe('gpt-oss-120b')
   })
 })
 
@@ -236,72 +208,24 @@ describe('extractModelRepo', () => {
 })
 
 describe('getModelCapabilities', () => {
-  it('returns completion capability for all models', () => {
-    const capabilities = getModelCapabilities('openai', 'gpt-3.5-turbo')
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
+  it('marks Groq\'s Llama 4 models as seeing images', () => {
+    expect(
+      getModelCapabilities(
+        'groq',
+        'meta-llama/llama-4-scout-17b-16e-instruct'
+      )
+    ).toEqual([ModelCapabilities.COMPLETION, ModelCapabilities.VISION])
   })
 
-  it('includes tools capability when model supports it', () => {
-    const capabilities = getModelCapabilities('openai', 'gpt-3.5-turbo')
-    expect(capabilities).toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-  })
-
-  it('excludes tools capability when model does not support it', () => {
-    const capabilities = getModelCapabilities('mistral', 'mistral-7b')
-    expect(capabilities).not.toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-  })
-
-  it('includes vision capability when model supports it', () => {
-    const capabilities = getModelCapabilities('openai', 'gpt-4-vision-preview')
-    expect(capabilities).toContain(ModelCapabilities.VISION)
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-  })
-
-  it('excludes vision capability when model does not support it', () => {
-    const capabilities = getModelCapabilities('openai', 'gpt-3.5-turbo')
-    expect(capabilities).not.toContain(ModelCapabilities.VISION)
-  })
-
-  it('includes both tools and vision when model supports both', () => {
-    const capabilities = getModelCapabilities('anthropic', 'claude-3-sonnet')
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-    expect(capabilities).toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).toContain(ModelCapabilities.VISION)
-  })
-
-  it('handles provider with no capability arrays gracefully', () => {
-    const capabilities = getModelCapabilities('cohere', 'command')
-    expect(capabilities).toEqual([ModelCapabilities.COMPLETION])
-    expect(capabilities).not.toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).not.toContain(ModelCapabilities.VISION)
-  })
-
-  it('handles unknown provider gracefully', () => {
-    const capabilities = getModelCapabilities('openrouter', 'some-model')
-    expect(capabilities).toEqual([ModelCapabilities.COMPLETION])
-    expect(capabilities).not.toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).not.toContain(ModelCapabilities.VISION)
-  })
-
-  it('handles model not in capability list', () => {
-    const capabilities = getModelCapabilities('anthropic', 'claude-3-haiku')
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-    expect(capabilities).toContain(ModelCapabilities.VISION)
-    expect(capabilities).not.toContain(ModelCapabilities.TOOLS)
-  })
-
-  it('returns only completion for provider with partial capability data', () => {
-    // Mistral has supportsToolCalls but no supportsImages
-    const capabilities = getModelCapabilities('mistral', 'mistral-7b')
-    expect(capabilities).toEqual([ModelCapabilities.COMPLETION])
-  })
-
-  it('handles model that supports tools but not vision', () => {
-    const capabilities = getModelCapabilities('mistral', 'mistral-8x7b')
-    expect(capabilities).toContain(ModelCapabilities.COMPLETION)
-    expect(capabilities).toContain(ModelCapabilities.TOOLS)
-    expect(capabilities).not.toContain(ModelCapabilities.VISION)
+  it('gives plain completion to other models and unknown providers', () => {
+    expect(getModelCapabilities('groq', 'openai/gpt-oss-120b')).toEqual([
+      ModelCapabilities.COMPLETION,
+    ])
+    expect(getModelCapabilities('cerebras', 'gpt-oss-120b')).toEqual([
+      ModelCapabilities.COMPLETION,
+    ])
+    expect(getModelCapabilities('unknown', 'x')).toEqual([
+      ModelCapabilities.COMPLETION,
+    ])
   })
 })

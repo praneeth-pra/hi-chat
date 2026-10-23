@@ -37,6 +37,8 @@ export default defineConfig({
     },
     target: 'esnext',
   },
+  // Debug chatter stays out of the live site; warnings and errors still show
+  esbuild: { pure: ['console.log', 'console.debug'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

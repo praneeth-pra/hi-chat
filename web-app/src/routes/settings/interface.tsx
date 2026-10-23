@@ -2,16 +2,11 @@
 import { route } from '@/constants/routes'
 import SettingsMenu from '@/containers/SettingsMenu'
 import HeaderPage from '@/containers/HeaderPage'
-import { ColorPickerAppBgColor } from '@/containers/ColorPickerAppBgColor'
-import { ColorPickerAppMainView } from '@/containers/ColorPickerAppMainView'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { ThemeSwitcher } from '@/containers/ThemeSwitcher'
 import { FontSizeSwitcher } from '@/containers/FontSizeSwitcher'
 import { FontFamilySwitcher } from '@/containers/FontFamilySwitcher'
-import { ColorPickerAppPrimaryColor } from '@/containers/ColorPickerAppPrimaryColor'
-import { ColorPickerAppAccentColor } from '@/containers/ColorPickerAppAccentColor'
-import { ColorPickerAppDestructiveColor } from '@/containers/ColorPickerAppDestructiveColor'
 import { useInterfaceSettings } from '@/hooks/useInterfaceSettings'
 import { useCodeblock } from '@/hooks/useCodeblock'
 import { Button } from '@/components/ui/button'
@@ -60,36 +55,6 @@ function InterfaceSettings() {
                 actions={<FontSizeSwitcher />}
               />
 
-              <CardItem
-                title={t('settings:interface.windowBackground')}
-                description={t('settings:interface.windowBackgroundDesc')}
-                className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
-                actions={<ColorPickerAppBgColor />}
-              />
-              <CardItem
-                title={t('settings:interface.appMainView')}
-                description={t('settings:interface.appMainViewDesc')}
-                className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
-                actions={<ColorPickerAppMainView />}
-              />
-              <CardItem
-                title={t('settings:interface.primary')}
-                description={t('settings:interface.primaryDesc')}
-                className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
-                actions={<ColorPickerAppPrimaryColor />}
-              />
-              <CardItem
-                title={t('settings:interface.accent')}
-                description={t('settings:interface.accentDesc')}
-                className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
-                actions={<ColorPickerAppAccentColor />}
-              />
-              <CardItem
-                title={t('settings:interface.destructive')}
-                description={t('settings:interface.destructiveDesc')}
-                className="flex-col sm:flex-row items-start sm:items-center sm:justify-between gap-y-2"
-                actions={<ColorPickerAppDestructiveColor />}
-              />
               <CardItem
                 title={t('settings:interface.resetToDefault')}
                 description={t('settings:interface.resetToDefaultDesc')}

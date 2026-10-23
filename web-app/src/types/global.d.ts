@@ -1,6 +1,5 @@
 export {}
 
-declare module 'react-syntax-highlighter-virtualized-renderer'
 
 type AppCore = {
   api: APIs

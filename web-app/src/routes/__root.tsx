@@ -3,8 +3,6 @@
 
 import LeftPanel from '@/containers/LeftPanel'
 import { SideRail } from '@/containers/SideRail'
-import DialogAppUpdater from '@/containers/dialogs/AppUpdater'
-import BackendUpdater from '@/containers/dialogs/BackendUpdater'
 import { Fragment } from 'react/jsx-runtime'
 import { InterfaceProvider } from '@/providers/InterfaceProvider'
 import { ThemeProvider } from '@/providers/ThemeProvider'
@@ -13,9 +11,6 @@ import { DataProvider } from '@/providers/DataProvider'
 import { route } from '@/constants/routes'
 import { ExtensionProvider } from '@/providers/ExtensionProvider'
 import { ToasterProvider } from '@/providers/ToasterProvider'
-import { useAnalytic } from '@/hooks/useAnalytic'
-import { PromptAnalytic } from '@/containers/analytics/PromptAnalytic'
-import { AnalyticProvider } from '@/providers/AnalyticProvider'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
 import { cn } from '@/lib/utils'
 import ToolApproval from '@/containers/dialogs/ToolApproval'
@@ -35,8 +30,6 @@ import { GlobalEventHandler } from '@/providers/GlobalEventHandler'
 import { RemoteKeysProvider } from '@/containers/RemoteKeysProvider'
 import ErrorDialog from '@/containers/dialogs/ErrorDialog'
 import { ServiceHubProvider } from '@/providers/ServiceHubProvider'
-import { PlatformFeatures } from '@/lib/platform/const'
-import { PlatformFeature } from '@/lib/platform/types'
 import { startRemoteMirror } from '@/lib/remoteMirror'
 import { useRemoteSession } from '@/hooks/useRemoteSession'
 
@@ -46,7 +39,6 @@ export const Route = createRootRoute({
 })
 
 const AppLayout = () => {
-  const { productAnalyticPrompt } = useAnalytic()
   const {
     open: isLeftPanelOpen,
     setLeftPanel,
@@ -121,15 +113,10 @@ const AppLayout = () => {
 
   return (
     <Fragment>
-      <AnalyticProvider />
       <KeyboardShortcutsProvider />
       <main className="relative h-svh text-sm antialiased select-none bg-app">
         {/* Fake absolute panel top to enable window drag */}
         <div className="absolute w-full h-10 z-10" data-tauri-drag-region />
-        <DialogAppUpdater />
-        {PlatformFeatures[PlatformFeature.LOCAL_INFERENCE] && (
-          <BackendUpdater />
-        )}
 
         {/* Use ResizablePanelGroup only on larger screens */}
         {!isSmallScreen && isLeftPanelOpen ? (
@@ -182,14 +169,12 @@ const AppLayout = () => {
           </div>
         )}
       </main>
-      {PlatformFeatures[PlatformFeature.ANALYTICS] && productAnalyticPrompt && (
-        <PromptAnalytic />
-      )}
     </Fragment>
   )
 }
 
-const LogsLayout = () => {
+/** The mirror pages: the page alone, no side panel */
+const BareLayout = () => {
   return (
     <Fragment>
       <main className="relative h-svh text-sm antialiased select-text bg-app">
@@ -210,16 +195,13 @@ function RootLayout() {
   const getInitialLayoutType = () => {
     const pathname = window.location.pathname
     return (
-      pathname === route.localApiServerlogs ||
-      pathname === route.systemMonitor ||
-      pathname === route.appLogs ||
       pathname === route.mirror ||
       // An app's own mirror link (lib/mirrorLink.ts)
       pathname.startsWith('/m/')
     )
   }
 
-  const IS_LOGS_ROUTE = getInitialLayoutType()
+  const isBarePage = getInitialLayoutType()
 
   return (
     <Fragment>
@@ -232,9 +214,8 @@ function RootLayout() {
             <DataProvider />
             <GlobalEventHandler />
             <RemoteKeysProvider />
-            {IS_LOGS_ROUTE ? <LogsLayout /> : <AppLayout />}
+            {isBarePage ? <BareLayout /> : <AppLayout />}
           </ExtensionProvider>
-          {/* {isLocalAPIServerLogsRoute ? <LogsLayout /> : <AppLayout />} */}
           {/* <TanStackRouterDevtools position="bottom-right" /> */}
           <ToolApproval />
           <LoadModelErrorDialog />

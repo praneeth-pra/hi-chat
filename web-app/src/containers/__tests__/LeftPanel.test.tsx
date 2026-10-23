@@ -88,11 +88,6 @@ vi.mock('./ThreadList', () => ({
   default: () => <div data-testid="thread-list">ThreadList</div>,
 }))
 
-vi.mock('@/containers/DownloadManegement', () => ({
-  DownloadManagement: () => (
-    <div data-testid="download-management">DownloadManagement</div>
-  ),
-}))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
   useTranslation: () => ({
@@ -218,19 +213,6 @@ describe('LeftPanel', () => {
     expect(searchInput).toHaveAttribute('type', 'text')
   })
 
-  it('should render download management component', () => {
-    vi.mocked(useLeftPanel).mockReturnValue({
-      open: true,
-      setLeftPanel: vi.fn(),
-      toggle: vi.fn(),
-      close: vi.fn(),
-    })
-
-    render(<LeftPanel />)
-
-    expect(screen.getByTestId('download-management')).toBeDefined()
-  })
-
   it('should have proper structure when open', () => {
     vi.mocked(useLeftPanel).mockReturnValue({
       open: true,
@@ -244,9 +226,6 @@ describe('LeftPanel', () => {
     // Check that basic structure exists
     const searchInput = screen.getByPlaceholderText('common:search')
     expect(searchInput).toBeDefined()
-
-    const downloadComponent = screen.getByTestId('download-management')
-    expect(downloadComponent).toBeDefined()
   })
 
   it('should render menu navigation links', () => {

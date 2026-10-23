@@ -11,8 +11,6 @@ import { Button } from '@/components/ui/button'
 import { IconExternalLink, IconLoader2 } from '@tabler/icons-react'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useCallback } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { isPlatformTauri } from '@/lib/platform/utils'
 
 const CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/jan-browser-mcp/mkciifcjehgnpaigoiaakdgabbpfppal'
 
@@ -36,18 +34,8 @@ export default function JanBrowserExtensionDialog({
 }: JanBrowserExtensionDialogProps) {
   const { t } = useTranslation()
 
-  const handleOpenChromeStore = useCallback(async () => {
-    try {
-      if (isPlatformTauri()) {
-        await openUrl(CHROME_STORE_URL)
-      } else {
-        window.open(CHROME_STORE_URL, '_blank')
-      }
-    } catch (error) {
-      console.error('Failed to open Chrome Store URL:', error)
-      // Fallback to window.open
-      window.open(CHROME_STORE_URL, '_blank')
-    }
+  const handleOpenChromeStore = useCallback(() => {
+    window.open(CHROME_STORE_URL, '_blank')
   }, [])
 
   const handleCancel = useCallback(() => {

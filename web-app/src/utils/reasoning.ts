@@ -1,4 +1,4 @@
-import { CompletionResponseChunk } from 'token.js'
+import type { CompletionResponseChunk } from 'token.js'
 import {
   chatCompletionChunk,
   ChatCompletionMessage,

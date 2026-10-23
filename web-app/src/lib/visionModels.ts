@@ -1,4 +1,4 @@
-import { ChatCompletionMessageParam } from 'token.js'
+import type { ChatCompletionMessageParam } from 'token.js'
 
 // Most Groq and Cerebras models can't read images. A question with an image
 // attached goes to that provider's vision model; earlier images are not

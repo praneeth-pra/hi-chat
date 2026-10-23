@@ -2,7 +2,6 @@
  * Web Providers Service - Web implementation
  */
 
-import { models as providerModels } from 'token.js'
 import { predefinedProviders } from '@/consts/providers'
 import { EngineManager, SettingComponentProps } from '@janhq/core'
 import { ModelCapabilities } from '@/types/models'
@@ -95,7 +94,7 @@ export class WebProvidersService implements ProvidersService {
     }
 
     // This web build talks to Groq and Cerebras only. Their model lists are
-    // seeded here because token.js doesn't know them; "refresh models" in
+    // seeded here; "refresh models" in
     // settings fetches the live list.
     const builtinProviders = predefinedProviders
       .filter((provider) => provider.provider in SEEDED_MODELS)
@@ -116,27 +115,6 @@ export class WebProvidersService implements ProvidersService {
                     : getModelCapabilities(provider.provider, model),
               }) as Model
           )
-        } else if (Object.keys(providerModels).includes(provider.provider)) {
-          const builtInModels = providerModels[
-            provider.provider as unknown as keyof typeof providerModels
-          ].models as unknown as string[]
-
-          if (Array.isArray(builtInModels)) {
-            models = builtInModels.map((model) => {
-              const modelManifest = models.find((e) => e.id === model)
-              // TODO: Check chat_template for tool call support
-              return {
-                ...(modelManifest ?? { id: model, name: model }),
-                capabilities:
-                  VISION_MODEL_IDS.includes(model)
-                    ? [
-                        ...getModelCapabilities(provider.provider, model),
-                        'vision',
-                      ]
-                    : getModelCapabilities(provider.provider, model),
-              } as Model
-            })
-          }
         }
 
         return {

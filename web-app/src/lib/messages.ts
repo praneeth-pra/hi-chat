@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { ChatCompletionMessageParam } from 'token.js'
+import type { ChatCompletionMessageParam } from 'token.js'
 import { ChatCompletionMessageToolCall } from 'openai/resources'
 import { ThreadMessage, ContentType } from '@janhq/core'
 import { removeReasoningContent } from '@/utils/reasoning'

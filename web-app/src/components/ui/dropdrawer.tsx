@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
-import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import * as React from 'react'
 
@@ -30,26 +29,12 @@ import {
 import { cn } from '@/lib/utils'
 import { useSmallScreen } from '@/hooks/useMediaQuery'
 
-const ANIMATION_CONFIG = {
-  variants: {
-    enter: (direction: 'forward' | 'backward') => ({
-      x: direction === 'forward' ? '100%' : '-100%',
-      opacity: 0,
-    }),
-    center: {
-      x: 0,
-      opacity: 1,
-    },
-    exit: (direction: 'forward' | 'backward') => ({
-      x: direction === 'forward' ? '-100%' : '100%',
-      opacity: 0,
-    }),
-  },
-  transition: {
-    duration: 0.3,
-    ease: [0.25, 0.1, 0.25, 1.0],
-  },
-} as const
+/** A submenu slides in from the side it was opened toward (plain CSS) */
+const slideIn = (direction: 'forward' | 'backward') =>
+  cn(
+    'animate-in fade-in duration-300 ease-out',
+    direction === 'forward' ? 'slide-in-from-right-full' : 'slide-in-from-left-full'
+  )
 
 const getMobileItemStyles = (
   isInsideGroup: boolean,
@@ -356,27 +341,15 @@ function DropDrawerContent({
                 </div>
               </DrawerHeader>
               <div className="flex-1 relative overflow-hidden max-h-[70vh]">
-                {/* Use AnimatePresence to handle exit animations */}
-                <AnimatePresence
-                  initial={false}
-                  mode="wait"
-                  custom={animationDirection}
+                <div
+                  key={activeSubmenu || 'main'}
+                  className={cn(
+                    'pb-6 space-y-1.5 w-full h-full overflow-hidden',
+                    slideIn(animationDirection)
+                  )}
                 >
-                  <motion.div
-                    key={activeSubmenu || 'main'}
-                    custom={animationDirection}
-                    variants={ANIMATION_CONFIG.variants}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={ANIMATION_CONFIG.transition as any}
-                    className="pb-6 space-y-1.5 w-full h-full overflow-hidden"
-                  >
-                    {activeSubmenu
-                      ? getSubmenuContent(activeSubmenu)
-                      : children}
-                  </motion.div>
-                </AnimatePresence>
+                  {activeSubmenu ? getSubmenuContent(activeSubmenu) : children}
+                </div>
               </div>
             </>
           ) : (
@@ -385,24 +358,9 @@ function DropDrawerContent({
                 <DrawerTitle>Menu</DrawerTitle>
               </DrawerHeader>
               <div className="overflow-hidden max-h-[70vh]">
-                <AnimatePresence
-                  initial={false}
-                  mode="wait"
-                  custom={animationDirection}
-                >
-                  <motion.div
-                    key="main-menu"
-                    custom={animationDirection}
-                    variants={ANIMATION_CONFIG.variants}
-                    initial="enter"
-                    animate="center"
-                    exit="exit"
-                    transition={ANIMATION_CONFIG.transition as any}
-                    className="pb-6 space-y-1.5 w-full overflow-hidden"
-                  >
-                    {children}
-                  </motion.div>
-                </AnimatePresence>
+                <div className="pb-6 space-y-1.5 w-full overflow-hidden">
+                  {children}
+                </div>
               </div>
             </>
           )}
