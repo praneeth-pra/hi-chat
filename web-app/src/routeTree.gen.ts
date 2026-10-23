@@ -31,9 +31,9 @@ import { Route as SettingsAttachmentsImport } from './routes/settings/attachment
 import { Route as SettingsAssistantImport } from './routes/settings/assistant'
 import { Route as SettingsAppKeysImport } from './routes/settings/app-keys'
 import { Route as ProjectProjectIdImport } from './routes/project/$projectId'
+import { Route as MLinkImport } from './routes/m/$link'
 import { Route as LocalApiServerLogsImport } from './routes/local-api-server/logs'
 import { Route as HubModelIdImport } from './routes/hub/$modelId'
-import { Route as MLinkImport } from './routes/m/$link'
 import { Route as SettingsProvidersIndexImport } from './routes/settings/providers/index'
 import { Route as SettingsProvidersProviderNameImport } from './routes/settings/providers/$providerName'
 
@@ -159,15 +159,15 @@ const ProjectProjectIdRoute = ProjectProjectIdImport.update({
   getParentRoute: () => rootRoute,
 } as any)
 
-const LocalApiServerLogsRoute = LocalApiServerLogsImport.update({
-  id: '/local-api-server/logs',
-  path: '/local-api-server/logs',
-  getParentRoute: () => rootRoute,
-} as any)
-
 const MLinkRoute = MLinkImport.update({
   id: '/m/$link',
   path: '/m/$link',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const LocalApiServerLogsRoute = LocalApiServerLogsImport.update({
+  id: '/local-api-server/logs',
+  path: '/local-api-server/logs',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -222,13 +222,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SystemMonitorImport
       parentRoute: typeof rootRoute
     }
-    '/m/$link': {
-      id: '/m/$link'
-      path: '/m/$link'
-      fullPath: '/m/$link'
-      preLoaderRoute: typeof MLinkImport
-      parentRoute: typeof rootRoute
-    }
     '/hub/$modelId': {
       id: '/hub/$modelId'
       path: '/hub/$modelId'
@@ -241,6 +234,13 @@ declare module '@tanstack/react-router' {
       path: '/local-api-server/logs'
       fullPath: '/local-api-server/logs'
       preLoaderRoute: typeof LocalApiServerLogsImport
+      parentRoute: typeof rootRoute
+    }
+    '/m/$link': {
+      id: '/m/$link'
+      path: '/m/$link'
+      fullPath: '/m/$link'
+      preLoaderRoute: typeof MLinkImport
       parentRoute: typeof rootRoute
     }
     '/project/$projectId': {
@@ -379,9 +379,9 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
-  '/m/$link': typeof MLinkRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
+  '/m/$link': typeof MLinkRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -407,9 +407,9 @@ export interface FileRoutesByTo {
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
-  '/m/$link': typeof MLinkRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
+  '/m/$link': typeof MLinkRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -436,9 +436,9 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/mirror': typeof MirrorRoute
   '/system-monitor': typeof SystemMonitorRoute
-  '/m/$link': typeof MLinkRoute
   '/hub/$modelId': typeof HubModelIdRoute
   '/local-api-server/logs': typeof LocalApiServerLogsRoute
+  '/m/$link': typeof MLinkRoute
   '/project/$projectId': typeof ProjectProjectIdRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -466,9 +466,9 @@ export interface FileRouteTypes {
     | '/logs'
     | '/mirror'
     | '/system-monitor'
-    | '/m/$link'
     | '/hub/$modelId'
     | '/local-api-server/logs'
+    | '/m/$link'
     | '/project/$projectId'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -493,9 +493,9 @@ export interface FileRouteTypes {
     | '/logs'
     | '/mirror'
     | '/system-monitor'
-    | '/m/$link'
     | '/hub/$modelId'
     | '/local-api-server/logs'
+    | '/m/$link'
     | '/project/$projectId'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -520,9 +520,9 @@ export interface FileRouteTypes {
     | '/logs'
     | '/mirror'
     | '/system-monitor'
-    | '/m/$link'
     | '/hub/$modelId'
     | '/local-api-server/logs'
+    | '/m/$link'
     | '/project/$projectId'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -549,9 +549,9 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MirrorRoute: typeof MirrorRoute
   SystemMonitorRoute: typeof SystemMonitorRoute
-  MLinkRoute: typeof MLinkRoute
   HubModelIdRoute: typeof HubModelIdRoute
   LocalApiServerLogsRoute: typeof LocalApiServerLogsRoute
+  MLinkRoute: typeof MLinkRoute
   ProjectProjectIdRoute: typeof ProjectProjectIdRoute
   SettingsAppKeysRoute: typeof SettingsAppKeysRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
@@ -577,9 +577,9 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MirrorRoute: MirrorRoute,
   SystemMonitorRoute: SystemMonitorRoute,
-  MLinkRoute: MLinkRoute,
   HubModelIdRoute: HubModelIdRoute,
   LocalApiServerLogsRoute: LocalApiServerLogsRoute,
+  MLinkRoute: MLinkRoute,
   ProjectProjectIdRoute: ProjectProjectIdRoute,
   SettingsAppKeysRoute: SettingsAppKeysRoute,
   SettingsAssistantRoute: SettingsAssistantRoute,
@@ -614,9 +614,9 @@ export const routeTree = rootRoute
         "/logs",
         "/mirror",
         "/system-monitor",
-        "/m/$link",
         "/hub/$modelId",
         "/local-api-server/logs",
+        "/m/$link",
         "/project/$projectId",
         "/settings/app-keys",
         "/settings/assistant",
@@ -649,14 +649,14 @@ export const routeTree = rootRoute
     "/system-monitor": {
       "filePath": "system-monitor.tsx"
     },
-    "/m/$link": {
-      "filePath": "m/$link.tsx"
-    },
     "/hub/$modelId": {
       "filePath": "hub/$modelId.tsx"
     },
     "/local-api-server/logs": {
       "filePath": "local-api-server/logs.tsx"
+    },
+    "/m/$link": {
+      "filePath": "m/$link.tsx"
     },
     "/project/$projectId": {
       "filePath": "project/$projectId.tsx"
