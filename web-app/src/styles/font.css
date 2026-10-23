@@ -67,32 +67,31 @@
 
 /* Font choices in Settings > Interface (SIL Open Font License 1.1): one
    variable file each, latin subset; a browser downloads one only when it is
-   used (Literata is the default) */
+   used (Figtree is the default) */
 @font-face {
-  font-family: 'Literata';
+  font-family: 'Figtree';
   font-display: swap;
-  src: url('/fonts/Literata/Literata.woff2') format('woff2');
-  font-weight: 400 700;
+  src: url('/fonts/Figtree/Figtree.woff2') format('woff2');
+  font-weight: 300 900;
 }
 
 @font-face {
-  font-family: 'Atkinson Hyperlegible Next';
+  font-family: 'Inter';
   font-display: swap;
-  src: url('/fonts/AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext.woff2')
-    format('woff2');
-  font-weight: 400 700;
+  src: url('/fonts/Inter/Inter.woff2') format('woff2');
+  font-weight: 100 900;
 }
 
 @font-face {
-  font-family: 'Merriweather';
+  font-family: 'Geist';
   font-display: swap;
-  src: url('/fonts/Merriweather/Merriweather.woff2') format('woff2');
-  font-weight: 400 700;
+  src: url('/fonts/Geist/Geist.woff2') format('woff2');
+  font-weight: 100 900;
 }
 
 @font-face {
-  font-family: 'Lexend';
+  font-family: 'Public Sans';
   font-display: swap;
-  src: url('/fonts/Lexend/Lexend.woff2') format('woff2');
-  font-weight: 400 700;
+  src: url('/fonts/PublicSans/PublicSans.woff2') format('woff2');
+  font-weight: 100 900;
 }

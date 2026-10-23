@@ -42,7 +42,7 @@
 :root {
   --font-code:
     'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --app-font: 'Literata', Georgia, 'Times New Roman', serif;
+  --app-font: 'Figtree', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* Button */
   --radius: 0.625rem;
   --font-size-base: 15px;
