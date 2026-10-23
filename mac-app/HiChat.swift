@@ -776,6 +776,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     tellMirror(["command": "toggle", "window": String(panel.windowNumber)])
   }
 
+  /// A key was typed: tells the mirror helper, if it's running.
+  func keyTyped() {
+    guard mirrorTask?.isRunning == true else { return }
+    DistributedNotificationCenter.default().postNotificationName(
+      mirrorNote, object: nil, userInfo: ["command": "typed"], deliverImmediately: true)
+  }
+
   func hideMirror() {
     if mirrorTask?.isRunning == true { tellMirror(["command": "hide"]) }
   }
@@ -1351,6 +1358,11 @@ final class Keys {
       return flagsChanged(event)
     case .keyDown:
       lone = nil
+      // Typing (not a shortcut): the mirror's pointer view may look for
+      // where the screen changed, in apps that don't report a text cursor
+      if !event.flags.contains(.maskCommand) && !event.flags.contains(.maskControl) {
+        later { $0.keyTyped() }
+      }
       return keyDown(event)
     case .keyUp:
       let key = event.getIntegerValueField(.keyboardEventKeycode)
