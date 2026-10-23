@@ -774,13 +774,21 @@ describe('dictation', () => {
 })
 
 describe('auto-stop on silence', () => {
-  it('stops only after 2 minutes without sound, and only when on', async () => {
+  it('stops only after 2 minutes without sound', async () => {
     const { silentTooLong, SILENCE_STOP_MS } = await import('../dictation')
     const rec = { lastSound: 1_000 }
-    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS - 1, true)).toBe(false)
-    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS, true)).toBe(true)
-    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS, false)).toBe(false)
-    expect(silentTooLong({}, 10 * SILENCE_STOP_MS, true)).toBe(false)
+    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS - 1)).toBe(false)
+    expect(silentTooLong(rec, 1_000 + SILENCE_STOP_MS)).toBe(true)
+    expect(silentTooLong({}, 10 * SILENCE_STOP_MS)).toBe(false)
+  })
+
+  it("doesn't start while dictation is off on this device", async () => {
+    const { startDictation, useDictation } = await import('../dictation')
+    const { useDictationEnabled } = await import('@/hooks/useDictationEnabled')
+    useDictationEnabled.setState({ on: false })
+    await startDictation()
+    expect(useDictation.getState().status).toBe('idle')
+    useDictationEnabled.setState({ on: true })
   })
 
   it('counts a voice as sound and a quiet room as silence', async () => {

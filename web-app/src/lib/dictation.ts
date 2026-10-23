@@ -32,7 +32,7 @@ import {
   warmJudges,
 } from '@/lib/dictationJudge'
 import { withCodingTerms } from '@/lib/keyTerms'
-import { useDictationAutoStop } from '@/hooks/useDictationAutoStop'
+import { useDictationEnabled } from '@/hooks/useDictationEnabled'
 
 /**
  * Dictation: speech heard by your selected microphone, streamed to live
@@ -100,6 +100,11 @@ export function setDictationReduceEcho(on: boolean) {
     /* Storage blocked */
   }
   switchMic()
+}
+
+/** Dictation turned off on this device: the open mic is let go. */
+export function letGoOfMic() {
+  if (!recording) closeMic()
 }
 
 const KEEP_MIC_STORAGE_KEY = 'dictation-keep-mic'
@@ -180,28 +185,19 @@ let failedAudio: Float32Array | undefined
 /** A dictation stops by itself after this long. */
 export const MAX_DICTATION_MS = 9.5 * 60 * 1000
 /**
- * With auto-stop on (the header button), a dictation stops by itself after
- * this long without sound: one left running streams to all three paid
+ * A dictation stops by itself after this long without sound: one left running streams to all three paid
  * engines the whole time (23 Oct: sessions left on for 7 to 100+ minutes).
  */
 export const SILENCE_STOP_MS = 2 * 60 * 1000
 /** Quieter than this (RMS) counts as silence: a quiet room, not a voice. */
 const SOUND_RMS = 0.015
 
-/**
- * Whether this recording has been silent too long and should stop: auto-stop
- * on, and no sound for SILENCE_STOP_MS.
- */
+/** Whether this recording has had no sound for SILENCE_STOP_MS. */
 export function silentTooLong(
   rec: Pick<Recording, 'lastSound'>,
-  now: number,
-  autoStop: boolean
+  now: number
 ): boolean {
-  return (
-    autoStop &&
-    rec.lastSound !== undefined &&
-    now - rec.lastSound >= SILENCE_STOP_MS
-  )
+  return rec.lastSound !== undefined && now - rec.lastSound >= SILENCE_STOP_MS
 }
 
 /** Shorter than this is a slip of the key: nothing is sent. */
@@ -477,10 +473,14 @@ let readied = false
  */
 export function readyMicEarly() {
   if (readied || typeof window === 'undefined') return
+  if (!useDictationEnabled.getState().on) return
   readied = true
   if (!navigator.mediaDevices?.getUserMedia) return
   if (typeof AudioWorkletNode === 'undefined') return
-  const wanted = async () => getKeepMicReady() && (await micAllowed())
+  const wanted = async () =>
+    useDictationEnabled.getState().on &&
+    getKeepMicReady() &&
+    (await micAllowed())
   void wanted().then(async (yes) => {
     if (!yes || early || mic || opening) return
     try {
@@ -563,11 +563,7 @@ export function onBlock(rec: Recording, block: Float32Array) {
   if (useDictation.getState().level !== level) useDictation.setState({ level })
   const now = Date.now()
   if (rec.lastSound === undefined || loudness >= SOUND_RMS) rec.lastSound = now
-  else if (
-    rec === recording &&
-    !rec.autoStopped &&
-    silentTooLong(rec, now, useDictationAutoStop.getState().on)
-  ) {
+  else if (rec === recording && !rec.autoStopped && silentTooLong(rec, now)) {
     rec.autoStopped = true
     toast('Dictation stopped after 2 minutes of silence')
     void stopDictation()
@@ -786,6 +782,12 @@ let generation = 0
 
 export async function startDictation() {
   if (useDictation.getState().status !== 'idle') return
+  if (!useDictationEnabled.getState().on) {
+    toast(
+      'Dictation is off on this device: turn it on with the mic in the chat header'
+    )
+    return
+  }
   if (
     !navigator.mediaDevices?.getUserMedia ||
     typeof AudioWorkletNode === 'undefined'

@@ -56,5 +56,21 @@ export function useSmoothText(target: string, live: boolean): string {
   }, [animate, target])
 
   if (!animate) return target
-  return target.slice(0, Math.min(shown, shownRef.current))
+  return wholeWords(target, Math.min(shown, shownRef.current))
+}
+
+/**
+ * The text up to `end`, never cutting a word: a word that grew a letter at a
+ * time jumped to the next line once it no longer fit, so lines jittered as
+ * the answer came in. The word `end` falls in is shown whole if it has
+ * arrived; one still arriving waits until it has.
+ */
+export function wholeWords(text: string, end: number): string {
+  if (end >= text.length) return text
+  if (end <= 0) return ''
+  if (/\s/.test(text[end - 1])) return text.slice(0, end)
+  const rest = text.slice(end).search(/\s/)
+  if (rest >= 0) return text.slice(0, end + rest)
+  const back = text.slice(0, end).search(/\s\S*$/)
+  return back >= 0 ? text.slice(0, back + 1) : ''
 }
