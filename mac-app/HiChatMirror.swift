@@ -13,8 +13,10 @@
 // text cursor while you type. Hi-chat reads the text cursor (it has
 // Accessibility for remote control) and sends it here:
 //   { command = "caret", at = "x,y" }   (at = "" when there is none)
-// Without those reports this helper reads it itself, if it may. Apps that
-// don't report a text cursor are followed by the mouse.
+// Without those reports this helper reads it itself, if it may. For apps
+// that don't report a text cursor (many web editors), Hi-chat says when a
+// key is typed ({ command = "typed" }) and the view goes to where the screen
+// changed just then: the letters appearing.
 //   { command = "hide" }   { command = "quit" }
 // fn + Left sends "toggle", fn + Shift + Left sends "hide".
 //
@@ -166,6 +168,12 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   var caretReports = false
   var caretWhy = ""
   let status = NSTextField(labelWithString: "")
+  // Typing found on the screen (apps that don't report a text cursor)
+  var latestSurface: IOSurface?
+  var streamFrame = NSRect.zero
+  var visualPoint: NSPoint?
+  var followingVisual = false
+  var comparing = false
 
   override init() {
     panel = MirrorPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
@@ -314,7 +322,8 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   func handle(_ command: String, window: CGWindowID?) {
     if let window, window != 0 { janWindow = window }
     switch command {
-    case "caret": return // handled with its position (caretNote)
+    case "caret": return // handled with its position (caretReported)
+    case "typed": typed(); return
     case "toggle":
       if !panel.isVisible {
         mode = .jan
@@ -355,6 +364,8 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     let text: String
     if followingCaret {
       text = "Following your typing"
+    } else if followingVisual {
+      text = "Following your typing (from the screen)"
     } else {
       switch caretWhy {
       case "no-permission": text = "Following the mouse · Hi-chat needs Accessibility"
@@ -375,6 +386,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     if mouse != lastMouse {
       lastMouse = mouse
       followingCaret = false
+      followingVisual = false
     }
     ticks += 1
     if ticks % caretEvery == 0 {
@@ -384,7 +396,82 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       lastCaret = caret
     }
     if followingCaret, let caret = lastCaret { return caret }
+    if followingVisual, let seen = visualPoint { return seen }
     return mouse
+  }
+
+  // MARK: Typing seen on the screen
+
+  /// A small grey copy of the screen: one sample every `step` pixels.
+  struct Snapshot {
+    let cols: Int, rows: Int, step: Int, width: Int, height: Int
+    let lum: [UInt8]
+  }
+
+  /// The newest frame, sampled now (the frame is reused for later ones).
+  func snapshot() -> Snapshot? {
+    guard let surface = latestSurface else { return nil }
+    IOSurfaceLock(surface, .readOnly, nil)
+    defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+    let width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface)
+    let row = IOSurfaceGetBytesPerRow(surface)
+    let base = IOSurfaceGetBaseAddress(surface).assumingMemoryBound(to: UInt8.self)
+    let step = 4
+    let cols = width / step, rows = height / step
+    guard cols > 0, rows > 0 else { return nil }
+    var lum = [UInt8](repeating: 0, count: cols * rows)
+    for r in 0..<rows {
+      let line = base + r * step * row
+      for c in 0..<cols {
+        let px = line + c * step * 4 // BGRA
+        lum[r * cols + c] = UInt8((Int(px[0]) + 2 * Int(px[1]) + Int(px[2])) >> 2)
+      }
+    }
+    return Snapshot(cols: cols, rows: rows, step: step, width: width, height: height, lum: lum)
+  }
+
+  /// A key was typed. When the app doesn't report its text cursor, compare
+  /// the screen now with a moment later and follow the small patch that
+  /// changed: the letters appearing.
+  func typed() {
+    let reportsCursor = caretReports ? reportedCaret != nil : lastCaret != nil
+    guard mode == .pointer, panel.isVisible, !reportsCursor, !comparing,
+          let before = snapshot() else { return }
+    comparing = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+      MainActor.assumeIsolated { self?.compareTyping(before) }
+    }
+  }
+
+  func compareTyping(_ before: Snapshot) {
+    comparing = false
+    guard let after = snapshot(), after.cols == before.cols, after.rows == before.rows,
+          streamFrame.width > 0 else { return }
+    // Screen point <-> sample, for the streamed display
+    let sx = CGFloat(after.width) / streamFrame.width / CGFloat(after.step)
+    let sy = CGFloat(after.height) / streamFrame.height / CGFloat(after.step)
+    // macOS hides the mouse pointer as you type: that's a change, not typing
+    let mouse = NSEvent.mouseLocation
+    let mc = Int((mouse.x - streamFrame.minX) * sx)
+    let mr = Int((streamFrame.maxY - mouse.y) * sy)
+    let near = Int(48 * sx)
+    var minC = Int.max, minR = Int.max, maxC = -1, maxR = -1, changed = 0
+    for i in 0..<after.lum.count where abs(Int(after.lum[i]) - Int(before.lum[i])) > 24 {
+      let c = i % after.cols, r = i / after.cols
+      if abs(c - mc) < near && abs(r - mr) < near { continue }
+      changed += 1
+      minC = min(minC, c); maxC = max(maxC, c)
+      minR = min(minR, r); maxR = max(maxR, r)
+    }
+    // Typing changes a small patch; scrolling or a new page changes a lot
+    guard changed >= 3, changed < after.lum.count / 50,
+          maxC - minC < after.cols / 3, maxR - minR < after.rows / 4
+    else { return }
+    // The right end of what changed: where the newest letter is
+    visualPoint = NSPoint(x: streamFrame.minX + CGFloat(maxC) / sx,
+                          y: streamFrame.maxY - CGFloat(minR + maxR) / 2 / sy)
+    followingVisual = true
+    followingCaret = false
   }
 
   /// The screen the pointer view follows (the pointer's, or the text cursor's).
@@ -404,6 +491,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
     stream = nil
     area = nil
     view.picture.contents = nil
+    latestSurface = nil
     let screen = pointerScreen()
     streamDisplay = mode == .pointer ? screen.flatMap(displayID) : nil
     Task {
@@ -439,6 +527,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
           config.width = Int(CGFloat(display.width) * screen.backingScaleFactor)
           config.height = Int(CGFloat(display.height) * screen.backingScaleFactor)
           config.showsCursor = true
+          streamFrame = screen.frame
           view.picture.contentsGravity = .resize
           followPointer()
         }
@@ -468,7 +557,8 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       restart() // the pointer moved to another display
       return
     }
-    let p = followingCaret ? (lastCaret ?? NSEvent.mouseLocation) : NSEvent.mouseLocation
+    let p = followingCaret ? (lastCaret ?? NSEvent.mouseLocation)
+      : followingVisual ? (visualPoint ?? NSEvent.mouseLocation) : NSEvent.mouseLocation
     let full = screen.frame
     let w = min(panel.frame.width, full.width), h = min(panel.frame.height, full.height)
     var a: NSRect
@@ -511,6 +601,7 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       CATransaction.begin()
       CATransaction.setDisableActions(true)
       self.view.picture.contents = surface
+      self.latestSurface = surface
       CATransaction.commit()
       CATransaction.flush()
     }
