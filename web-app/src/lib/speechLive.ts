@@ -222,6 +222,16 @@ export const SONIOX_LIVE_MODEL = 'stt-rt-v5'
  */
 const SONIOX_TERMS_CHARS = 1500
 
+/**
+ * Soniox is told to keep to English (language_hints_strict), so background
+ * speech in other languages isn't written down. If a model ever refuses the
+ * setting, later clips go without it rather than failing every time.
+ */
+let sonioxStrict = true
+export function resetSonioxStrict() {
+  sonioxStrict = true
+}
+
 /** Plain lowercase words ("filter", "star schema") the engines already know. */
 const isEverydayWord = (term: string) => /^[a-z][a-z' -]*$/.test(term)
 
@@ -295,6 +305,7 @@ export class SonioxLiveTranscriber {
               sample_rate: TARGET_SAMPLE_RATE,
               num_channels: 1,
               language_hints: ['en'],
+              ...(sonioxStrict ? { language_hints_strict: true } : {}),
               context: { terms: sonioxTerms(keyterms, terms) },
             })
           )
@@ -392,6 +403,8 @@ export class SonioxLiveTranscriber {
       return
     }
     if (msg.error_code) {
+      if (msg.error_message?.includes('language_hints_strict'))
+        sonioxStrict = false
       return this.abort(
         new Error(`Soniox live: ${msg.error_message ?? msg.error_code}`)
       )
