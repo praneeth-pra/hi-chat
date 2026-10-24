@@ -140,6 +140,19 @@ const LeftPanel = () => {
     return filteredThreads.filter((t) => !t.isFavorite && !t.metadata?.project)
   }, [filteredThreads])
 
+  // A compact window opens on the chat, not on the drawer, and Esc closes it
+  useEffect(() => {
+    if (window.innerWidth <= 768) setLeftPanel(false)
+  }, [setLeftPanel])
+  useEffect(() => {
+    if (!isSmallScreen || !open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setLeftPanel(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isSmallScreen, open, setLeftPanel])
+
   // Disable body scroll when panel is open on small screens
   useEffect(() => {
     if (isSmallScreen && open) {
@@ -175,8 +188,10 @@ const LeftPanel = () => {
           // Resizable context: full height and width, no margins
           isResizableContext && 'h-full w-full',
           // Small screen context: fixed positioning and styling
+          // Compact window: a drawer over the chat, narrow enough that the
+          // chat still shows beside it and a click there closes it
           isSmallScreen &&
-            'fixed h-full pb-[calc(env(safe-area-inset-bottom)+env(safe-area-inset-top))] bg-main-view z-50 md:border border-left-panel-fg/10 px-1 w-full md:w-48',
+            'fixed h-full pb-[calc(env(safe-area-inset-bottom)+env(safe-area-inset-top))] bg-main-view z-50 border-r border-left-panel-fg/10 shadow-[8px_0_32px_rgba(0,0,0,0.25)] px-1 w-[min(18rem,85%)]',
           // Default context: original styling
           !isResizableContext &&
             !isSmallScreen &&

@@ -96,28 +96,28 @@ function AssistantContent() {
   return (
     <div className="flex h-full flex-col justify-center">
       <HeaderPage>
-        <div className="flex items-center justify-between w-full mr-2">
-          <span>{t('assistants:title')}</span>
+        <div className="flex items-center justify-between gap-2 w-full">
+          <span className="truncate">{t('assistants:title')}</span>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              className="relative z-50"
+              className="relative z-20"
               title="Download all assistants as a file"
               onClick={() => downloadAssistants(assistants)}
             >
               <IconDownload size={16} />
-              Export
+              <span className="hidden sm:inline">Export</span>
             </Button>
             <Button
               variant="outline"
               size="sm"
-              className="relative z-50"
+              className="relative z-20"
               title="Add assistants from an exported file"
               onClick={() => importInput.current?.click()}
             >
               <IconUpload size={16} />
-              Import
+              <span className="hidden sm:inline">Import</span>
             </Button>
             <input
               ref={importInput}
@@ -136,17 +136,18 @@ function AssistantContent() {
                 setOpen(true)
               }}
               size="sm"
-              className="relative z-50"
+              className="relative z-20"
             >
               <IconCirclePlus size={16} />
-              Add Assistant
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add Assistant</span>
             </Button>
           </div>
         </div>
       </HeaderPage>
       <div className="flex h-full w-full">
         <SettingsMenu />
-        <div className="space-y-3 p-4">
+        <div className="space-y-3 p-4 flex-1 min-w-0 overflow-y-auto">
           {assistants
             .slice()
             .sort((a, b) => a.created_at - b.created_at)

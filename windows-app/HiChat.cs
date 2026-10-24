@@ -283,7 +283,8 @@ sealed class ChatWindow : Form
     else
     {
       var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 900);
-      Size = new Size(Math.Min(1000, area.Width), Math.Min(800, area.Height));
+      // Hi-chat is designed for a compact window beside your other apps
+      Size = new Size(Math.Min(LogicalToDeviceUnits(480), area.Width), Math.Min(LogicalToDeviceUnits(820), area.Height));
       Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
     }
     PlaceOnHomeScreen();

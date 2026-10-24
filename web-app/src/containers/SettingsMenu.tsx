@@ -123,7 +123,7 @@ const SettingsMenu = () => {
   return (
     <>
       <button
-        className="fixed top-[calc(10px+env(safe-area-inset-top))] right-4 sm:hidden size-5 cursor-pointer items-center justify-center rounded hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out data-[state=open]:bg-main-view-fg/10 z-20"
+        className="fixed top-[calc(8px+env(safe-area-inset-top))] right-2 sm:hidden size-8 flex cursor-pointer items-center justify-center rounded-lg hover:bg-main-view-fg/10 transition-all duration-200 ease-in-out data-[state=open]:bg-main-view-fg/10 z-40"
         onClick={toggleMenu}
         aria-label="Toggle settings menu"
       >
@@ -133,12 +133,19 @@ const SettingsMenu = () => {
           <IconMenu2 size={18} className="text-main-view-fg relative z-20" />
         )}
       </button>
+      {/* Compact window: the menu slides over the page; a click beside it closes it */}
+      {isMenuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 sm:hidden"
+          onClick={() => setIsMenuOpen(false)}
+        />
+      )}
       <div
         className={cn(
           'h-full w-48 shrink-0 px-2 pt-3 border-r border-main-view-fg/[0.06] bg-main-view',
           'sm:flex',
           isMenuOpen
-            ? 'flex fixed sm:hidden top-[calc(10px+env(safe-area-inset-top))] z-10 m-1 h-[calc(100%-8px)] border-r-0 border-l bg-main-view right-0 py-8 rounded-tr-lg rounded-br-lg'
+            ? 'flex fixed sm:hidden inset-y-0 right-0 z-30 w-56 h-full border-r-0 border-l pt-12 shadow-[-8px_0_32px_rgba(0,0,0,0.25)]'
             : 'hidden'
         )}
       >
