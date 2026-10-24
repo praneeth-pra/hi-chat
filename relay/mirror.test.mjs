@@ -98,6 +98,28 @@ test('a reply saved under a new id still ends the stream', () => {
   assert.equal(late.got.filter((m) => m.t === 'stream').length, 0)
 })
 
+test('scroll positions keep their exact px, cleaned', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(
+    JSON.stringify({ t: 'scroll', id: 'a1', f: 0.2, px: 120.4, h: 600 })
+  )
+  assert.deepEqual(lastOf(viewer, 'scroll'), {
+    t: 'scroll',
+    id: 'a1',
+    f: 0.2,
+    px: 120,
+    h: 600,
+  })
+  sender.onmessage(
+    JSON.stringify({ t: 'scroll', id: 'a1', f: 0.3, px: 'x', h: -1 })
+  )
+  assert.deepEqual(lastOf(viewer, 'scroll'), { t: 'scroll', id: 'a1', f: 0.3 })
+})
+
 test('viewers hear how much of the reply Hi-chat shows', () => {
   const hub = createMirrorHub()
   const sender = fakeSocket()

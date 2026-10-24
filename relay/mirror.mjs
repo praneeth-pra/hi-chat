@@ -394,6 +394,14 @@ export function createMirrorHub({
               t: 'scroll',
               id: m.id.slice(0, 100),
               f: Math.min(1, Math.max(0, m.f)),
+              // Exactly how far into it, and its height (px)
+              ...(Number.isFinite(m.px) &&
+              Number.isFinite(m.h) &&
+              m.h > 0 &&
+              Math.abs(m.px) <= 1e6 &&
+              m.h <= 1e6
+                ? { px: Math.round(m.px), h: Math.round(m.h) }
+                : {}),
             }
           : null
     if (!clean) return

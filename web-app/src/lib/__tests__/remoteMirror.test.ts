@@ -118,10 +118,34 @@ describe('remote mirror', () => {
       m.getBoundingClientRect = () => box(top, 400)
       el.append(m)
     }
-    // a1 runs from 0 to 400, and the view's top is at 100: a quarter in
-    expect(readScroll(el)).toEqual({ t: 'scroll', id: 'a1', f: 0.25 })
+    // a1 runs from 0 to 400, and the view's top is at 100: a quarter in,
+    // exactly 100 px
+    expect(readScroll(el)).toEqual({
+      t: 'scroll',
+      id: 'a1',
+      f: 0.25,
+      px: 100,
+      h: 400,
+    })
+    // At the end of the chat it still says where, rather than "the end",
+    // so a viewer doesn't jump between the two as you scroll near it
     el.scrollTop = 2490
-    expect(readScroll(el)).toEqual({ t: 'scroll', bottom: true })
+    expect(readScroll(el)).toMatchObject({ id: 'a1', px: 100 })
+  })
+
+  it('viewer state keeps the exact scroll position', () => {
+    const s = applyMirrorMessage(emptyMirror, {
+      t: 'scroll',
+      id: 'a1',
+      f: 0.2,
+      px: -8,
+      h: 600,
+    })
+    expect(s.scroll).toEqual({ id: 'a1', f: 0.2, px: -8, h: 600 })
+    // An older Hi-chat sends only the fraction
+    expect(
+      applyMirrorMessage(emptyMirror, { t: 'scroll', id: 'a1', f: 0.2 }).scroll
+    ).toEqual({ id: 'a1', f: 0.2 })
   })
 
   it('viewer state keeps where Hi-chat is scrolled to', () => {
