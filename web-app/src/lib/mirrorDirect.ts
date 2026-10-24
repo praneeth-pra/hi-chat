@@ -15,6 +15,8 @@ export const SEQUENCED = new Set([
   'phase',
   'scroll',
   'shown',
+  'look',
+  'typing',
 ])
 
 // Data channel messages much over 64 KB aren't safe everywhere: a longer one

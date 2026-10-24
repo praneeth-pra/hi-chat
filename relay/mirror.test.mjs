@@ -533,3 +533,58 @@ test("a link's viewer is marked, so Hi-chat never lets it control", () => {
   hub.join(fakeSocket(), 'view', { link: 'L'.repeat(24) })
   assert.equal(lastOf(app, 'peer').link, true)
 })
+
+test("viewers get Hi-chat's look and message box, late ones too", () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(
+    JSON.stringify({
+      t: 'look',
+      width: 768.4,
+      dark: true,
+      vars: {
+        '--font-size-base': '16px',
+        '--app-main-view': 'rgba(23, 23, 23, 1)',
+        // Nothing that loads anything, or breaks out of the value
+        '--bad': 'url(https://evil.example/x.png)',
+        '--worse': 'red; } body { display: none',
+        'not-a-var': 'red',
+      },
+    })
+  )
+  assert.deepEqual(lastOf(viewer, 'look'), {
+    t: 'look',
+    width: 768,
+    dark: true,
+    vars: {
+      '--font-size-base': '16px',
+      '--app-main-view': 'rgba(23, 23, 23, 1)',
+    },
+  })
+  sender.onmessage(JSON.stringify({ t: 'typing', text: 'What is' }))
+  assert.deepEqual(lastOf(viewer, 'typing'), { t: 'typing', text: 'What is' })
+
+  const late = fakeSocket()
+  hub.join(late, 'view')
+  assert.equal(lastOf(late, 'look')?.width, 768)
+  assert.deepEqual(lastOf(late, 'typing'), { t: 'typing', text: 'What is' })
+  // An emptied box isn't replayed to the next viewer
+  sender.onmessage(JSON.stringify({ t: 'typing', text: '' }))
+  const later = fakeSocket()
+  hub.join(later, 'view')
+  assert.equal(lastOf(later, 'typing'), undefined)
+})
+
+test('answers keep how long the model thought', () => {
+  const clean = cleanSnapshot({
+    msgs: [{ id: 'a', role: 'assistant', text: 'Hi', thinking: 2.4 }],
+  })
+  assert.equal(clean.msgs[0].thinking, 2.4)
+  const bad = cleanSnapshot({
+    msgs: [{ id: 'a', role: 'assistant', text: 'Hi', thinking: 'x' }],
+  })
+  assert.equal(bad.msgs[0].thinking, undefined)
+})

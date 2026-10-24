@@ -5,10 +5,11 @@ import {
   diffMessages,
   emptyMirror,
   messageImages,
-  mirrorStreamTap,
   mirrorShownTap,
+  mirrorStreamTap,
   mirrorMessages,
   mirrorSocketUrl,
+  readLook,
   readScroll,
   startRemoteMirror,
   streamUpdate,
@@ -16,6 +17,7 @@ import {
 import { markdownBlocks } from '../markdownBlocks'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
+import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 
 const msg = (id: string, role: string, text: string) =>
@@ -297,6 +299,21 @@ describe('remote mirror', () => {
       for (const m of ws.sent.slice(0, 5)) s = applyMirrorMessage(s, m)
       expect(s.stream).toBeNull()
       expect(s.msgs.map((m) => m.text)).toEqual(['Hi', 'Hello there'])
+    })
+
+    it("sends what's typed in the message box", async () => {
+      const ws = start()
+      ws.hear({ t: 'viewers', n: 1 })
+      await vi.advanceTimersByTimeAsync(100)
+      usePrompt.setState({ prompt: 'And then' })
+      await vi.advanceTimersByTimeAsync(100)
+      usePrompt.setState({ prompt: 'And then?' })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(ws.sent.slice(1)).toEqual([
+        { t: 'typing', text: 'And then' },
+        { t: 'typing', text: 'And then?' },
+      ])
+      usePrompt.setState({ prompt: '' })
     })
 
     it('does not run on the viewer page itself', async () => {
@@ -637,5 +654,38 @@ describe('mirror: a reply goes out the moment it arrives', () => {
       globalThis.requestAnimationFrame = raf
       scroller.remove()
     }
+  })
+
+  it("viewer takes Hi-chat's look and its message box", () => {
+    let s = applyMirrorMessage(emptyMirror, {
+      t: 'look',
+      width: 768,
+      dark: true,
+      vars: { '--font-size-base': '16px', '--x': 'url(a.png)', 'bad': 'red' },
+    })
+    expect(s.look).toEqual({
+      width: 768,
+      dark: true,
+      vars: { '--font-size-base': '16px' },
+    })
+    s = applyMirrorMessage(s, { t: 'typing', text: 'Why' })
+    expect(s.typing).toBe('Why')
+  })
+
+  it("reads the chat's look: its variables, theme and column", () => {
+    const root = document.createElement('div')
+    root.style.setProperty('--font-size-base', '16px')
+    root.style.setProperty('color', 'red')
+    root.classList.add('dark')
+    const scroller = document.createElement('div')
+    const column = document.createElement('div')
+    Object.defineProperty(column, 'clientWidth', { value: 768 })
+    scroller.appendChild(column)
+    expect(readLook(root, scroller)).toEqual({
+      t: 'look',
+      width: 768,
+      dark: true,
+      vars: { '--font-size-base': '16px' },
+    })
   })
 })

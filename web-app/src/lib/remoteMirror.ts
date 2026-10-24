@@ -13,6 +13,7 @@ import type { AccuracyReview } from '@/lib/accuracyReview'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
+import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
 import {
@@ -56,6 +57,8 @@ export type MirrorMessage = {
   images?: string[]
   /** An answer stopped before it finished */
   stopped?: boolean
+  /** How long an answer's model thought, in seconds ("Thought for 2s") */
+  thinking?: number
   review?: MirrorReview
   /** Tools an answer used */
   tools?: { name: string; pending: boolean }[]
@@ -87,6 +90,10 @@ export function mirrorMessages(messages: ThreadMessage[]): MirrorMessage[] {
         text: messageText(m),
       }
       if (m.status === MessageStatus.Stopped) msg.stopped = true
+      const thinking = (m.metadata?.timings as { thinking_s?: unknown })
+        ?.thinking_s
+      if (typeof thinking === 'number' && Number.isFinite(thinking))
+        msg.thinking = thinking
       const review = m.metadata?.accuracyReview as AccuracyReview | undefined
       if (review)
         msg.review = {
@@ -181,12 +188,37 @@ export function mirrorStreamTap(threadId: string, text: string) {
 
 // The chat reports how much of a reply's answer it shows each time it
 // reveals more (ThreadContent), so viewers show exactly that, in step
-let shownTap: ((threadId: string, id: string, n: number) => void) | null =
-  null
+let shownTap: ((threadId: string, id: string, n: number) => void) | null = null
 
 /** How many characters of a reply's answer Hi-chat shows right now. */
 export function mirrorShownTap(threadId: string, id: string, n: number) {
   shownTap?.(threadId, id, n)
+}
+
+/** How Hi-chat looks, so /mirror can look the same. */
+export type MirrorLook = {
+  t: 'look'
+  /** The chat column's width, in px */
+  width: number
+  dark: boolean
+  /** Hi-chat's CSS variables (colours, font, font size) */
+  vars: Record<string, string>
+}
+
+/** Reads how the chat looks: the page's own CSS variables and its column. */
+export function readLook(root: HTMLElement, scroller: HTMLElement): MirrorLook {
+  const vars: Record<string, string> = {}
+  for (let i = 0; i < root.style.length; i++) {
+    const k = root.style[i]
+    if (k.startsWith('--')) vars[k] = root.style.getPropertyValue(k).trim()
+  }
+  const column = scroller.firstElementChild as HTMLElement | null
+  return {
+    t: 'look',
+    width: Math.round(column?.clientWidth ?? 0),
+    dark: root.classList.contains('dark'),
+    vars,
+  }
 }
 
 /**
@@ -195,7 +227,8 @@ export function mirrorShownTap(threadId: string, id: string, n: number) {
  * pixels, as the viewer's text wraps at its own width.
  */
 export type MirrorScroll =
-  { t: 'scroll'; bottom: true } | { t: 'scroll'; id: string; f: number }
+  | { t: 'scroll'; bottom: true }
+  | { t: 'scroll'; id: string; f: number }
 
 const AT_BOTTOM_PX = 40
 const MESSAGE = '[data-test-id^="message-"]'
@@ -290,6 +323,9 @@ export function startRemoteMirror({
   let sentPhase: string | null | undefined
   let sentStream: { id: string | null; text: string } = { id: null, text: '' }
   let sentScroll = ''
+  let sentLook = ''
+  // What the viewers have in the message box (a new one starts empty)
+  let sentTyping: string | undefined = ''
   let scrollFrame: number | undefined
   let streamCount = 0
   // The reply viewers follow, and how much of it they were told is shown
@@ -350,6 +386,8 @@ export function startRemoteMirror({
     sentStream = { id: null, text: '' }
     sentScroll = ''
     sentShown = -1
+    sentLook = ''
+    sentTyping = ''
   }
 
   // The reply being written. The chat gives it a new id on every update (and
@@ -465,16 +503,24 @@ export function startRemoteMirror({
           ? app.streamingContent
           : undefined
         : undefined
+    // What's being typed in the message box
+    const typing = usePrompt.getState().prompt
+    if (typing !== sentTyping) {
+      send({ t: 'typing', text: typing.slice(0, 20_000) })
+      sentTyping = typing
+    }
     if (!live) sendStream(null)
     else {
       const text = messageText(live)
       // The model's own pieces (tap) are usually ahead of what Hi-chat has
       // drawn: nothing to send then
-      if (!(
-        sentStream.id !== null &&
-        sentStream.text.startsWith(text) &&
-        sentStream.text.length >= text.length
-      ))
+      if (
+        !(
+          sentStream.id !== null &&
+          sentStream.text.startsWith(text) &&
+          sentStream.text.length >= text.length
+        )
+      )
         sendStream(text, live.id)
     }
     // Where the chat is scrolled to: measuring it makes the browser lay the
@@ -500,6 +546,17 @@ export function startRemoteMirror({
       '[data-thread-scroller]'
     )
     if (!scroller) return
+    // How it looks (theme, font, size, the column's width): read here, with
+    // the scroll, as it also lays the page out
+    const root = globalThis.document?.documentElement
+    if (root) {
+      const look = readLook(root, scroller)
+      const key = JSON.stringify(look)
+      if (key !== sentLook) {
+        sentLook = key
+        send(look)
+      }
+    }
     const at = readScroll(scroller)
     const scroll = JSON.stringify(at)
     if (scroll !== sentScroll) {
@@ -562,6 +619,8 @@ export function startRemoteMirror({
   const onVisible = () => {
     if (globalThis.document?.hidden) return
     resend()
+    // Another window may have been typing: send this one's box either way
+    sentTyping = undefined
     schedule()
   }
   globalThis.document?.addEventListener('visibilitychange', onVisible)
@@ -572,10 +631,26 @@ export function startRemoteMirror({
     if (target?.matches?.('[data-thread-scroller]')) scrollSoon()
   }
   globalThis.document?.addEventListener('scroll', onScroll, true)
+  // A new theme, font or size, or a resized window: send how it looks
+  const onResize = () => scrollSoon()
+  globalThis.addEventListener?.('resize', onResize)
+  const root = globalThis.document?.documentElement
+  const looks =
+    root && typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(() => viewers && scrollSoon())
+      : null
+  if (root)
+    looks?.observe(root, {
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+    })
   const unsubscribe = [
     useMessages.subscribe(schedule),
     useThreads.subscribe(schedule),
     useAppState.subscribe(schedule),
+    usePrompt.subscribe(schedule),
+    () => globalThis.removeEventListener?.('resize', onResize),
+    () => looks?.disconnect(),
     () =>
       globalThis.document?.removeEventListener('visibilitychange', onVisible),
     () => globalThis.document?.removeEventListener('scroll', onScroll, true),
@@ -630,6 +705,10 @@ export type MirrorState = {
   phase: 'searching' | 'drafting' | 'verifying' | null
   /** How much of a reply's answer Hi-chat shows right now */
   shown: { id: string; n: number } | null
+  /** How Hi-chat looks */
+  look: Omit<MirrorLook, 't'> | null
+  /** What is in Hi-chat's message box */
+  typing: string
 }
 
 export const emptyMirror: MirrorState = {
@@ -641,6 +720,8 @@ export const emptyMirror: MirrorState = {
   images: {},
   phase: null,
   shown: null,
+  look: null,
+  typing: '',
 }
 
 const PHASES = ['searching', 'drafting', 'verifying'] as const
@@ -714,6 +795,22 @@ export function applyMirrorMessage(
     if (same && n === state.shown!.n) return state
     return { ...state, shown: { id: m.id, n } }
   }
+  if (m?.t === 'look' && m.vars && typeof m.vars === 'object') {
+    const vars: Record<string, string> = {}
+    for (const [k, v] of Object.entries(m.vars))
+      if (/^--[\w-]+$/.test(k) && typeof v === 'string' && !/url\(/i.test(v))
+        vars[k] = v
+    return {
+      ...state,
+      look: {
+        width: typeof m.width === 'number' && m.width > 0 ? m.width : 0,
+        dark: m.dark === true,
+        vars,
+      },
+    }
+  }
+  if (m?.t === 'typing' && typeof m.text === 'string')
+    return m.text === state.typing ? state : { ...state, typing: m.text }
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
   if (m?.t === 'scroll') {
     if (m.bottom === true) return { ...state, scroll: { bottom: true } }

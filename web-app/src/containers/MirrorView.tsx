@@ -6,10 +6,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type RefObject,
 } from 'react'
 import {
   IconArrowDown,
+  IconCopy,
+  IconCopyCheck,
   IconGripVertical,
   IconLayoutSidebarRightCollapse,
   IconLoader2,
@@ -62,6 +65,7 @@ import {
   type MirrorMessage as MirrorMessageData,
   type MirrorState,
 } from '@/lib/remoteMirror'
+import { useTranslation } from '@/i18n/react-i18next-compat'
 import { cn } from '@/lib/utils'
 
 // The remote mirror's viewer: open /mirror on another signed-in computer to
@@ -235,6 +239,30 @@ function useMirror(link?: string) {
 }
 
 /**
+ * While Hi-chat says how it looks, this page looks the same: its colours,
+ * font and font size (its CSS variables), and dark or light. Put back as it
+ * was on leaving.
+ */
+function useLook(look: MirrorState['look']) {
+  useLayoutEffect(() => {
+    if (!look) return
+    const root = document.documentElement
+    const before = Object.keys(look.vars).map(
+      (k) => [k, root.style.getPropertyValue(k)] as const
+    )
+    const wasDark = root.classList.contains('dark')
+    for (const [k, v] of Object.entries(look.vars)) root.style.setProperty(k, v)
+    root.classList.toggle('dark', look.dark)
+    return () => {
+      for (const [k, v] of before)
+        if (v) root.style.setProperty(k, v)
+        else root.style.removeProperty(k)
+      root.classList.toggle('dark', wasDark)
+    }
+  }, [look])
+}
+
+/**
  * The mirror page: signed in at /mirror (every app's conversation, the one in
  * front showing), or through an app's own link at /m/<link> without login.
  */
@@ -242,6 +270,9 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   const { state, connected, lag, direct, controllable, sendInput } =
     useMirror(link)
   const cam = useCameraSender({ link })
+  useLook(state.look)
+  // Hi-chat's own column width, so lines break where they break there
+  const column = state.look?.width || TEXT_WIDTH
   // Open as last left; at first, open on a computer that sends its camera
   const [panelOpen, setPanelOpen] = useState(() => {
     const saved = stored(CAMERA_PANEL)
@@ -380,25 +411,25 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   const right = panelOpen ? PANEL_WIDTH : 0
   const screenWidth = cam.screen
     ? clampScreen(
-        split === null ? (bodyWidth - TEXT_WIDTH) / 2 - GAP : split * bodyWidth,
+        split === null ? (bodyWidth - column) / 2 - GAP : split * bodyWidth,
         bodyWidth,
         right
       )
     : 0
   const textLeft = Math.max(
     screenWidth ? screenWidth + GAP : 0,
-    (bodyWidth - TEXT_WIDTH) / 2
+    (bodyWidth - column) / 2
   )
   const text =
     wide && bodyWidth
       ? {
           width: Math.max(
             MIN_TEXT,
-            Math.min(TEXT_WIDTH, bodyWidth - right - GAP - textLeft)
+            Math.min(column, bodyWidth - right - GAP - textLeft)
           ),
           marginLeft: textLeft,
         }
-      : undefined
+      : { maxWidth: column }
 
   return (
     <div className="flex h-full flex-col bg-main-view text-main-view-fg">
@@ -504,7 +535,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
           </div>
           <div
             ref={scroller}
-            className="flex-1 overflow-y-auto px-4 py-6 lg:px-0"
+            className="flex-1 overflow-y-auto px-4 pt-4 pb-3 lg:px-0"
             onScroll={(e) => {
               const el = e.currentTarget
               if (Math.abs(el.scrollTop - placed.current) > 2)
@@ -519,7 +550,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             <div
               ref={content}
               style={text}
-              className="mx-auto flex max-w-md flex-col gap-6 text-base lg:mx-0 lg:max-w-none"
+              className="mx-auto flex w-full flex-col lg:mx-0"
             >
               {empty && <EmptyState tone={mirror.tone} />}
               {/* The reply being written sits in the list under the id the
@@ -532,6 +563,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
                     msg={m}
                     images={m.images?.map((k) => state.images[k])}
                     shown={state.shown?.id === m.id ? state.shown.n : undefined}
+                    last={!streaming && m === state.msgs[state.msgs.length - 1]}
                   />
                 )),
                 streaming && (
@@ -539,6 +571,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
                     key={streaming.id}
                     msg={streamingMsg(streaming)}
                     streaming
+                    last
                     shown={
                       state.shown?.id === streaming.id
                         ? state.shown.n
@@ -566,6 +599,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
               Latest
             </button>
           )}
+          <MirrorComposer text={state.typing} busy={!!streaming} style={text} />
         </div>
 
         {/* While the computer in Meet presents, its screen fills the left */}
@@ -1064,6 +1098,7 @@ const MirrorMessage = memo(
     images,
     streaming,
     shown,
+    last,
   }: {
     msg: MirrorMessageData
     /** Its screenshots, as they arrive (undefined until then) */
@@ -1071,19 +1106,22 @@ const MirrorMessage = memo(
     streaming?: boolean
     /** How much of its answer Hi-chat shows right now, while it reveals it */
     shown?: number
+    /** The last message (its buttons show, as in Hi-chat) */
+    last?: boolean
   }) {
+    // Spaced as Hi-chat's chat spaces its messages
     if (msg.role === 'user')
       return (
-        <div data-mid={msg.id || undefined} className="w-full">
+        <div data-mid={msg.id || undefined} className="mb-4 w-full">
           {msg.text && (
-            <div className="flex w-full justify-end break-words text-start">
+            <div className="flex w-full justify-end break-words pt-4 text-start">
               <div className="relative max-w-[90%] rounded-3xl bg-surface px-5 py-2.5 text-main-view-fg">
                 <RenderMarkdown content={msg.text} isUser />
               </div>
             </div>
           )}
           {!!msg.files?.length && (
-            <div className="mt-2 flex w-full justify-end">
+            <div className="mt-2 mb-2 flex w-full justify-end">
               <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
                 {msg.files.map((name, i) => (
                   <span
@@ -1097,23 +1135,28 @@ const MirrorMessage = memo(
             </div>
           )}
           {!!msg.images?.length && (
-            <div className="mt-2 flex w-full justify-end">
-              <div className="flex max-w-[90%] flex-wrap justify-end gap-2">
+            <div className="mb-2 flex w-full justify-end">
+              <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
                 {msg.images.map((key, i) => (
                   <MirrorImage key={key} src={images?.[i]} />
                 ))}
               </div>
             </div>
           )}
+          {/* Where Hi-chat has its edit and delete buttons */}
+          <div aria-hidden className="mt-1.5 h-4" />
         </div>
       )
-    return <MirrorAnswer msg={msg} streaming={streaming} shown={shown} />
+    return (
+      <MirrorAnswer msg={msg} streaming={streaming} shown={shown} last={last} />
+    )
   },
   // The same message, the same screenshots: nothing to draw again
   (a, b) =>
     a.msg === b.msg &&
     a.streaming === b.streaming &&
     a.shown === b.shown &&
+    a.last === b.last &&
     (a.images ?? []).length === (b.images ?? []).length &&
     (a.images ?? []).every((src, i) => src === b.images?.[i])
 )
@@ -1139,10 +1182,12 @@ function MirrorAnswer({
   msg,
   streaming,
   shown,
+  last,
 }: {
   msg: MirrorMessageData
   streaming?: boolean
   shown?: number
+  last?: boolean
 }) {
   const { reasoningSegment, textSegment } = useMemo(
     () => splitReasoning(msg.text),
@@ -1174,11 +1219,12 @@ function MirrorAnswer({
     return () => cancelAnimationFrame(frame)
   }, [shown, n, fresh, full.length])
   return (
-    <div data-mid={msg.id || undefined} className="w-full">
+    <div data-mid={msg.id || undefined} className="group/answer mb-4 w-full">
       {reasoningSegment && (
         <ThinkingBlock
           id={`mirror-${msg.id || 'streaming'}`}
           text={reasoningSegment}
+          seconds={msg.thinking}
         />
       )}
       {streaming && !reasoningSegment && !answer.trim() && (
@@ -1190,7 +1236,11 @@ function MirrorAnswer({
           <span className="relative size-2 rounded-full bg-current animate-[breathe-core_1.8s_ease-in-out_infinite]" />
         </span>
       )}
-      <RenderMarkdown content={answer} streamable isStreaming={!!streaming} />
+      <RenderMarkdown
+        content={answer}
+        streamable
+        isStreaming={!!streaming || answer.length < full.length}
+      />
       {msg.review && (
         <AccuracyReviewInfo review={msg.review as unknown as AccuracyReview} />
       )}
@@ -1211,6 +1261,81 @@ function MirrorAnswer({
           ))}
         </div>
       )}
+      {/* Where Hi-chat has its buttons: shown under the last answer, the
+          others on hover. Copy works here too */}
+      {!msg.tools?.length && (
+        <div
+          className={cn(
+            'mt-1 flex items-center gap-3 text-xs text-main-view-fg/45',
+            !last &&
+              'md:opacity-0 md:group-hover/answer:opacity-100 focus-within:opacity-100 transition-opacity'
+          )}
+        >
+          {!streaming && <MirrorCopy text={full} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MirrorCopy({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      title="Copy"
+      aria-label="Copy the answer"
+      onClick={() =>
+        navigator.clipboard
+          ?.writeText(text)
+          .then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1500)
+          })
+          .catch(() => {})
+      }
+      className="flex items-center gap-1 transition-colors hover:text-accent"
+    >
+      {copied ? <IconCopyCheck size={16} /> : <IconCopy size={16} />}
+    </button>
+  )
+}
+
+/**
+ * Hi-chat's message box, as it is: what is being typed there shows here as
+ * it is typed (read only), dimmed while an answer is written.
+ */
+function MirrorComposer({
+  text,
+  busy,
+  style,
+}: {
+  text: string
+  busy: boolean
+  style?: CSSProperties
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      style={style}
+      className="mx-auto w-full shrink-0 px-4 pt-2 pb-3 lg:mx-0 lg:px-0"
+    >
+      <div
+        className={cn(
+          'overflow-hidden rounded-3xl shadow-lg shadow-black/5',
+          busy && 'opacity-70'
+        )}
+      >
+        <div
+          aria-label="Hi-chat's message box"
+          className={cn(
+            'max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-3xl border border-main-view-fg/[0.08] bg-main-view px-4 py-4 text-[14px] leading-relaxed text-main-view-fg dark:bg-surface',
+            !text && 'text-main-view-fg/40'
+          )}
+        >
+          {text || t('common:placeholder.chatInput')}
+        </div>
+      </div>
     </div>
   )
 }
