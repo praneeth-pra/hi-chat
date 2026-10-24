@@ -22,7 +22,6 @@ import { localStorageKey } from '@/constants/localStorage'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useFavoriteModel } from '@/hooks/useFavoriteModel'
 import { predefinedProviders } from '@/consts/providers'
-import { isAutoVisionModel } from '@/lib/visionModels'
 import { useServiceHub } from '@/hooks/useServiceHub'
 import { PlatformFeatures } from '@/lib/platform/const'
 import { PlatformFeature } from '@/lib/platform/types'
@@ -345,8 +344,6 @@ const DropdownModelProvider = ({
           !provider.api_key?.length
         )
           return
-
-        if (isAutoVisionModel(provider.provider, modelItem.id)) return
 
         const capabilities = modelItem.capabilities || []
         const capabilitiesString = capabilities.join(' ')
