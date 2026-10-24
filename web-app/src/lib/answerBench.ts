@@ -131,7 +131,7 @@ export async function answerOnce(
   now: () => number = () => performance.now()
 ): Promise<AnswerRun> {
   // The same short-code rule a live answer gets
-  const system = withCodingRule(config.instructions, question)
+  const system = withCodingRule(config.instructions)
   const messages = [
     ...(system ? [{ role: 'system', content: system }] : []),
     { role: 'user', content: question },

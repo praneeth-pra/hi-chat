@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   CompletionMessagesBuilder,
   MAX_CONTEXT_MESSAGES,
+  CONTEXT_STEP,
+  recentMessages,
 } from '../messages'
 import { ThreadMessage } from '@janhq/core'
 import { ChatCompletionMessageToolCall } from 'openai/resources'
@@ -159,9 +161,26 @@ describe('CompletionMessagesBuilder', () => {
       const result = new CompletionMessagesBuilder(messages, 'sys').getMessages()
 
       expect(result[0]).toEqual({ role: 'system', content: 'sys' })
-      expect(result.length - 1).toBeLessThanOrEqual(MAX_CONTEXT_MESSAGES)
+      expect(result.length - 1).toBeGreaterThanOrEqual(MAX_CONTEXT_MESSAGES)
+      expect(result.length - 1).toBeLessThan(MAX_CONTEXT_MESSAGES + CONTEXT_STEP)
       expect(result[1].role).toBe('user')
       expect(result[result.length - 1].content).toBe('m30')
+    })
+
+    it('lets old messages go in steps, so the request starts the same for several turns', () => {
+      const chat = (n: number) =>
+        Array.from({ length: n }, (_, i) =>
+          createMockThreadMessage(i % 2 === 0 ? 'user' : 'assistant', `m${i}`)
+        )
+      const firstSent = (n: number) =>
+        (recentMessages(chat(n))[0].content[0] as { text: { value: string } })
+          .text.value
+      // 30 to 39 messages: the same first message every turn
+      expect(new Set([30, 32, 34, 36, 38].map(firstSent))).toEqual(
+        new Set(['m10'])
+      )
+      // Then the next step
+      expect(firstSent(40)).toBe('m20')
     })
 
     it('keeps short chats whole', () => {

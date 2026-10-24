@@ -779,8 +779,7 @@ export const useChat = () => {
                     currentAssistant.documents
                   )
                 : undefined
-            ),
-            message
+            )
           )
         )
         // Using addUserMessage to respect legacy code. Should be using the userContent above.
