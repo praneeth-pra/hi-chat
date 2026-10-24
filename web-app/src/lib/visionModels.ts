@@ -21,7 +21,8 @@ export const CEREBRAS_VISION_MODEL = VISION_MODELS.cerebras.model
 // Providers whose image questions are routed to a vision model
 export const routesImages = (provider: string) => provider in VISION_MODELS
 
-// The vision model is picked on its own, so the model picker hides it
+// The provider's vision model (picked on its own for image questions). It is
+// also listed in the model picker, to answer any question when chosen there.
 export const isAutoVisionModel = (provider: string, modelId: string) =>
   VISION_MODELS[provider]?.model === modelId
 
