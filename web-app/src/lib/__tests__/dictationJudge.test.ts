@@ -29,7 +29,7 @@ const reply = (content: string) =>
 
 const results = [
   { engine: 'cartesia', text: 'Run kube cuddle get pods' },
-  { engine: 'grok', text: 'Run cube cuddle get pods.' },
+  { engine: 'soniox', text: 'Run cube cuddle get pods.' },
   { engine: 'elevenlabs', text: 'Run kubectl get pods.' },
 ]
 
@@ -51,7 +51,7 @@ describe('judgeDictation', () => {
       'Key terms the speaker may use: kubectl'
     )
     expect(body.messages[1].content).toContain(
-      'Grok: "Run cube cuddle get pods."'
+      'Soniox: "Run cube cuddle get pods."'
     )
   })
 

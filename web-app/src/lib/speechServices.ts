@@ -24,17 +24,11 @@ export function reportSpeech(line: string) {
 
 /**
  * Live mode: the relay hands out single-use ElevenLabs streaming tokens, or
- * tickets for its own Grok, Muse or Sarvam live
- * socket ({"engine":"grok"|"muse"|"sarvam"}), or temporary Soniox or Cartesia keys
- * ({"engine":"soniox"|"cartesia"}, which come with P's dictionary as `terms`).
+ * temporary Soniox or Cartesia keys or an Azure token
+ * ({"engine":"soniox"|"cartesia"|"azure"}, which come with P's dictionary as
+ * `terms`).
  */
-type LiveEngine =
-  | 'elevenlabs'
-  | 'grok'
-  | 'muse'
-  | 'sarvam'
-  | 'soniox'
-  | 'cartesia'
+type LiveEngine = 'elevenlabs' | 'soniox' | 'cartesia' | 'azure'
 export const LIVE_TOKEN_URL = '/api/live-token'
 
 async function requestLiveToken(
@@ -58,7 +52,7 @@ export async function fetchLiveToken(
 
 /** A Soniox or Cartesia key and the dictionary terms to send with it. */
 export async function fetchLiveKeyWithTerms(
-  engine: 'soniox' | 'cartesia'
+  engine: 'soniox' | 'cartesia' | 'azure'
 ): Promise<{ token: string; terms: string[] }> {
   const { token, terms } = await requestLiveToken(engine)
   return { token, terms: terms ?? [] }

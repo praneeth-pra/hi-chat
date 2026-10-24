@@ -1,6 +1,6 @@
 // Transcription relay: the browser uploads each clip once to
 // /api/transcribe; this sends it to every engine with a key at the same time,
-// adding the keys (ELEVENLABS_API_KEY, XAI_API_KEY) so
+// adding the key (ELEVENLABS_API_KEY) so
 // they never reach the browser. nginx lets only signed-in browsers through
 // (the site login, auth.mjs).
 //
@@ -11,14 +11,7 @@
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { randomBytes } from 'node:crypto'
-import {
-  acceptWebSocket,
-  cleanKeyterms,
-  grokLive,
-  museLive,
-  sarvamLive,
-} from './wsProxy.mjs'
+import { acceptWebSocket } from './wsProxy.mjs'
 import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
@@ -55,26 +48,6 @@ export const ENGINES = [
         throw new Error(
           `ElevenLabs failed (${res.status}): ${await errorText(res)}`
         )
-      return (await res.json()).text ?? ''
-    },
-  },
-  {
-    // Grok Voice Transcribe 2.0: about as accurate as ElevenLabs and faster
-    name: 'grok',
-    keyVar: 'XAI_API_KEY',
-    async run(file, key, signal, fetchImpl) {
-      const form = new FormData()
-      form.append('file', file, file.name || 'speaker.flac')
-      form.append('model', 'grok-voice-transcribe-2.0')
-      form.append('language', 'en')
-      const res = await fetchImpl('https://api.x.ai/v1/stt', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}` },
-        body: form,
-        signal,
-      })
-      if (!res.ok)
-        throw new Error(`Grok failed (${res.status}): ${await errorText(res)}`)
       return (await res.json()).text ?? ''
     },
   },
@@ -215,12 +188,7 @@ export async function liveToken({
   fetchImpl = fetch,
   engine = 'elevenlabs',
 } = {}) {
-  if (engine === 'grok')
-    return liveTicket('grok', env.XAI_API_KEY, 'XAI_API_KEY')
-  if (engine === 'muse')
-    return liveTicket('muse', env.META_API_KEY, 'META_API_KEY')
-  if (engine === 'sarvam')
-    return liveTicket('sarvam', env.SARVAM_API_KEY, 'SARVAM_API_KEY')
+  if (engine === 'azure') return azureToken({ env, fetchImpl })
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
   const key = env.ELEVENLABS_API_KEY
@@ -248,36 +216,37 @@ export async function liveToken({
 }
 
 /**
- * Grok and Muse live go through the relay (wsProxy.mjs), so their "token" is
- * a single-use ticket for /api/grok-live or /api/muse-live?ticket=…, valid
- * for 10 minutes. The ticket, fetched by a signed-in browser, lets the
- * WebSocket through to the relay.
+ * Azure live (a test engine): a token valid 10 minutes lets the browser's
+ * Speech SDK connect without seeing AZURE_SPEECH_KEY. The region is public.
  */
-const TICKET_MS = 10 * 60 * 1000
-const tickets = new Map()
-
-function liveTicket(engine, key, keyName) {
-  if (!key)
-    throw Object.assign(new Error(`${keyName} not set`), { status: 503 })
-  const now = Date.now()
-  for (const [t, { at }] of tickets) if (now - at > TICKET_MS) tickets.delete(t)
-  const ticket = randomBytes(24).toString('hex')
-  tickets.set(ticket, { engine, at: now })
-  return ticket
-}
-
-/** Spends a ticket; true if it was issued for `engine` and is still fresh. */
-export function useLiveTicket(ticket, engine) {
-  const issued = tickets.get(ticket)
-  tickets.delete(ticket)
-  return (
-    issued !== undefined &&
-    issued.engine === engine &&
-    Date.now() - issued.at <= TICKET_MS
+export const AZURE_REGION_RE = /^[a-z0-9]{2,40}$/
+export async function azureToken({
+  env = process.env,
+  fetchImpl = fetch,
+} = {}) {
+  const region = String(env.AZURE_SPEECH_REGION ?? '')
+    .trim()
+    .toLowerCase()
+  if (!env.AZURE_SPEECH_KEY || !AZURE_REGION_RE.test(region))
+    throw Object.assign(
+      new Error('AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set'),
+      { status: 503 }
+    )
+  const res = await fetchImpl(
+    `https://${region}.api.cognitive.microsoft.com/sts/v1.0/issueToken`,
+    {
+      method: 'POST',
+      headers: { 'Ocp-Apim-Subscription-Key': env.AZURE_SPEECH_KEY },
+      signal: AbortSignal.timeout(15_000),
+    }
   )
+  if (!res.ok)
+    throw Object.assign(
+      new Error(`Azure token failed (${res.status}): ${await errorText(res)}`),
+      { status: 502 }
+    )
+  return `${region}:${await res.text()}`
 }
-
-export const useGrokTicket = (ticket) => useLiveTicket(ticket, 'grok')
 
 /**
  * Soniox live: a temporary key (valid 60 s, enough to open the socket) lets
@@ -375,7 +344,7 @@ export function dictionaryTerms(
 function liveTokenEngine(body) {
   try {
     const engine = JSON.parse(body.toString('utf8')).engine
-    return ['grok', 'muse', 'sarvam', 'soniox', 'cartesia'].includes(engine)
+    return ['soniox', 'cartesia', 'azure'].includes(engine)
       ? engine
       : 'elevenlabs'
   } catch {
@@ -421,8 +390,7 @@ export function speechLogLine(body, includeText = false) {
       '(?:invalid-json|claim-span|missing-audit|source-reference|context-reference|unsupported-claim|invalid-verdict|incomplete-response|missing-response|timeout|provider-[45]\\d\\d|provider-error)'
     const rules = {
       verdict: /^(approved|revised|uncertain|unverified|direct)$/,
-      model:
-        /^(?:openai_)?gpt-oss-(?:20|120)b$/,
+      model: /^(?:openai_)?gpt-oss-(?:20|120)b$/,
       search: /^(ready|empty|unavailable|unconfigured|skipped)$/,
       sources: /^\d{1,2}$/,
       total: /^\d{1,9}ms$|^none$/,
@@ -560,8 +528,8 @@ export function createRelay(options = {}) {
         engine = liveTokenEngine(await readBody(req))
         const token = await liveToken({ ...options, engine })
         console.log(`live token ${engine} ${Date.now() - started} ms`)
-        // Soniox and Cartesia are sent the dictionary as key terms
-        if (engine === 'soniox' || engine === 'cartesia')
+        // Soniox, Cartesia and Azure are sent the dictionary as key terms
+        if (engine === 'soniox' || engine === 'cartesia' || engine === 'azure')
           return send(res, 200, { token, terms: dictionaryTerms() })
         return send(res, 200, { token })
       } catch (err) {
@@ -628,14 +596,6 @@ export function createRelay(options = {}) {
       send(res, err.status ?? 400, { error: err.message })
     }
   })
-  // Grok, Muse and Sarvam live: the browser's WebSocket is piped to xAI,
-  // Meta or Sarvam
-  // (see wsProxy.mjs)
-  const LIVE_PATHS = {
-    '/api/grok-live': 'grok',
-    '/api/muse-live': 'muse',
-    '/api/sarvam-live': 'sarvam',
-  }
   // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
   // STUN (and TURN, when set up) for direct connections: the camera's, and
   // the mirror's between Hi-chat and /mirror
@@ -688,21 +648,7 @@ export function createRelay(options = {}) {
         )
       return
     }
-    const engine = LIVE_PATHS[url.pathname]
-    if (!engine) return socket.destroy()
-    if (!sameOriginRequest(req))
-      return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
-    if (!useLiveTicket(url.searchParams.get('ticket') ?? '', engine)) {
-      console.log(`${engine} live refused: bad or used ticket`)
-      return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
-    }
-    const client = acceptWebSocket(req, socket, head)
-    const keyterms = cleanKeyterms(url.searchParams.getAll('keyterm'))
-    if (client)
-      ({ muse: museLive, sarvam: sarvamLive }[engine] ?? grokLive)(client, {
-        ...options,
-        keyterms,
-      })
+    return socket.destroy()
   })
   return server
 }

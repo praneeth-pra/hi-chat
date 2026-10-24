@@ -15,6 +15,7 @@ import {
   readyMicEarly,
   pickBest,
   gatherAuto,
+  countedEngines,
   getAutoEngines,
   setAutoEngines,
   reportAuto,
@@ -53,7 +54,6 @@ vi.mock('@/lib/speechLive', async (orig) => {
   return {
     ...(await orig<object>()),
     LiveTranscriber: FakeLive,
-    GrokLiveTranscriber: FakeLive,
     SonioxLiveTranscriber: FakeLive,
     CartesiaLiveTranscriber: FakeLive,
   }
@@ -337,10 +337,10 @@ describe('dictation', () => {
     expect(
       pickBest([
         { engine: 'cartesia', text: 'What is cube cuddle?' },
-        { engine: 'grok', text: 'What is kubectl?' },
+        { engine: 'soniox', text: 'What is kubectl?' },
         { engine: 'elevenlabs', text: 'What is kubectl.' },
       ])?.engine
-    ).toBe('grok')
+    ).toBe('soniox')
     // One misheard word is outvoted by the other two (18 Oct)
     expect(
       pickBest([
@@ -362,25 +362,25 @@ describe('dictation', () => {
     expect(
       pickBest([
         { engine: 'cartesia', text: 'one' },
-        { engine: 'grok', text: 'two' },
+        { engine: 'soniox', text: 'two' },
       ])?.engine
     ).toBe('cartesia')
     expect(
       pickBest([
         { engine: 'cartesia', text: '' },
-        { engine: 'grok', text: 'two' },
+        { engine: 'soniox', text: 'two' },
       ])?.text
     ).toBe('two')
   })
 
   it('Auto streams every block to each live engine', () => {
-    const grok = { push: vi.fn() }
+    const azure = { push: vi.fn() }
     const eleven = { push: vi.fn() }
     const rec = {
       rate: 16000,
       engine: 'auto',
       autoLive: [
-        { engine: 'grok', stream: grok },
+        { engine: 'azure', stream: azure },
         { engine: 'elevenlabs', stream: eleven },
       ],
       audio: [],
@@ -388,7 +388,7 @@ describe('dictation', () => {
     const loud = new Float32Array(2048).fill(0.2)
     for (let i = 0; i < 35; i++) onBlock(rec, loud)
     for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
-    expect(grok.push).toHaveBeenCalledTimes(40)
+    expect(azure.push).toHaveBeenCalledTimes(40)
     expect(eleven.push).toHaveBeenCalledTimes(40)
   })
 
@@ -397,11 +397,13 @@ describe('dictation', () => {
     try {
       const results = gatherAuto([
         { engine: 'cartesia', text: new Promise(() => {}) },
-        { engine: 'grok', text: Promise.resolve('fast') },
+        { engine: 'soniox', text: Promise.resolve('fast') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ])
       await vi.advanceTimersByTimeAsync(1000)
-      await expect(results).resolves.toEqual([{ engine: 'grok', text: 'fast' }])
+      await expect(results).resolves.toEqual([
+        { engine: 'soniox', text: 'fast' },
+      ])
       // Two engines that agree: sent at once, without waiting for Cartesia
       const quorum = gatherAuto([
         { engine: 'cartesia', text: new Promise(() => {}) },
@@ -527,19 +529,36 @@ describe('dictation', () => {
 
   it('Auto races the engines chosen in Settings, in tie-break order', () => {
     expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
-    setAutoEngines(['grok', 'cartesia'])
-    expect(getAutoEngines()).toEqual(['cartesia', 'grok'])
+    setAutoEngines(['azure', 'cartesia'])
+    expect(getAutoEngines()).toEqual(['cartesia', 'azure'])
+    // Removed engines saved earlier are dropped
+    setAutoEngines(['grok', 'muse', 'soniox'] as never)
+    expect(getAutoEngines()).toEqual(['soniox'])
     // None chosen falls back to the default three
     setAutoEngines([])
     expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
     localStorage.removeItem('dictation-auto-engines')
   })
 
+  it('an engine on trial (Azure) is logged but never decides what is sent', () => {
+    const jobs = [
+      { engine: 'cartesia' as const },
+      { engine: 'azure' as const },
+      { engine: 'soniox' as const },
+    ]
+    expect(countedEngines(jobs).map((j) => j.engine)).toEqual([
+      'cartesia',
+      'soniox',
+    ])
+    // Chosen on its own, it is used: there's nothing else to send
+    expect(countedEngines([{ engine: 'azure' as const }])).toHaveLength(1)
+  })
+
   it('logs the engines that lost the race once they answer', async () => {
-    let lateGrok!: (t: string) => void
+    let lateAzure!: (t: string) => void
     const done = reportAuto(
       [
-        { engine: 'grok', text: new Promise((r) => (lateGrok = r)) },
+        { engine: 'azure', text: new Promise((r) => (lateAzure = r)) },
         { engine: 'soniox', text: Promise.resolve('What is EKS?') },
         { engine: 'cartesia', text: Promise.resolve('What is EKS?') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
@@ -547,11 +566,11 @@ describe('dictation', () => {
       { soniox: 300, cartesia: 120 },
       { sent: 'soniox', totalMs: 310 }
     )
-    lateGrok('What is EKS? ')
+    lateAzure('What is EKS? ')
     await done
     const line = reportSpeech.mock.calls.at(-1)?.[0] as string
     expect(line).toContain('sent=soniox total=310ms')
-    expect(line).toContain('grok: "What is EKS?"')
+    expect(line).toContain('azure: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
   })
 

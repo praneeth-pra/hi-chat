@@ -41,6 +41,7 @@
     "lodash.debounce": "4.0.8",
     "lucide-react": "0.536.0",
     "mammoth": "1.13.0",
+    "microsoft-cognitiveservices-speech-sdk": "1.46.0",
     "openai": "4.91.1",
     "pdfjs-dist": "4.10.38",
     "react": "19.0.0",
