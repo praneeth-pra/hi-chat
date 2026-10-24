@@ -228,15 +228,25 @@ export function readLook(root: HTMLElement, scroller: HTMLElement): MirrorLook {
  */
 export type MirrorScroll =
   | { t: 'scroll'; bottom: true }
-  | { t: 'scroll'; id: string; f: number }
+  | {
+      t: 'scroll'
+      id: string
+      f: number
+      /** Exactly how far into it, in px (negative: in the gap above it) */
+      px?: number
+      /** Its height here, in px, so a viewer can scale `px` to its own */
+      h?: number
+    }
 
 const AT_BOTTOM_PX = 40
 const MESSAGE = '[data-test-id^="message-"]'
 
 /** Reads where the chat's scroll area (`[data-thread-scroller]`) is. */
 export function readScroll(el: HTMLElement): MirrorScroll {
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX)
-    return { t: 'scroll', bottom: true }
+  // The message at the top of the view, and exactly where in it the view
+  // starts, even at the end of the chat: a viewer placed the same way shows
+  // the same lines, so a scroll near the end doesn't flip it to "the end"
+  // (laid out differently there) and back
   const top = el.getBoundingClientRect().top
   for (const m of el.querySelectorAll<HTMLElement>(MESSAGE)) {
     const r = m.getBoundingClientRect()
@@ -244,8 +254,16 @@ export function readScroll(el: HTMLElement): MirrorScroll {
     const id = (m.dataset.testId ?? '').replace(/^message-[a-z]+-/, '')
     const f =
       r.height > 0 ? Math.min(1, Math.max(0, (top - r.top) / r.height)) : 0
-    return { t: 'scroll', id, f: Math.round(f * 1000) / 1000 }
+    return {
+      t: 'scroll',
+      id,
+      f: Math.round(f * 1000) / 1000,
+      px: Math.round(top - r.top),
+      h: Math.round(r.height),
+    }
   }
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX)
+    return { t: 'scroll', bottom: true }
   // Below the last saved message: in the reply being written
   return { t: 'scroll', bottom: true }
 }
@@ -698,7 +716,10 @@ export type MirrorState = {
   stream: Stream
   senderOn: boolean
   /** Where Hi-chat is scrolled to; a new object for each move */
-  scroll: { bottom: true } | { id: string; f: number } | null
+  scroll:
+    | { bottom: true }
+    | { id: string; f: number; px?: number; h?: number }
+    | null
   /** Screenshots messages show, by key */
   images: Record<string, string>
   /** Accuracy mode's progress, while it runs */
@@ -814,11 +835,16 @@ export function applyMirrorMessage(
   if (m?.t === 'sender') return { ...state, senderOn: m.on === true }
   if (m?.t === 'scroll') {
     if (m.bottom === true) return { ...state, scroll: { bottom: true } }
-    if (typeof m.id === 'string' && typeof m.f === 'number')
+    if (typeof m.id === 'string' && typeof m.f === 'number') {
+      const exact =
+        Number.isFinite(m.px) && Number.isFinite(m.h) && m.h > 0
+          ? { px: m.px as number, h: m.h as number }
+          : {}
       return {
         ...state,
-        scroll: { id: m.id, f: Math.min(1, Math.max(0, m.f)) },
+        scroll: { id: m.id, f: Math.min(1, Math.max(0, m.f)), ...exact },
       }
+    }
   }
   return state
 }

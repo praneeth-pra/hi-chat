@@ -330,10 +330,18 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
         const box = el.getBoundingClientRect().top
         const top = m.getBoundingClientRect().top - box + el.scrollTop
         const pin = pinned.current
+        // Exactly as far into it as Hi-chat is (scaled, should it wrap
+        // differently here); else by fraction, from an older Hi-chat
+        const into =
+          at.px === undefined || !at.h
+            ? at.f * m.offsetHeight - 16
+            : at.px > 0
+              ? at.px * (m.offsetHeight / at.h)
+              : at.px
         el.scrollTop =
           pin && pin.scroll === at && pin.id === at.id
             ? top - pin.top
-            : top + at.f * m.offsetHeight - 16
+            : top + into
         placed.current = el.scrollTop
         pinned.current = { scroll: at, id: at.id, top: top - el.scrollTop }
         atBottom.current = false
