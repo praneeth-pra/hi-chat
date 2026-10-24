@@ -5,6 +5,7 @@ import { withAnswerDetail } from '@/lib/answerDetail'
 import { withDocuments } from '@/lib/assistantDocuments'
 import { contextSize, formatBytes, formatTokens } from '@/lib/contextSize'
 import { chatDelay } from '@/lib/replySpeed'
+import { formatSeconds, networkLevel, useLastReply } from '@/lib/lastReply'
 import { cn } from '@/lib/utils'
 
 const DOT = {
@@ -16,10 +17,12 @@ const DOT = {
 const secs = (s: number) => `${s.toFixed(s < 1 ? 2 : 1)} s`
 
 /**
- * Next to the model: how much the next question sends, and whether that is
- * actually slowing this chat's answers down. The colour comes from measured
- * timings (this chat's latest answers against a fresh chat's), never from
- * the size alone.
+ * Next to the model: the network time of the latest answer (sending the
+ * question until the model's first byte), coloured green under 1 s, amber
+ * under 1.5 s, red from 1.5 s. Hovering shows the whole wait (network, thinking,
+ * and for a spoken question, stop talking → first word), how much the next
+ * question sends, and whether this long chat is slowing answers down.
+ * Before the first answer it shows nothing.
  */
 export function ContextMeter({
   messages,
@@ -46,8 +49,10 @@ export function ContextMeter({
     [messages, assistant, draft, draftImages]
   )
   const delay = useMemo(() => chatDelay(messages), [messages])
+  const last = useLastReply((s) => s.last)
+  if (last?.network === undefined) return null
   if (!messages.length && !draft.trim() && !draftImages.length) return null
-  const level = delay?.level ?? 'light'
+  const level = networkLevel(last.network)
   const images = size.images
     ? ` and ${size.images} image${size.images > 1 ? 's' : ''} (${formatBytes(size.imageBytes)})`
     : ''
@@ -60,7 +65,18 @@ export function ContextMeter({
     : level === 'light'
       ? `Answers here start as fast as in a new chat (${secs(delay.recentS)} against ${secs(delay.baselineS)}).`
       : `Answers here start ${secs(delay.delayS)} later than in a new chat${why}.${level === 'heavy' ? ' A new chat (fn + N) starts fast again.' : ''}`
-  const label = `Each question sends about ${formatTokens(size.tokens)} tokens of text${images}. ${speed}`
+  const wait = [
+    `Last answer: network ${formatSeconds(last.network)} (question sent → model's first byte)`,
+    last.thinking !== undefined
+      ? `, thinking ${formatSeconds(last.thinking)}, first word after ${formatSeconds(last.firstWord ?? last.network)}`
+      : '',
+    last.fromStop !== undefined
+      ? `; ${formatSeconds(last.fromStop)} from when you stopped talking`
+      : '',
+    last.model ? ` (${last.model})` : '',
+    '.',
+  ].join('')
+  const label = `${wait} Each question sends about ${formatTokens(size.tokens)} tokens of text${images}. ${speed}`
   return (
     <span
       role="img"
@@ -73,9 +89,7 @@ export function ContextMeter({
         className={cn('size-1.5 rounded-full', DOT[level])}
         aria-hidden="true"
       />
-      {level === 'light' || !delay
-        ? formatTokens(size.tokens)
-        : `+${secs(delay.delayS)}`}
+      {formatSeconds(last.network)}
       {size.images > 0 && (
         <span className="hidden sm:inline">· {size.images} img</span>
       )}

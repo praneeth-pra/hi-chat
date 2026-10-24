@@ -352,7 +352,8 @@ function ThreadDetail() {
           </div>
           <div
             className={cn(
-              'mx-auto pt-2 pb-3 shrink-0 relative',
+              // Tight under the message box: the room goes to the answer
+              'mx-auto pt-1 pb-1 shrink-0 relative',
               // Responsive padding and width
               isMobile ? 'px-3' : 'px-2',
               // Width: mobile/small screens or non-compact always full, compact desktop uses constrained
