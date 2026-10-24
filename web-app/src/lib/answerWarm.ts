@@ -1,9 +1,6 @@
 import { useModelProvider } from '@/hooks/useModelProvider'
-import { anthropicConfig } from '@/lib/anthropicProvider'
 import { autoChain, useChatAuto } from '@/lib/chatModels'
 
-/** Anthropic keeps its permission answer 10 minutes; the connection less. */
-const CLAUDE_WARM_AGAIN_MS = 20_000
 /**
  * Groq and Cerebras don't say how long to keep theirs, so browsers keep it
  * about 5 s: warm just before sending (dictation stop) and now and then while
@@ -76,23 +73,11 @@ function warm(soon: boolean, fetcher: typeof fetch, now: number) {
         body: JSON.stringify({ warm: true }),
       })
     )
-  if (auto && mode === 'accuracy') {
-    warmClaude(anthropicConfig(state.providers), fetcher, now)
-    return
-  }
   const chatTargets = auto
     ? autoChain().map((c) => withKey(c.provider))
     : [withKey(state.selectedProvider)]
   for (const provider of new Set(chatTargets)) {
     if (!provider?.api_key || !provider.base_url) continue
-    if (provider.provider === 'anthropic') {
-      warmClaude(
-        { apiKey: provider.api_key, baseUrl: provider.base_url },
-        fetcher,
-        now
-      )
-      continue
-    }
     const base = provider.base_url.replace(/\/+$/, '')
     if (!base.startsWith('https://')) continue
     if (!due(base, soon ? CHAT_WARM_SOON_MS : CHAT_WARM_AGAIN_MS, now)) continue
@@ -107,29 +92,4 @@ function warm(soon: boolean, fetcher: typeof fetch, now: number) {
       })
     )
   }
-}
-
-function warmClaude(
-  { apiKey, baseUrl }: { apiKey?: string; baseUrl?: string },
-  fetcher: typeof fetch,
-  now: number
-) {
-  if (!apiKey) return
-  const base = (baseUrl || 'https://api.anthropic.com')
-    .replace(/\/+$/, '')
-    .replace(/\/v1$/, '')
-  if (!due(base, CLAUDE_WARM_AGAIN_MS, now)) return
-  // Same URL and headers as the real answer, so the permission check is reused
-  discard(
-    fetcher(`${base}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: '{}',
-    })
-  )
 }

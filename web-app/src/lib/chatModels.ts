@@ -6,9 +6,6 @@ import { persist, createJSONStorage } from 'zustand/middleware'
  * Model labels and the Groq/Cerebras participants in the two Auto modes.
  */
 export type ChatModelKey =
-  | 'claude-haiku'
-  | 'claude-haiku-5'
-  | 'claude-sonnet'
   | 'cerebras-120b'
   | 'groq-120b'
   | 'groq-20b'
@@ -19,26 +16,6 @@ export const CHAT_MODELS: {
   provider: string
   model: string
 }[] = [
-  // Display labels for manually selected Claude models.
-  {
-    value: 'claude-haiku',
-    label: 'Claude Haiku 4.5',
-    provider: 'anthropic',
-    model: 'claude-haiku-4-5',
-  },
-  {
-    value: 'claude-haiku-5',
-    label: 'Claude Haiku 5.5',
-    provider: 'anthropic',
-    model: 'claude-haiku-5-5',
-  },
-  // Better answers but slower to start, so it gets longer before Cerebras
-  {
-    value: 'claude-sonnet',
-    label: 'Claude Sonnet 5.5',
-    provider: 'anthropic',
-    model: 'claude-sonnet-5-5',
-  },
   {
     value: 'cerebras-120b',
     label: 'Cerebras gpt-oss-120b',

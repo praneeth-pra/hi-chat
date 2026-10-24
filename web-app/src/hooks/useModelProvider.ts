@@ -40,9 +40,11 @@ export const useModelProvider = create<ModelProviderState>()(
       setProviders: (providers) =>
         set((state) => {
           const existingProviders = state.providers
-            // Filter out legacy llama.cpp provider for migration
-            // Can remove after a couple of releases
-            .filter((e) => e.provider !== 'llama.cpp')
+            // Filter out legacy llama.cpp provider for migration, and
+            // Anthropic (Claude), which Hi-chat no longer uses
+            .filter(
+              (e) => e.provider !== 'llama.cpp' && e.provider !== 'anthropic'
+            )
             .map((provider) => {
               return {
                 ...provider,
@@ -323,47 +325,6 @@ export const useModelProvider = create<ModelProviderState>()(
 
         if (version <= 3 && state?.providers) {
           state.providers.forEach((provider) => {
-            // Migrate Anthropic provider base URL and add custom headers
-            if (provider.provider === 'anthropic') {
-              if (provider.base_url === 'https://api.anthropic.com') {
-                provider.base_url = 'https://api.anthropic.com/v1'
-              }
-
-              // Update base-url in settings
-              if (provider.settings) {
-                const baseUrlSetting = provider.settings.find(
-                  (s) => s.key === 'base-url'
-                )
-                if (
-                  baseUrlSetting?.controller_props?.value ===
-                  'https://api.anthropic.com'
-                ) {
-                  baseUrlSetting.controller_props.value =
-                    'https://api.anthropic.com/v1'
-                }
-                if (
-                  baseUrlSetting?.controller_props?.placeholder ===
-                  'https://api.anthropic.com'
-                ) {
-                  baseUrlSetting.controller_props.placeholder =
-                    'https://api.anthropic.com/v1'
-                }
-              }
-
-              if (!provider.custom_header) {
-                provider.custom_header = [
-                  {
-                    header: 'anthropic-version',
-                    value: '2023-06-01',
-                  },
-                  {
-                    header: 'anthropic-dangerous-direct-browser-access',
-                    value: 'true',
-                  },
-                ]
-              }
-            }
-
             if (provider.provider === 'cohere') {
               if (
                 provider.base_url === 'https://api.cohere.ai/compatibility/v1'
@@ -448,7 +409,9 @@ export const useModelProvider = create<ModelProviderState>()(
         if (version <= 6 && state?.providers) {
           // Most of legacy cohere models are deprecated now, remove the provider entirely
           // TODO: Default providers should be updated automatically somehow later
-          state.providers = state.providers.filter((provider) => provider.provider !== 'cohere')
+          state.providers = state.providers.filter(
+            (provider) => provider.provider !== 'cohere'
+          )
         }
         if (version <= 7 && state?.providers) {
           // Remove 'proactive' capability from all models as it's now managed in MCP settings
@@ -476,9 +439,19 @@ export const useModelProvider = create<ModelProviderState>()(
             }
           })
         }
+        if (version <= 9 && state?.providers) {
+          // Claude is gone from Hi-chat: drop its provider and saved key
+          state.providers = state.providers.filter(
+            (provider) => provider.provider !== 'anthropic'
+          )
+          if (state.selectedProvider === 'anthropic') {
+            state.selectedProvider = 'groq'
+            state.selectedModel = null
+          }
+        }
         return state
       },
-      version: 9,
+      version: 10,
     }
   )
 )

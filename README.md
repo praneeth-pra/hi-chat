@@ -199,7 +199,7 @@ The whole site sits behind a login: a 6-digit code is emailed to
 can sign in.
 
 Dictation's Auto mode streams to Cartesia, Soniox and ElevenLabs, so it
-needs all three keys. Keys for Groq, Cerebras and Anthropic chat models are
+needs all three keys. Keys for the Groq and Cerebras chat models are
 entered in the app under Model Providers.
 
 ## License

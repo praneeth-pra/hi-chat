@@ -14,9 +14,6 @@ describe('getProviderLogo', () => {
     expect(getProviderLogo('llamacpp')).toBe(
       '/images/model-provider/llamacpp.svg'
     )
-    expect(getProviderLogo('anthropic')).toBe(
-      '/images/model-provider/anthropic.svg'
-    )
     expect(getProviderLogo('openai')).toBe('/images/model-provider/openai.svg')
     expect(getProviderLogo('gemini')).toBe('/images/model-provider/gemini.svg')
   })

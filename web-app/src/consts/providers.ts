@@ -96,51 +96,6 @@ export const predefinedProviders = [
   {
     active: true,
     api_key: '',
-    base_url: 'https://api.anthropic.com/v1',
-    provider: 'anthropic',
-    explore_models_url:
-      'https://docs.anthropic.com/en/docs/about-claude/models',
-    settings: [
-      {
-        key: 'api-key',
-        title: 'API Key',
-        description:
-          "The Anthropic API uses API keys for authentication. Visit your [API Keys](https://console.anthropic.com/settings/keys) page to retrieve the API key you'll use in your requests.",
-        controller_type: 'input',
-        controller_props: {
-          placeholder: 'Insert API Key',
-          value: '',
-          type: 'password',
-          input_actions: ['unobscure', 'copy'],
-        },
-      },
-      {
-        key: 'base-url',
-        title: 'Base URL',
-        description:
-          'The base endpoint to use. See the [Anthropic API documentation](https://docs.anthropic.com/en/api/messages) for more information.',
-        controller_type: 'input',
-        controller_props: {
-          placeholder: 'https://api.anthropic.com',
-          value: 'https://api.anthropic.com',
-        },
-      },
-    ],
-    models: [],
-    custom_header: [
-      {
-        header: 'anthropic-version',
-        value: '2023-06-01'
-      },
-      {
-        header: 'anthropic-dangerous-direct-browser-access',
-        value: 'true'
-      }
-    ]
-  },
-  {
-    active: true,
-    api_key: '',
     base_url: 'https://api.cohere.ai/v1',
     explore_models_url: 'https://docs.cohere.com/v2/docs/models',
     provider: 'cohere',

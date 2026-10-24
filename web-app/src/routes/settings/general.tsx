@@ -7,8 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardItem } from '@/containers/Card'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useGeneralSetting } from '@/hooks/useGeneralSetting'
-import { useModelProvider } from '@/hooks/useModelProvider'
-import { anthropicConfig } from '@/lib/anthropicProvider'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import {
@@ -36,18 +34,6 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { dictionaryTerms, getDictionary, setDictionary } from '@/lib/keyTerms'
 import { getDictationMic, listMics, setDictationMic } from '@/lib/micActivity'
-import {
-  ANSWER_MODELS,
-  ANSWER_QUESTIONS,
-  answerSummary,
-  availableAnswerModels,
-  compareAnswers,
-  formatAnswers,
-  type AnswerResult,
-} from '@/lib/answerBench'
-import { useAssistant } from '@/hooks/useAssistant'
-import { renderInstructions } from '@/lib/instructionTemplate'
-import { withDocuments } from '@/lib/assistantDocuments'
 import {
   CHAT_THINKING_LEVELS,
   type ChatThinking,
@@ -96,38 +82,6 @@ function General() {
   const [keepMic, setKeepMicState] = useState(getKeepMicReady)
   const [judges, setJudgesState] = useState(getDictationJudges)
   const [autoEngines, setAutoEnginesState] = useState(getAutoEngines)
-  const [answers, setAnswers] = useState<AnswerResult[] | null>(null)
-  const [answersRunning, setAnswersRunning] = useState(false)
-  const runAnswers = async () => {
-    const providers = useModelProvider.getState()
-    const cerebras = providers.getProviderByName('cerebras')
-    const assistant = useAssistant.getState().currentAssistant
-    const config = {
-      anthropic: anthropicConfig(providers.providers),
-      cerebras: { apiKey: cerebras?.api_key, baseUrl: cerebras?.base_url },
-      // The same instructions and documents a live answer gets
-      instructions: assistant
-        ? withDocuments(
-            renderInstructions(assistant.instructions),
-            assistant.documents
-          )
-        : undefined,
-    }
-    const models = availableAnswerModels(config)
-    if (!models.length) {
-      toast.error('Add an Anthropic or Cerebras key first')
-      return
-    }
-    setAnswersRunning(true)
-    setAnswers([])
-    try {
-      await compareAnswers(config, models, (r) =>
-        setAnswers((done) => [...(done ?? []), r])
-      )
-    } finally {
-      setAnswersRunning(false)
-    }
-  }
   const autoMode = useChatAuto((state) => state.mode)
   const setAutoMode = useChatAuto((state) => state.setMode)
   const [chatThinking, setChatThinkingState] =
@@ -559,102 +513,6 @@ function General() {
               />
             </Card>
 
-            {/* Answer models */}
-            <Card title="Answer model test">
-              <CardItem
-                title="Compare answer models"
-                description={`Asks Claude Haiku 4.5, Haiku 5.5, Sonnet 5.5 and Cerebras ${ANSWER_QUESTIONS.length} real interview questions at the same moment, with your current assistant's instructions, and shows each answer and how fast it started.`}
-                actions={
-                  <div className="flex gap-2">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0"
-                      disabled={answersRunning}
-                      onClick={runAnswers}
-                    >
-                      <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                        {answersRunning
-                          ? `Running ${answers?.length ?? 0}/${ANSWER_QUESTIONS.length}...`
-                          : 'Run test'}
-                      </div>
-                    </Button>
-                    {answers && answers.length > 0 && !answersRunning && (
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="p-0"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(formatAnswers(answers))
-                            .then(() => toast.success('Answers copied'))
-                            .catch(() => toast.error("Couldn't copy"))
-                        }}
-                      >
-                        <div className="cursor-pointer flex items-center justify-center rounded-sm hover:bg-main-view-fg/15 bg-main-view-fg/10 transition-all duration-200 ease-in-out px-2 py-1 gap-1">
-                          Copy answers
-                        </div>
-                      </Button>
-                    )}
-                  </div>
-                }
-              />
-              {answers && answers.length > 0 && (
-                <div className="text-sm text-main-view-fg/80 px-1 pb-2 space-y-2">
-                  {answerSummary(answers).map((s) => (
-                    <div key={s.model}>
-                      <span className="font-medium text-main-view-fg">
-                        {s.label}
-                      </span>
-                      : first word{' '}
-                      {s.firstMs === undefined
-                        ? '–'
-                        : `${(s.firstMs / 1000).toFixed(2)} s`}
-                      , whole answer{' '}
-                      {s.totalMs === undefined
-                        ? '–'
-                        : `${(s.totalMs / 1000).toFixed(2)} s`}{' '}
-                      (median{s.errors ? `, ${s.errors} failed` : ''})
-                    </div>
-                  ))}
-                  {answers.map((r, i) => (
-                    <details
-                      key={i}
-                      className="rounded-sm bg-main-view-fg/4 px-2 py-1"
-                    >
-                      <summary className="cursor-pointer">
-                        {i + 1}. {r.question}
-                      </summary>
-                      {r.runs.map((x) => (
-                        <div key={x.model} className="mt-2">
-                          <div className="font-medium text-main-view-fg">
-                            {
-                              ANSWER_MODELS.find((m) => m.value === x.model)
-                                ?.label
-                            }{' '}
-                            <span className="font-normal text-main-view-fg/60">
-                              (first word{' '}
-                              {x.firstMs === undefined
-                                ? '–'
-                                : `${(x.firstMs / 1000).toFixed(2)} s`}
-                              , whole{' '}
-                              {x.totalMs === undefined
-                                ? '–'
-                                : `${(x.totalMs / 1000).toFixed(2)} s`}
-                              )
-                            </span>
-                          </div>
-                          {x.error && (
-                            <div className="text-destructive">{x.error}</div>
-                          )}
-                          <div className="whitespace-pre-wrap">{x.text}</div>
-                        </div>
-                      ))}
-                    </details>
-                  ))}
-                </div>
-              )}
-            </Card>
           </div>
         </div>
       </div>

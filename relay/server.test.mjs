@@ -274,7 +274,7 @@ test('speech log: Windows key waits keep only their numbers', () => {
 test('speech log: Accuracy lines keep only key=value tokens', () => {
   const body = (o) => Buffer.from(JSON.stringify(o))
   const line =
-    'accuracy: verdict=approved model=claude-sonnet-5-5 search=skipped total=4210ms failures=groq:timeout,cerebras:claim-span'
+    'accuracy: verdict=approved model=gpt-oss-120b search=skipped total=4210ms failures=groq:timeout,cerebras:claim-span'
   assert.equal(speechLogLine(body({ line })), line)
   assert.equal(
     speechLogLine(
@@ -721,6 +721,9 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
     'accuracy: verdict=approved model=private_secret',
     'accuracy: failures=groq:private_secret',
     'accuracy: reviewers=claude:private_secret',
+    // Claude is no longer a reviewer or a model
+    'accuracy: reviewers=claude:3400ms:ok',
+    'accuracy: verdict=direct model=claude-sonnet-5-5',
     'accuracy: total=123ms total=456ms',
   ])
     assert.equal(
@@ -728,11 +731,11 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
       'speech diagnostic text omitted'
     )
   const line =
-    'accuracy: verdict=revised model=gpt-oss-120b search=ready sources=5 total=4210ms search_time=300ms draft=500ms review=3410ms claims=4 context_claims=1 unsupported=0 fallback=none failures=groq:timeout reviewers=cerebras:3400ms:ok,claude:cancelled'
+    'accuracy: verdict=revised model=gpt-oss-120b search=ready sources=5 total=4210ms search_time=300ms draft=500ms review=3410ms claims=4 context_claims=1 unsupported=0 fallback=none failures=groq:timeout reviewers=cerebras:3400ms:ok,groq:cancelled'
   assert.equal(speechLogLine(Buffer.from(JSON.stringify({ line }))), line)
   // The client logs the provider's actual HTTP status (provider-400, provider-529).
   const statusLine =
-    'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=5 total=12844ms search_time=1066ms draft=1751ms review=10023ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=cerebras:source-reference,groq:provider-400,claude:provider-529 reviewers=cerebras:1520ms:source-reference,groq:4178ms:provider-400,claude:7770ms:provider-529,cerebras-repair:10022ms:ok'
+    'accuracy: verdict=unverified model=gpt-oss-120b search=ready sources=5 total=12844ms search_time=1066ms draft=1751ms review=10023ms claims=0 context_claims=0 unsupported=0 fallback=reviewer-answer failures=cerebras:source-reference,groq:provider-529 reviewers=cerebras:1520ms:source-reference,groq:7770ms:provider-529,cerebras-repair:10022ms:ok'
   assert.equal(
     speechLogLine(Buffer.from(JSON.stringify({ line: statusLine }))),
     statusLine
@@ -745,12 +748,12 @@ test('Accuracy telemetry rejects arbitrary text disguised as metadata', () => {
     ),
     'speech diagnostic text omitted'
   )
-  // A Claude-written answer (no audit) also logs its time to first words.
-  const direct =
-    'accuracy: verdict=direct model=claude-sonnet-5-5 search=ready sources=5 total=5210ms search_time=700ms draft=4100ms review=0ms claims=0 context_claims=0 unsupported=0 fallback=none failures=none reviewers=none first=1900ms'
+  // An answer logs its time to first words.
+  const first =
+    'accuracy: verdict=approved model=gpt-oss-120b search=ready sources=5 total=5210ms search_time=700ms draft=4100ms review=300ms claims=3 context_claims=0 unsupported=0 fallback=none failures=none reviewers=cerebras:300ms:ok first=1900ms'
   assert.equal(
-    speechLogLine(Buffer.from(JSON.stringify({ line: direct }))),
-    direct
+    speechLogLine(Buffer.from(JSON.stringify({ line: first }))),
+    first
   )
 })
 

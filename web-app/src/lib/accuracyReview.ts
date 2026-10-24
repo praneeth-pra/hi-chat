@@ -4,8 +4,6 @@ import { isCompletionResponse, sendCompletion } from './completion'
 import { withRequestDeadline } from './requestDeadline'
 import { withAnswerDetail } from './answerDetail'
 import { collectChatPrompts } from './chatQuestions'
-import { anthropicConfig } from './anthropicProvider'
-import { completeClaude } from './claudeChat'
 import type { ThreadMessage } from '@janhq/core'
 
 export type WebSource = {
@@ -20,7 +18,7 @@ export type WebEvidence = {
   searchMs?: number
 }
 export type AccuracyReview = {
-  /** `direct`: Claude wrote the answer from the sources; no separate audit. */
+  /** `direct`: older answers written straight from the sources (no audit). */
   verdict: 'approved' | 'revised' | 'uncertain' | 'unverified' | 'direct'
   verifier: string
   model: string
@@ -656,17 +654,6 @@ export async function verifyAccuracyCompletion(
         Number(a.provider === draftedBy) - Number(b.provider === draftedBy)
     )
     .map(gptOss)
-  const claudeKey = anthropicConfig(providers)
-  const claude: Reviewer | undefined = claudeKey.apiKey
-    ? {
-        kind: 'claude',
-        name: 'claude',
-        verifier: 'Claude Sonnet 5.5',
-        model: CLAUDE_REVIEW_MODEL,
-        apiKey: claudeKey.apiKey,
-        baseUrl: claudeKey.baseUrl,
-      }
-    : undefined
   const started = Date.now()
   const reviewDeadline = started + 15_000
   const failures: string[] = []
@@ -710,22 +697,6 @@ export async function verifyAccuracyCompletion(
     repair: boolean,
     controller: AbortController
   ): Promise<string> => {
-    if (reviewer.kind === 'claude') {
-      const reply = await completeClaude({
-        apiKey: reviewer.apiKey,
-        baseUrl: reviewer.baseUrl,
-        model: reviewer.model,
-        messages: reviewMessages(repair) as {
-          role: string
-          content?: unknown
-        }[],
-        signal: controller.signal,
-        maxTokens: 8192,
-      })
-      if (reply.stopReason === 'max_tokens')
-        throw new Error('Incomplete review')
-      return jsonObjectText(reply.text)
-    }
     const requestReview = (format: object) =>
       sendCompletion(
         {
@@ -850,11 +821,11 @@ export async function verifyAccuracyCompletion(
     },
   })
 
-  // Every reviewer audits at once, and one recovery answer (Cerebras when
-  // configured) is written alongside so a failed audit never adds a second
-  // round trip. Claude's verdict wins if it lands within CLAUDE_WINDOW_MS;
-  // after that the first valid gpt-oss audit is shown, and once every gpt-oss
-  // audit has failed the recovery answer is shown, labelled unverified.
+  // Every reviewer (Groq's and Cerebras's 120B) audits at once, and one
+  // recovery answer (Cerebras when configured) is written alongside so a
+  // failed audit never adds a second round trip. The first valid audit is
+  // shown; once every audit has failed, the recovery answer is shown,
+  // labelled unverified.
   const raceAbort = new AbortController()
   const link = () => raceAbort.abort(signal.reason)
   signal.addEventListener('abort', link, { once: true })
@@ -876,10 +847,7 @@ export async function verifyAccuracyCompletion(
     run.promise = attempt(
       reviewer,
       repair,
-      Math.min(
-        reviewer.kind === 'claude' ? 12_000 : 10_000,
-        reviewDeadline - Date.now()
-      ),
+      Math.min(10_000, reviewDeadline - Date.now()),
       raceAbort.signal
     ).then(
       (checked) => {
@@ -898,47 +866,24 @@ export async function verifyAccuracyCompletion(
     )
     return run
   }
-  const runs: Run[] = (claude ? [claude, ...judges] : judges).map((reviewer) =>
-    start(reviewer, false)
-  )
+  const runs: Run[] = judges.map((reviewer) => start(reviewer, false))
   const repairer = [...judges].sort(
     (a, b) => Number(a.name !== 'cerebras') - Number(b.name !== 'cerebras')
   )[0]
   if (repairer) runs.push(start(repairer, true))
-  const claudeWindowEnd = started + CLAUDE_WINDOW_MS
   try {
     for (;;) {
       if (signal.aborted) throw signal.reason
-      const windowOver = Date.now() >= claudeWindowEnd
-      const claudeRun = runs.find((run) => run.reviewer.kind === 'claude')
       const repairRun = runs.find((run) => run.repair)
-      const gptRuns = runs.filter(
-        (run) => run.reviewer.kind !== 'claude' && !run.repair
-      )
-      if (claudeRun?.checked)
-        return accept(claudeRun.reviewer, claudeRun.checked, false)
-      const best = gptRuns.find((run) => run.checked)
-      if (best?.checked && (!claudeRun || claudeRun.settled || windowOver))
-        return accept(best.reviewer, best.checked, false)
-      const gptFailed = gptRuns.every((run) => run.settled && !run.checked)
-      if (
-        repairRun?.checked &&
-        gptFailed &&
-        (!claudeRun || claudeRun.settled || windowOver)
-      )
+      const audits = runs.filter((run) => !run.repair)
+      const best = audits.find((run) => run.checked)
+      if (best?.checked) return accept(best.reviewer, best.checked, false)
+      const auditsFailed = audits.every((run) => run.settled && !run.checked)
+      if (repairRun?.checked && auditsFailed)
         return accept(repairRun.reviewer, repairRun.checked, true)
       const pending = runs.filter((run) => !run.settled)
       if (!pending.length) break
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const waits: Promise<unknown>[] = pending.map((run) => run.promise)
-      if (!windowOver)
-        waits.push(
-          new Promise((resolve) => {
-            timer = setTimeout(resolve, claudeWindowEnd - Date.now())
-          })
-        )
-      await Promise.race(waits)
-      clearTimeout(timer)
+      await Promise.race(pending.map((run) => run.promise))
     }
   } finally {
     for (const run of runs)
@@ -950,9 +895,7 @@ export async function verifyAccuracyCompletion(
     signal.removeEventListener('abort', link)
   }
   if (signal.aborted) throw signal.reason
-  const replacement =
-    replacements.find((item) => item.reviewer.kind === 'claude') ??
-    replacements[0]
+  const replacement = replacements[0]
   const answer = replacement?.answer ?? draft
   return {
     completion: (async function* () {
@@ -986,21 +929,12 @@ export async function verifyAccuracyCompletion(
   }
 }
 
-const CLAUDE_REVIEW_MODEL = 'claude-sonnet-5-5'
-/** How long a valid gpt-oss audit waits for Claude's before it is shown. */
-export const CLAUDE_WINDOW_MS = 2500
-
-type Reviewer = { name: string; verifier: string; model: string } & (
-  | { kind: 'openai'; provider: ModelProvider }
-  | { kind: 'claude'; apiKey: string; baseUrl?: string }
-)
-
-/** Claude has no JSON mode here: take the JSON object out of its reply. */
-export function jsonObjectText(text: string): string {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error('Missing review')
-  return text.slice(start, end + 1)
+type Reviewer = {
+  kind: 'openai'
+  name: string
+  verifier: string
+  model: string
+  provider: ModelProvider
 }
 
 /**
