@@ -32,9 +32,8 @@ notice recommends rotating them, so use fresh keys where you can.
 | `EMAIL_FROM` | Optional sender, default `Hi-chat <login@hi-techie.dev>` |
 | `AUTH_SECRET` | Signs the login cookie and the extension's camera key. Without it, a key derived from `RESEND_API_KEY` is used, so changing either signs you out and changes the extension key |
 | `ELEVENLABS_API_KEY` | Main dictation engine |
-| `XAI_API_KEY` | Grok dictation engine |
-| `META_API_KEY` | Muse live engine (optional) |
 | `SONIOX_API_KEY`, `CARTESIA_API_KEY` | Optional engines |
+| `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Azure (Indian English), on trial: logged, never sent (optional) |
 | `EXA_API_KEY` | Accuracy mode web search (optional) |
 | `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_KEY_TOKEN` | TURN for the screen and camera (optional) |
 | `CAMERA_ICE_SERVERS` | Optional fixed STUN/TURN list (JSON) |

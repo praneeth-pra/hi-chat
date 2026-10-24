@@ -11,10 +11,9 @@ The continuous Speaker listener has been removed.
 - `core/` - `@janhq/core`, shared types and extension base classes
 - `extensions-web/` - browser storage for threads and messages
 - `relay/` - small Node server that keeps the speech API keys on the server:
-  `/api/transcribe` forwards clips to ElevenLabs and Grok (also the
-  dictation fallback), `/api/live-token` hands out short-lived tokens so the
-  browser can stream live to ElevenLabs, Soniox and Cartesia, and
-  `/api/grok-live` relays Grok's live stream
+  `/api/transcribe` forwards clips to ElevenLabs (also the dictation
+  fallback), and `/api/live-token` hands out short-lived tokens so the
+  browser can stream live to ElevenLabs, Soniox, Cartesia and Azure
 - `nginx.conf`, `Dockerfile` - the production image (static app, Groq
   pass-through at `/api/groq/`, transcription relay)
 
@@ -190,7 +189,7 @@ yarn build:web-app      # output in web-app/dist-web
 docker build -t hi-chat .
 docker run -p 8080:8080 -e PORT=8080 \
   -e LOGIN_EMAIL=... -e RESEND_API_KEY=... \
-  -e ELEVENLABS_API_KEY=... -e XAI_API_KEY=... \
+  -e ELEVENLABS_API_KEY=... \
   -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... hi-chat
 ```
 

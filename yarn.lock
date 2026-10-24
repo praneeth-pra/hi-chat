@@ -3491,6 +3491,7 @@ __metadata:
     lodash.debounce: "npm:4.0.8"
     lucide-react: "npm:0.536.0"
     mammoth: "npm:1.13.0"
+    microsoft-cognitiveservices-speech-sdk: "npm:1.46.0"
     openai: "npm:4.91.1"
     pdfjs-dist: "npm:4.10.38"
     react: "npm:19.0.0"
@@ -7537,6 +7538,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/webrtc@npm:^0.0.37":
+  version: 0.0.37
+  resolution: "@types/webrtc@npm:0.0.37"
+  checksum: 10c0/7d4d4e1c9b22cfa2ac74678df83f76157f8a81471545a147155c0926e461d6c099bb81cf1a6a8eab0f4ef46af4c429e2000369f21d9f27402ee860df01ba4a3e
+  languageName: node
+  linkType: hard
+
 "@types/whatwg-mimetype@npm:^3.0.2":
   version: 3.0.2
   resolution: "@types/whatwg-mimetype@npm:3.0.2"
@@ -8000,6 +8008,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"agent-base@npm:5":
+  version: 5.1.1
+  resolution: "agent-base@npm:5.1.1"
+  checksum: 10c0/3baa3f01072c16e3955ce7802166e576cde9831af82b262aae1c780af49c0c84e82e64ba9ef9e7d1704fe29e9f0096a78a4f998ec137360fee3cb95186f97161
+  languageName: node
+  linkType: hard
+
+"agent-base@npm:^6.0.1":
+  version: 6.0.2
+  resolution: "agent-base@npm:6.0.2"
+  dependencies:
+    debug: "npm:4"
+  checksum: 10c0/dc4f757e40b5f3e3d674bc9beb4f1048f4ee83af189bae39be99f57bf1f48dde166a8b0a5342a84b5944ee8e6ed1e5a9d801858f4ad44764e84957122fe46261
+  languageName: node
+  linkType: hard
+
 "agent-base@npm:^7.1.0, agent-base@npm:^7.1.2":
   version: 7.1.4
   resolution: "agent-base@npm:7.1.4"
@@ -8419,6 +8443,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"bent@npm:^7.3.12":
+  version: 7.3.12
+  resolution: "bent@npm:7.3.12"
+  dependencies:
+    bytesish: "npm:^0.4.1"
+    caseless: "npm:~0.12.0"
+    is-stream: "npm:^2.0.0"
+  checksum: 10c0/20f77364bcb462a6eb0ea7322442a1125ca6181ea6b94ad498b8348c678a2adf56c231a653bcac016c5d017aee91ff55b2169b69d8263a4b3c710f4121cbe615
+  languageName: node
+  linkType: hard
+
 "bignumber.js@npm:^9.0.0":
   version: 9.3.1
   resolution: "bignumber.js@npm:9.3.1"
@@ -8689,6 +8724,13 @@ __metadata:
   version: 3.1.2
   resolution: "bytes@npm:3.1.2"
   checksum: 10c0/76d1c43cbd602794ad8ad2ae94095cddeb1de78c5dddaa7005c51af10b0176c69971a6d88e805a90c2b6550d76636e43c40d8427a808b8645ede885de4a0358e
+  languageName: node
+  linkType: hard
+
+"bytesish@npm:^0.4.1":
+  version: 0.4.4
+  resolution: "bytesish@npm:0.4.4"
+  checksum: 10c0/469088f0020797dfbb61b6ce3972c91d95d79df8aacca55841ea93ac59ef3209bb04be8212b6265dfbafb7583a58dd73ca2f14e4feae36d3333a4f1509dd2eef
   languageName: node
   linkType: hard
 
@@ -11583,6 +11625,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"https-proxy-agent@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "https-proxy-agent@npm:4.0.0"
+  dependencies:
+    agent-base: "npm:5"
+    debug: "npm:4"
+  checksum: 10c0/fbba3e037ec04e1850e867064a763b86dd884baae9c5f4ad380504e321068c9e9b5de79cf2f3a28ede7c36036dce905b58d9f51703c5b3884d887114f4887f77
+  languageName: node
+  linkType: hard
+
 "https-proxy-agent@npm:^7.0.1, https-proxy-agent@npm:^7.0.6":
   version: 7.0.6
   resolution: "https-proxy-agent@npm:7.0.6"
@@ -13759,6 +13811,20 @@ __metadata:
     braces: "npm:^3.0.3"
     picomatch: "npm:^2.3.1"
   checksum: 10c0/166fa6eb926b9553f32ef81f5f531d27b4ce7da60e5baf8c021d043b27a388fb95e46a8038d5045877881e673f8134122b59624d5cecbd16eb50a42e7a6b5ca8
+  languageName: node
+  linkType: hard
+
+"microsoft-cognitiveservices-speech-sdk@npm:1.46.0":
+  version: 1.46.0
+  resolution: "microsoft-cognitiveservices-speech-sdk@npm:1.46.0"
+  dependencies:
+    "@types/webrtc": "npm:^0.0.37"
+    agent-base: "npm:^6.0.1"
+    bent: "npm:^7.3.12"
+    https-proxy-agent: "npm:^4.0.0"
+    uuid: "npm:^9.0.0"
+    ws: "npm:^8.18.2"
+  checksum: 10c0/cad886741bc0c6dfc8b4d3be49eb9973d51203c9c30ccb67d9b1f4693284c741dcb83a21bdc0d1e07c85c6f3a8fd29d63f4dc46bec4feec7c7bfb94701bba25d
   languageName: node
   linkType: hard
 
@@ -18040,7 +18106,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:^9.0.1":
+"uuid@npm:^9.0.0, uuid@npm:^9.0.1":
   version: 9.0.1
   resolution: "uuid@npm:9.0.1"
   bin:
@@ -18944,6 +19010,21 @@ __metadata:
     utf-8-validate:
       optional: true
   checksum: 10c0/eac918213de265ef7cb3d4ca348b891a51a520d839aa51cdb8ca93d4fa7ff9f6ccb339ccee89e4075324097f0a55157c89fa3f7147bde9d8d7e90335dc087b53
+  languageName: node
+  linkType: hard
+
+"ws@npm:^8.18.2":
+  version: 8.22.0
+  resolution: "ws@npm:8.22.0"
+  peerDependencies:
+    bufferutil: ^4.0.1
+    utf-8-validate: ">=5.0.2"
+  peerDependenciesMeta:
+    bufferutil:
+      optional: true
+    utf-8-validate:
+      optional: true
+  checksum: 10c0/7304d14ef38898dd366a528a85e2da389c4eebf30f4ce8a007bd2dce6025f9b619cefe44fe2354f0bad0ec541b1c9a4da06a3f3e046ab56f01fd52d5784ecfb2
   languageName: node
   linkType: hard
 

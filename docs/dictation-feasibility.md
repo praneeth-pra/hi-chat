@@ -19,7 +19,7 @@ race. The remaining improvements below are proposals.
    agreement, and invokes a judge only when the available engines disagree.
    The judge has a 1.5-second timeout; absent keys or failures retain the vote.
 5. Empty or failed live results trigger batch upload to `/api/transcribe`. The
-   relay races available ElevenLabs/Grok engines (`need=1`). Failed batch audio
+   relay races available ElevenLabs engine (`need=1`). Failed batch audio
    is retained for an explicit retry.
 6. `dictationDelivery.ts` adds text to the real prompt and a dedicated delivery
    queue. `ChatInput.tsx` sends when an answer is not streaming, attachments are

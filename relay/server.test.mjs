@@ -5,13 +5,13 @@ import {
   liveToken,
   speechLogLine,
   transcribeAll,
-  useGrokTicket,
   clipLogLine,
   dictionaryTerms,
+  azureToken,
 } from './server.mjs'
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
-const env = { XAI_API_KEY: 'x', ELEVENLABS_API_KEY: 'e' }
+const env = { OTHER_KEY: 'x', ELEVENLABS_API_KEY: 'e' }
 const engine = (name, keyVar, ms, text) => ({
   name,
   keyVar,
@@ -29,14 +29,14 @@ test('returns both transcripts, in engine order, when both answer in time', asyn
   const out = await transcribeAll(file, {
     env,
     engines: [
-      engine('grok', 'XAI_API_KEY', 60, 'grok text'),
+      engine('other', 'OTHER_KEY', 60, 'other text'),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 30, 'eleven text'),
     ],
   })
   assert.deepEqual(
     out.map((r) => [r.name, r.ok, r.text]),
     [
-      ['grok', true, 'grok text'],
+      ['other', true, 'other text'],
       ['elevenlabs', true, 'eleven text'],
     ]
   )
@@ -48,7 +48,7 @@ test('waits only the cap for the slower engine', async () => {
     env,
     waitMs: 50,
     engines: [
-      engine('grok', 'XAI_API_KEY', 20, 'fast'),
+      engine('other', 'OTHER_KEY', 20, 'fast'),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 2000, 'late'),
     ],
   })
@@ -60,9 +60,9 @@ test('waits only the cap for the slower engine', async () => {
 
 test('reports failures and skips engines with no key', async () => {
   const out = await transcribeAll(file, {
-    env: { XAI_API_KEY: 'x' },
+    env: { OTHER_KEY: 'x' },
     engines: [
-      engine('grok', 'XAI_API_KEY', 10, new Error('down')),
+      engine('other', 'OTHER_KEY', 10, new Error('down')),
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 10, 'x'),
     ],
   })
@@ -79,7 +79,7 @@ test('dictation race ignores an empty result and does not start the slower-engin
     waitMs: 1,
     engines: [
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, '  '),
-      engine('grok', 'XAI_API_KEY', 30, 'usable speech'),
+      engine('other', 'OTHER_KEY', 30, 'usable speech'),
     ],
   })
   assert.equal(out[1].text, 'usable speech')
@@ -92,7 +92,7 @@ test('dictation race resolves when all engines hear nothing', async () => {
     requireText: true,
     engines: [
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
-      engine('grok', 'XAI_API_KEY', 10, ''),
+      engine('other', 'OTHER_KEY', 10, ''),
     ],
   })
   assert.equal(out.length, 2)
@@ -104,7 +104,7 @@ test('legacy transcription race behavior is unchanged without the dictation opti
     need: 1,
     engines: [
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
-      engine('grok', 'XAI_API_KEY', 100, 'later'),
+      engine('other', 'OTHER_KEY', 100, 'later'),
     ],
   })
   assert.equal(out[0].text, '')
@@ -116,7 +116,7 @@ test('HTTP: dictation require_text option waits for nonempty speech', async () =
     waitMs: 1,
     engines: [
       engine('elevenlabs', 'ELEVENLABS_API_KEY', 0, ''),
-      engine('grok', 'XAI_API_KEY', 30, 'usable speech'),
+      engine('other', 'OTHER_KEY', 30, 'usable speech'),
     ],
   }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
@@ -142,12 +142,12 @@ test('HTTP: one upload reaches every engine with its key', async () => {
     calls.push({ url, headers: init.headers, file: init.body.get('file') })
     return new Response(
       JSON.stringify({
-        text: url.includes('x.ai') ? 'from grok' : 'from eleven',
+        text: 'from eleven',
       })
     )
   }
   const server = createRelay({
-    env: { ELEVENLABS_API_KEY: 'e', XAI_API_KEY: 'x' },
+    env: { ELEVENLABS_API_KEY: 'e' },
     fetchImpl,
   }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
@@ -166,11 +166,10 @@ test('HTTP: one upload reaches every engine with its key', async () => {
     const { results } = await res.json()
     assert.deepEqual(
       results.filter((r) => !r.off).map((r) => r.text),
-      ['from eleven', 'from grok']
+      ['from eleven']
     )
-    assert.equal(calls.length, 2)
+    assert.equal(calls.length, 1)
     assert.equal(calls[0].headers['xi-api-key'], 'e')
-    assert.equal(calls[1].headers.Authorization, 'Bearer x')
     assert.equal(calls[0].file.size, 3)
     assert.equal(calls[0].file.type, 'audio/flac')
   } finally {
@@ -284,48 +283,6 @@ test('speech log: Accuracy lines keep only key=value tokens', () => {
   )
 })
 
-test('HTTP: Grok runs with its key and the browser can shorten the wait', async () => {
-  const calls = []
-  const fetchImpl = async (url, init) => {
-    calls.push({ url, auth: init.headers.Authorization, form: init.body })
-    // Grok answers late: past the shortened wait, so it is cut off
-    if (url.includes('x.ai')) await new Promise((r) => setTimeout(r, 300))
-    return new Response(
-      JSON.stringify({ text: url.includes('x.ai') ? 'grok' : 'eleven' })
-    )
-  }
-  const server = createRelay({
-    env: { ...env, XAI_API_KEY: 'x' },
-    fetchImpl,
-  }).listen(0, '127.0.0.1')
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const form = new FormData()
-    form.append('file', new Blob([new Uint8Array([1])]), 'speaker.flac')
-    form.append('engines', 'elevenlabs,grok')
-    form.append('wait_ms', '50')
-    const res = await fetch(
-      `http://127.0.0.1:${server.address().port}/api/transcribe`,
-      { method: 'POST', body: form }
-    )
-    const { results } = await res.json()
-    assert.deepEqual(
-      results.map((r) => [r.name, r.ok]),
-      [
-        ['elevenlabs', true],
-        ['grok', false],
-      ]
-    )
-    const grok = calls.find((c) => c.url === 'https://api.x.ai/v1/stt')
-    assert.equal(grok.auth, 'Bearer x')
-    assert.equal(grok.form.get('model'), 'grok-voice-transcribe-2.0')
-    const eleven = calls.find((c) => c.url.includes('elevenlabs.io'))
-    assert.equal(eleven.form.get('language_code'), 'en')
-  } finally {
-    server.close()
-  }
-})
-
 test('race: returns as soon as two engines answer', async () => {
   const started = Date.now()
   const out = await transcribeAll(file, {
@@ -354,200 +311,14 @@ test('the clip log line carries each engine’s words', () => {
       1200,
       [
         { name: 'elevenlabs', ok: true, ms: 400, text: 'What is a "VPC"?' },
-        { name: 'grok', ok: false, ms: 0, off: true, error: 'x' },
+        { name: 'other', ok: false, ms: 0, off: true, error: 'x' },
         { name: 'soniox', ok: false, ms: 410, error: 'Too slow' },
       ],
       true
     ),
-    'clip 1200 B: elevenlabs 400 ms "What is a \\"VPC\\"?", grok off, ' +
+    'clip 1200 B: elevenlabs 400 ms "What is a \\"VPC\\"?", other off, ' +
       'soniox failed after 410 ms (Too slow)'
   )
-})
-
-test('grok live: pipes the browser socket to xAI with the key', async () => {
-  const upstreams = []
-  class FakeXai {
-    constructor(url, init) {
-      this.url = url
-      this.init = init
-      this.sent = []
-      this.readyState = 0
-      upstreams.push(this)
-      setTimeout(() => {
-        this.readyState = 1
-        this.onmessage({ data: '{"type":"transcript.created"}' })
-      }, 30)
-    }
-    send(data) {
-      this.sent.push(data)
-      if (typeof data === 'string' && data.includes('audio.done')) {
-        this.onmessage({
-          data: '{"type":"transcript.done","text":"What is EKS?"}',
-        })
-        this.readyState = 3
-        this.onclose()
-      }
-    }
-    close() {}
-  }
-  const server = createRelay({
-    env: { XAI_API_KEY: 'x' },
-    WebSocketImpl: FakeXai,
-    log: () => {},
-  }).listen(0, '127.0.0.1')
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const ticket = await liveToken({
-      env: { XAI_API_KEY: 'x' },
-      engine: 'grok',
-    })
-    assert.match(ticket, /^[0-9a-f]{48}$/)
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${server.address().port}/api/grok-live?ticket=${ticket}&keyterm=NAT+gateway&keyterm=VPC&keyterm=nat%20gateway&keyterm=${'x'.repeat(51)}`
-    )
-    const got = []
-    const closed = new Promise((r) => (ws.onclose = r))
-    ws.onmessage = (e) => got.push(JSON.parse(e.data).type)
-    await new Promise((r) => (ws.onopen = r))
-    // Sent before xAI is ready: held, then delivered in order
-    ws.send(new Uint8Array(3200))
-    ws.send(new Uint8Array(70000))
-    ws.send(JSON.stringify({ type: 'audio.done' }))
-    await closed
-    const up = upstreams[0]
-    assert.ok(up.url.startsWith('wss://api.x.ai/v1/stt?'))
-    assert.equal(new URL(up.url).searchParams.get('encoding'), 'pcm')
-    // Key terms pass through, deduplicated, without over-long ones
-    assert.deepEqual(new URL(up.url).searchParams.getAll('keyterm'), [
-      'NAT gateway',
-      'VPC',
-    ])
-    assert.equal(up.init.headers.Authorization, 'Bearer x')
-    assert.deepEqual(
-      up.sent.map((d) => (typeof d === 'string' ? d : d.length)),
-      [3200, 70000, '{"type":"audio.done"}']
-    )
-    assert.deepEqual(got, ['transcript.created', 'transcript.done'])
-  } finally {
-    server.close()
-  }
-})
-
-test('grok live: refuses a socket without a fresh ticket', async () => {
-  const server = createRelay({
-    env: { XAI_API_KEY: 'x' },
-    log: () => {},
-  }).listen(0, '127.0.0.1')
-  await new Promise((r) => server.once('listening', r))
-  const open = (ticket) =>
-    new Promise((resolve) => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${server.address().port}/api/grok-live?ticket=${ticket}`
-      )
-      ws.onopen = () => {
-        ws.close()
-        resolve('open')
-      }
-      ws.onerror = () => resolve('refused')
-    })
-  try {
-    assert.equal(await open('nope'), 'refused')
-    const ticket = await liveToken({
-      env: { XAI_API_KEY: 'x' },
-      engine: 'grok',
-    })
-    assert.equal(useGrokTicket(ticket), true)
-    // Single use
-    assert.equal(await open(ticket), 'refused')
-    await assert.rejects(
-      liveToken({ env: {}, engine: 'grok' }),
-      (err) => err.status === 503
-    )
-  } finally {
-    server.close()
-  }
-})
-
-test('muse live: sends the key in the handshake, then pipes the audio', async () => {
-  const upstreams = []
-  class FakeMeta {
-    constructor(url) {
-      this.url = url
-      this.sent = []
-      this.readyState = 0
-      upstreams.push(this)
-      setTimeout(() => {
-        this.readyState = 1
-        this.onopen()
-      }, 10)
-    }
-    send(data) {
-      this.sent.push(data)
-      if (typeof data === 'string' && data.includes('authorization'))
-        setTimeout(() => this.onmessage({ data: '{"sessionId":"s1"}' }), 20)
-      if (typeof data === 'string' && data.includes('endStream')) {
-        this.onmessage({
-          data: '{"type":"transcript","transcript":"What is EKS?","final":true}',
-        })
-        this.readyState = 3
-        this.onclose({ code: 1000 })
-      }
-    }
-    close() {}
-  }
-  const server = createRelay({
-    env: { META_API_KEY: 'm' },
-    WebSocketImpl: FakeMeta,
-    log: () => {},
-  }).listen(0, '127.0.0.1')
-  await new Promise((r) => server.once('listening', r))
-  try {
-    const ticket = await liveToken({
-      env: { META_API_KEY: 'm' },
-      engine: 'muse',
-    })
-    // A Muse ticket doesn't open Grok's socket
-    assert.equal(useGrokTicket(ticket), false)
-    const ticket2 = await liveToken({
-      env: { META_API_KEY: 'm' },
-      engine: 'muse',
-    })
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${server.address().port}/api/muse-live?ticket=${ticket2}&keyterm=EKS&keyterm=eks&keyterm=${'Performance testing tools JMeter'}`
-    )
-    const got = []
-    const closed = new Promise((r) => (ws.onclose = r))
-    ws.onmessage = (e) => got.push(JSON.parse(e.data).type)
-    await new Promise((r) => (ws.onopen = r))
-    // Sent before Meta is ready: held, then delivered in order
-    ws.send(new Uint8Array(3200))
-    ws.send(JSON.stringify({ type: 'endStream' }))
-    await closed
-    const up = upstreams[0]
-    assert.equal(up.url, 'wss://api.meta.ai/v1/asr/realtime')
-    const handshake = JSON.parse(up.sent[0])
-    assert.deepEqual(handshake, {
-      authorization: { accessToken: 'Bearer m' },
-      audioEncoding: 'PCM_16KHZ',
-      model: 'muse-voice-transcribe-1.0',
-      mode: 'PUSH_TO_TALK',
-      partialMode: 'CUMULATIVE',
-      emitAudioProgress: false,
-      languageBias: ['English'],
-      keywords: ['EKS'],
-    })
-    assert.deepEqual(
-      up.sent.slice(1).map((d) => (typeof d === 'string' ? d : d.length)),
-      [3200, '{"type":"endStream"}']
-    )
-    assert.deepEqual(got, ['ready', 'transcript'])
-    await assert.rejects(
-      liveToken({ env: {}, engine: 'muse' }),
-      (err) => err.status === 503
-    )
-  } finally {
-    server.close()
-  }
 })
 
 test('soniox live: a temporary key plus the dictionary as terms', async () => {
@@ -654,7 +425,7 @@ test('absolute deadline resolves even if no engine honors cancellation', async (
     engines: [
       {
         name: 'stuck',
-        keyVar: 'XAI_API_KEY',
+        keyVar: 'OTHER_KEY',
         run: () => new Promise(() => {}),
       },
     ],
@@ -672,7 +443,7 @@ test('client cancellation releases the transcription race and aborts engines', a
     engines: [
       {
         name: 'stuck',
-        keyVar: 'XAI_API_KEY',
+        keyVar: 'OTHER_KEY',
         run: (_file, _key, signal) => {
           engineSignal = signal
           return new Promise(() => {})
@@ -688,26 +459,26 @@ test('client cancellation releases the transcription race and aborts engines', a
 
 test('default diagnostics keep timings while withholding transcript text', () => {
   assert.equal(
-    clipLogLine(8, [{ name: 'grok', ok: true, ms: 20, text: 'secret' }]),
-    'clip 8 B: grok 20 ms 6 chars'
+    clipLogLine(8, [{ name: 'other', ok: true, ms: 20, text: 'secret' }]),
+    'clip 8 B: other 20 ms 6 chars'
   )
   assert.equal(
     speechLogLine(
       Buffer.from(
         JSON.stringify({
-          line: 'dictation auto: sent=grok total=25ms grok=20ms | grok: "secret"',
+          line: 'dictation auto: sent=other total=25ms other=20ms | other: "secret"',
         })
       )
     ),
-    'speech dictation auto: sent=grok total=25ms grok=20ms'
+    'speech dictation auto: sent=other total=25ms other=20ms'
   )
   assert.equal(
     speechLogLine(
       Buffer.from(
-        JSON.stringify({ line: 'dictation grok: 25 ms after stop, 6 chars' })
+        JSON.stringify({ line: 'dictation other: 25 ms after stop, 6 chars' })
       )
     ),
-    'speech dictation grok: 25 ms after stop, 6 chars'
+    'speech dictation other: 25 ms after stop, 6 chars'
   )
   assert.equal(
     speechLogLine(Buffer.from(JSON.stringify({ line: 'secret' }))),
@@ -782,5 +553,32 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   assert.equal(
     speechLogLine(body(line.replace('openai_gpt-oss-20b', 'private_text'))),
     'speech diagnostic text omitted'
+  )
+})
+
+test('azure live: the key becomes a region-tagged token, never sent itself', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, headers: init.headers })
+    return new Response('tok123')
+  }
+  const env = { AZURE_SPEECH_KEY: 'k', AZURE_SPEECH_REGION: ' CentralIndia ' }
+  assert.equal(await azureToken({ env, fetchImpl }), 'centralindia:tok123')
+  assert.equal(
+    calls[0].url,
+    'https://centralindia.api.cognitive.microsoft.com/sts/v1.0/issueToken'
+  )
+  assert.equal(calls[0].headers['Ocp-Apim-Subscription-Key'], 'k')
+  assert.equal(
+    await liveToken({ env, fetchImpl, engine: 'azure' }),
+    'centralindia:tok123'
+  )
+  await assert.rejects(azureToken({ env: {}, fetchImpl }), { status: 503 })
+  await assert.rejects(
+    azureToken({
+      env: { AZURE_SPEECH_KEY: 'k', AZURE_SPEECH_REGION: 'evil.com/x' },
+      fetchImpl,
+    }),
+    { status: 503 }
   )
 })

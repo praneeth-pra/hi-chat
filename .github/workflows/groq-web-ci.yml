@@ -43,7 +43,7 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/transcribe)" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/code)" = 503
           # With LOGIN_EMAIL: a signed cookie (as /auth/verify sets it) opens everything
-          docker run -d --name jan-web-key -e PORT=8081 -e LOGIN_EMAIL=ci@example.com -e RESEND_API_KEY=fake-key -e AUTH_SECRET=ci-secret -e ELEVENLABS_API_KEY=fake-key -e XAI_API_KEY=fake-key -p 8081:8081 jan-web
+          docker run -d --name jan-web-key -e PORT=8081 -e LOGIN_EMAIL=ci@example.com -e RESEND_API_KEY=fake-key -e AUTH_SECRET=ci-secret -e ELEVENLABS_API_KEY=fake-key -p 8081:8081 jan-web
           for i in $(seq 1 30); do curl -sf http://localhost:8081/login > /dev/null && break; sleep 1; done
           exp="$(( $(date +%s) + 3600 ))000"
           sig=$(printf '%s' "$exp:ci@example.com" | openssl dgst -sha256 -hmac ci-secret | awk '{print $NF}')
@@ -71,7 +71,7 @@ jobs:
           # Browser Origin checks use the public host forwarded by nginx.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' http://localhost:8081/auth/code)" = 403
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: https://evil.example' http://localhost:8081/api/live-token)" = 403
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: http://localhost:8081' --data '{"line":"dictation grok: 10 ms after stop, 6 chars"}' http://localhost:8081/api/speech-log)" = 204
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -b "$C" -H 'Origin: http://localhost:8081' --data '{"line":"dictation soniox: 10 ms after stop, 6 chars"}' http://localhost:8081/api/speech-log)" = 204
           # Groq pass-through reaches api.groq.com (no key, so Groq itself answers 401)
           curl -s -b "$C" http://localhost:8081/api/groq/openai/v1/models | grep -qi 'api key'
           # Cerebras pass-through reaches api.cerebras.ai, which refuses the missing key
@@ -103,7 +103,7 @@ jobs:
           sleep 2
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/mirror-link?link=$L" || true)" = 101
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=send&link=$L" || true)" = 101
-          # One upload reaches the relay, which tries both engines
+          # One upload reaches the relay, which tries ElevenLabs
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac
           for i in $(seq 1 30); do
@@ -114,4 +114,3 @@ jobs:
           echo "Relay with fake keys: $code $(cat body.json)"
           test "$code" = 502
           grep -q '"name":"elevenlabs"' body.json
-          grep -q '"name":"grok"' body.json

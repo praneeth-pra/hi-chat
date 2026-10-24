@@ -15,10 +15,7 @@ import {
 import {
   elevenLabsTerms,
   CartesiaLiveTranscriber,
-  GrokLiveTranscriber,
   LiveTranscriber,
-  MuseLiveTranscriber,
-  SarvamLiveTranscriber,
   SonioxLiveTranscriber,
 } from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
@@ -33,6 +30,7 @@ import {
   warmJudges,
 } from '@/lib/dictationJudge'
 import { withCodingTerms } from '@/lib/keyTerms'
+import { AzureLiveTranscriber } from '@/lib/azureSpeech'
 import { useDictationEnabled } from '@/hooks/useDictationEnabled'
 
 /**
@@ -45,13 +43,11 @@ import { useDictationEnabled } from '@/hooks/useDictationEnabled'
  * Which service turns your voice into text. Soniox gets your dictionary as
  * context terms and Cartesia the 100 that fit; all of them stream live while
  * you talk. Auto races the engines chosen in Settings (Cartesia, Soniox and
- * ElevenLabs by default; Grok, Muse or Sarvam can be added): as soon as two agree their text
+ * ElevenLabs by default): as soon as two agree their text
  * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
-  | 'grok'
-  | 'muse'
-  | 'sarvam'
+  | 'azure'
   | 'elevenlabs'
   | 'soniox'
   | 'cartesia'
@@ -60,10 +56,8 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'auto', label: 'Auto (race the chosen engines)' },
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
-  { value: 'grok', label: 'Grok (live)' },
-  { value: 'muse', label: 'Muse (live)' },
-  { value: 'sarvam', label: 'Sarvam (Indian English)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
+  { value: 'azure', label: 'Azure (Indian English, test)' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
 
@@ -529,7 +523,7 @@ export function switchMic() {
 }
 
 /**
- * The relay's batch route (ElevenLabs and Grok, the first answer wins), for
+ * The relay's batch route (ElevenLabs), for
  * a dictation the live engines lost. Resolves to its text.
  */
 async function transcribe(samples: Float32Array): Promise<string> {
@@ -584,26 +578,10 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       elevenLabsTerms(keyTerms())
     )
-  if (engine === 'grok')
-    return new GrokLiveTranscriber(
-      fetchLiveToken('grok'),
-      undefined,
-      undefined,
-      keyTerms()
-    )
-  if (engine === 'muse')
-    return new MuseLiveTranscriber(
-      fetchLiveToken('muse'),
-      undefined,
-      undefined,
-      keyTerms()
-    )
-  if (engine === 'sarvam')
-    return new SarvamLiveTranscriber(
-      fetchLiveToken('sarvam'),
-      undefined,
-      undefined,
-      keyTerms()
+  if (engine === 'azure')
+    return new AzureLiveTranscriber(
+      fetchLiveKeyWithTerms('azure'),
+      withCodingTerms(keyTerms())
     )
   if (engine === 'soniox')
     return new SonioxLiveTranscriber(
@@ -625,11 +603,27 @@ export const AUTO_ENGINE_CHOICES = [
   'cartesia',
   'soniox',
   'elevenlabs',
-  'grok',
-  'muse',
-  // Indian English; off until chosen in Settings
-  'sarvam',
+  // Indian English, on trial: off until ticked in Settings, and even then
+  // only logged beside the others (TEST_ENGINES), never used
+  'azure',
 ] as const satisfies readonly DictationEngine[]
+/**
+ * Engines on trial: they hear every clip and their text is logged beside the
+ * others' (for comparing on real interviews), but it never counts towards
+ * what is sent, so trying one can't make dictation worse or slower.
+ */
+export const TEST_ENGINES: readonly DictationEngine[] = ['azure']
+
+/** The engines whose text decides what is sent: all but the ones on trial,
+ * unless only engines on trial were chosen. */
+export function countedEngines<T extends { engine: DictationEngine }>(
+  jobs: T[]
+): T[] {
+  const trial = (e: DictationEngine) => TEST_ENGINES.includes(e)
+  return jobs.some((j) => !trial(j.engine))
+    ? jobs.filter((j) => !trial(j.engine))
+    : jobs
+}
 export type AutoEngine = (typeof AUTO_ENGINE_CHOICES)[number]
 const DEFAULT_AUTO_ENGINES: AutoEngine[] = ['cartesia', 'soniox', 'elevenlabs']
 const AUTO_ENGINES_STORAGE_KEY = 'dictation-auto-engines'
@@ -869,12 +863,15 @@ export async function stopDictation() {
       const jobs = autoLive.map((l) =>
         timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
       )
+      const counted = countedEngines(jobs)
       // Known mistakes fixed first, so two engines sharing one still agree
       // on the right text
-      const results = (await gatherAuto(jobs, AUTO_DEADLINE_MS)).map((r) => ({
-        ...r,
-        text: applyFixes(r.text),
-      }))
+      const results = (await gatherAuto(counted, AUTO_DEADLINE_MS)).map(
+        (r) => ({
+          ...r,
+          text: applyFixes(r.text),
+        })
+      )
       const best = pickBest(results)
       const judgeStart = Date.now()
       const elapsed = judgeStart - stoppedAt

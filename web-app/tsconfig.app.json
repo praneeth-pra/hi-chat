@@ -6,6 +6,9 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
+    /* Only these global types: the speech SDK's old @types/webrtc would
+       otherwise replace the browser's own WebRTC types */
+    "types": [],
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -26,9 +29,17 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@janhq/conversational-extension": ["../extensions-web/src/conversational-web/index.ts"]
+      "@janhq/conversational-extension": [
+        "../extensions-web/src/conversational-web/index.ts"
+      ]
     }
   },
   "include": ["src"],
-  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.spec.ts", "src/**/*.spec.tsx"]
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx"
+  ]
 }

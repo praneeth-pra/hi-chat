@@ -2,11 +2,12 @@ import { viaGroqProxy } from '@/lib/groqProxy'
 
 /**
  * Key terms: technical words the speaker is likely to say (VPC, NAT gateway,
- * Direct Connect). They are kept on the assistant, sent to Grok live to bias
- * its transcription, and given to the judge so it can fix a misheard term.
+ * Direct Connect). They are kept on the assistant, sent to the live engines
+ * to bias their transcription, and given to the judge so it can fix a
+ * misheard term.
  */
 
-/** xAI's limits: 100 terms of up to 50 characters each. */
+/** Up to 100 terms of up to 50 characters each. */
 export const MAX_KEY_TERMS = 100
 export const MAX_KEY_TERM_CHARS = 50
 
@@ -35,7 +36,7 @@ export const parseKeyTerms = (text: string, max = MAX_KEY_TERMS) =>
 /**
  * Coding-round words speech engines often mishear (09 Oct: "bubble shot",
  * "shorting", "intending to put oil" for insertion sort). Only the judge gets
- * them, after the assistant's own terms, so they don't use up Grok's 100.
+ * them, after the assistant's own terms, so they don't use up the 100.
  */
 export const CODING_KEY_TERMS = [
   'sorting',
@@ -62,7 +63,7 @@ export const withCodingTerms = (terms: string[]) =>
 
 /**
  * Your own dictionary (for example Wispr Flow's), kept in this browser. It
- * can be far longer than the 100 terms Grok takes; "Suggest" on an assistant
+ * can be far longer than the 100 key terms; "Suggest" on an assistant
  * picks the ones that fit it.
  */
 export const DICTIONARY_STORAGE_KEY = 'speaker-dictionary'

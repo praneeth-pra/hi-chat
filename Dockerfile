@@ -44,15 +44,11 @@ COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 ENV PORT=80
-# Dictation transcription keys; set them as Railway variables. ElevenLabs is the
-# main engine; Grok (xAI) is an optional second engine.
+# Dictation transcription keys; set them as Railway variables.
 ENV ELEVENLABS_API_KEY=""
-ENV XAI_API_KEY=""
-# Optional Muse (Meta) live engine for Auto dictation.
-ENV META_API_KEY=""
-# Optional Sarvam engine for Auto dictation (Indian English), off until chosen
-# in Settings.
-ENV SARVAM_API_KEY=""
+# Optional Azure Speech test engine (en-IN), e.g. AZURE_SPEECH_REGION=centralindia
+ENV AZURE_SPEECH_KEY=""
+ENV AZURE_SPEECH_REGION=""
 # Optional web sources for Accuracy mode; set securely in Railway.
 ENV EXA_API_KEY=""
 # Site login (relay/auth.mjs): a code emailed to LOGIN_EMAIL through Resend.

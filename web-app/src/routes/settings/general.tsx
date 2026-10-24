@@ -58,9 +58,7 @@ const ENGINE_LABELS: Record<string, string> = {
   cartesia: 'Cartesia',
   soniox: 'Soniox',
   elevenlabs: 'ElevenLabs',
-  grok: 'Grok',
-  muse: 'Muse',
-  sarvam: 'Sarvam (Indian English)',
+  azure: 'Azure (test only)',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,7 +254,7 @@ function General() {
               {dictationEngine === 'auto' && (
                 <CardItem
                   title="Auto engines"
-                  description="Race live; sent as soon as two agree. Sarvam (tuned for Indian English) is off until ticked here; it needs SARVAM_API_KEY in Railway."
+                  description="Race live; sent as soon as two agree. Azure (Indian English) is on trial: when ticked it hears every clip and its text goes to the speech log for comparison, but never decides what is sent. It needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION in Railway."
                   actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -513,7 +511,6 @@ function General() {
                 }
               />
             </Card>
-
           </div>
         </div>
       </div>

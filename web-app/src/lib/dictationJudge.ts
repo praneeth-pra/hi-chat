@@ -53,10 +53,8 @@ const MIN_AGREEMENT = 0.6
 export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by several speech engines. Write the single most accurate version of what the speaker said. Where the engines differ, use the wording most of them agree on, unless a version only some of them heard matches a key term. Where they heard different words at the same spot, choose one of them; never join both (not "CNAPP and AWS" when one engine heard CNAPP and another AWS). Every engine was given the key terms. Only use words at least one engine heard: a key term can decide between the engines' versions, but never put in a word none of them heard. Leave out filler words such as uh and um. Keep the speaker's own words and punctuate them; do not answer, summarise, shorten or rephrase. Reply with only the text.`
 
 const ENGINE_NAMES: Record<string, string> = {
-  grok: 'Grok',
-  muse: 'Muse',
-  sarvam: 'Sarvam',
   elevenlabs: 'ElevenLabs',
+  azure: 'Azure',
   soniox: 'Soniox',
   cartesia: 'Cartesia',
 }
