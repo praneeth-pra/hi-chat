@@ -397,6 +397,76 @@ describe('Accuracy review gate', () => {
       ])
     )
   })
+  it('stops waiting for slow audits shortly after the recovery answer is ready', async () => {
+    vi.mocked(sendCompletion).mockImplementation(async (...args) =>
+      (args[6]?.response_format as any).json_schema?.name ===
+      'accuracy_corrected_answer'
+        ? response({ answer: 'Recovered answer' })
+        : new Promise(() => {})
+    )
+    const started = Date.now()
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      providers,
+      'groq',
+      new AbortController().signal,
+      evidence,
+      undefined,
+      '',
+      Date.now(),
+      undefined,
+      50
+    )
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(await text(checked.completion)).toBe('Recovered answer')
+    expect(checked.review).toMatchObject({
+      verdict: 'unverified',
+      fallback: 'reviewer-answer',
+    })
+    expect(checked.review?.reviewAttempts).toEqual(
+      expect.arrayContaining(['groq:cancelled', 'cerebras:cancelled'])
+    )
+  })
+  it('still prefers an audit that passes within the extra wait', async () => {
+    vi.mocked(sendCompletion).mockImplementation(async (...args) => {
+      if (
+        (args[6]?.response_format as any).json_schema?.name ===
+        'accuracy_corrected_answer'
+      )
+        return response({ answer: 'Recovered answer' })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return response({
+        verdict: 'approved',
+        claims: [
+          {
+            text: 'Unverified draft',
+            support: 'source',
+            sourceId: 1,
+            quote: 'Technical evidence',
+          },
+        ],
+        unsupportedClaims: [],
+      })
+    })
+    const checked = await verifyAccuracyCompletion(
+      draft(),
+      thread,
+      [],
+      providers,
+      'groq',
+      new AbortController().signal,
+      evidence,
+      undefined,
+      '',
+      Date.now(),
+      undefined,
+      1000
+    )
+    expect(await text(checked.completion)).toBe('Unverified draft')
+    expect(checked.review?.verdict).toBe('approved')
+  })
   it('reports safe failure categories without echoing provider bodies or sensitive details', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.mocked(sendCompletion).mockRejectedValue(
