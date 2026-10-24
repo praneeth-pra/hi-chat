@@ -60,6 +60,7 @@ const ENGINE_LABELS: Record<string, string> = {
   elevenlabs: 'ElevenLabs',
   grok: 'Grok',
   muse: 'Muse',
+  sarvam: 'Sarvam (Indian English)',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -255,7 +256,7 @@ function General() {
               {dictationEngine === 'auto' && (
                 <CardItem
                   title="Auto engines"
-                  description="Race live; sent as soon as two agree."
+                  description="Race live; sent as soon as two agree. Sarvam (tuned for Indian English) is off until ticked here; it needs SARVAM_API_KEY in Railway."
                   actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

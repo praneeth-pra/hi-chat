@@ -24,11 +24,17 @@ export function reportSpeech(line: string) {
 
 /**
  * Live mode: the relay hands out single-use ElevenLabs streaming tokens, or
- * tickets for its own Grok or Muse live
- * socket ({"engine":"grok"|"muse"}), or temporary Soniox or Cartesia keys
+ * tickets for its own Grok, Muse or Sarvam live
+ * socket ({"engine":"grok"|"muse"|"sarvam"}), or temporary Soniox or Cartesia keys
  * ({"engine":"soniox"|"cartesia"}, which come with P's dictionary as `terms`).
  */
-type LiveEngine = 'elevenlabs' | 'grok' | 'muse' | 'soniox' | 'cartesia'
+type LiveEngine =
+  | 'elevenlabs'
+  | 'grok'
+  | 'muse'
+  | 'sarvam'
+  | 'soniox'
+  | 'cartesia'
 export const LIVE_TOKEN_URL = '/api/live-token'
 
 async function requestLiveToken(

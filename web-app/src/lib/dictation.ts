@@ -18,6 +18,7 @@ import {
   GrokLiveTranscriber,
   LiveTranscriber,
   MuseLiveTranscriber,
+  SarvamLiveTranscriber,
   SonioxLiveTranscriber,
 } from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
@@ -44,12 +45,13 @@ import { useDictationEnabled } from '@/hooks/useDictationEnabled'
  * Which service turns your voice into text. Soniox gets your dictionary as
  * context terms and Cartesia the 100 that fit; all of them stream live while
  * you talk. Auto races the engines chosen in Settings (Cartesia, Soniox and
- * ElevenLabs by default; Grok or Muse can be added): as soon as two agree their text
+ * ElevenLabs by default; Grok, Muse or Sarvam can be added): as soon as two agree their text
  * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
   | 'grok'
   | 'muse'
+  | 'sarvam'
   | 'elevenlabs'
   | 'soniox'
   | 'cartesia'
@@ -60,6 +62,7 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'grok', label: 'Grok (live)' },
   { value: 'muse', label: 'Muse (live)' },
+  { value: 'sarvam', label: 'Sarvam (Indian English)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
@@ -595,6 +598,13 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       keyTerms()
     )
+  if (engine === 'sarvam')
+    return new SarvamLiveTranscriber(
+      fetchLiveToken('sarvam'),
+      undefined,
+      undefined,
+      keyTerms()
+    )
   if (engine === 'soniox')
     return new SonioxLiveTranscriber(
       fetchLiveKeyWithTerms('soniox'),
@@ -617,6 +627,8 @@ export const AUTO_ENGINE_CHOICES = [
   'elevenlabs',
   'grok',
   'muse',
+  // Indian English; off until chosen in Settings
+  'sarvam',
 ] as const satisfies readonly DictationEngine[]
 export type AutoEngine = (typeof AUTO_ENGINE_CHOICES)[number]
 const DEFAULT_AUTO_ENGINES: AutoEngine[] = ['cartesia', 'soniox', 'elevenlabs']

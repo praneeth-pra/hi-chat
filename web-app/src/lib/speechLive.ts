@@ -217,6 +217,7 @@ export function toPcm16(samples: Float32Array): ArrayBuffer {
 /** Grok live goes through our relay, which adds XAI_API_KEY (wsProxy.mjs). */
 export const GROK_LIVE_PATH = '/api/grok-live'
 export const MUSE_LIVE_PATH = '/api/muse-live'
+export const SARVAM_LIVE_PATH = '/api/sarvam-live'
 
 /**
  * When `text` starts with the same characters as `prefix` (ignoring spaces),
@@ -544,6 +545,175 @@ export class MuseLiveTranscriber {
       if (msg.final) this.resolveWith(text || this.latest)
     } else if (msg.type === 'error') {
       this.abort(new Error(`Muse live: ${msg.message ?? 'error'}`))
+    }
+  }
+
+  private close() {
+    const socket = this.socket
+    if (!socket) return
+    socket.onclose = null
+    socket.onerror = null
+    socket.onmessage = null
+    try {
+      socket.close()
+    } catch {
+      // Already closed
+    }
+  }
+}
+
+/**
+ * One clip streamed to Sarvam (saaras:v4, Indian English) through the relay,
+ * which adds SARVAM_API_KEY (wsProxy.mjs). Sarvam sends a final transcript
+ * for each stretch of speech it hears end (no partials); `finish()` asks it
+ * to flush what it has heard since, and resolves with all of it joined.
+ */
+export class SarvamLiveTranscriber {
+  private onPreview?: (text: string) => void
+  private socket: SocketLike | null = null
+  private queue: (ArrayBuffer | string)[] = []
+  private pending: Float32Array[] = []
+  private pendingLen = 0
+  private failed: Error | null = null
+  private done: ((text: string) => void) | null = null
+  private fail: ((err: Error) => void) | null = null
+  private parts: string[] = []
+  // Speech Sarvam has heard start but not yet written out
+  private speaking = false
+  private settle: ReturnType<typeof setTimeout> | undefined
+
+  setPreviewListener(listener: (text: string) => void) {
+    this.onPreview = listener
+  }
+
+  constructor(
+    ticket: Promise<string>,
+    makeSocket: (url: string) => SocketLike = (url) => new WebSocket(url),
+    origin: string = typeof location !== 'undefined'
+      ? location.origin
+      : 'http://localhost',
+    // Words to bias Sarvam toward; the relay passes them on
+    keyterms: string[] = []
+  ) {
+    ticket.then(
+      (t) => {
+        if (this.failed) return
+        const params = new URLSearchParams({ ticket: t })
+        for (const term of keyterms) params.append('keyterm', term)
+        const url = `${origin.replace(/^http/, 'ws')}${SARVAM_LIVE_PATH}?${params}`
+        const socket = makeSocket(url)
+        this.socket = socket
+        socket.onopen = () => {
+          for (const msg of this.queue.splice(0)) socket.send(msg)
+        }
+        socket.onmessage = (e) => this.onMessage(e.data)
+        socket.onerror = () =>
+          this.abort(new Error('Sarvam live connection failed'))
+        socket.onclose = () => {
+          if (this.done) this.resolveWith(this.text())
+          else this.abort(new Error('Sarvam live connection closed early'))
+        }
+      },
+      (err: Error) => this.abort(err)
+    )
+  }
+
+  /** Adds 16 kHz audio; sent in ~100 ms blocks. */
+  push(samples: Float32Array) {
+    this.pending.push(samples)
+    this.pendingLen += samples.length
+    if (this.pendingLen >= SEND_SAMPLES) this.flush()
+  }
+
+  /** Ends the audio and waits for the final text. */
+  finish(timeoutMs = LIVE_COMMIT_TIMEOUT_MS): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (this.failed) return reject(this.failed)
+      const timer = setTimeout(() => {
+        if (this.parts.length) this.resolveWith(this.text())
+        else this.abort(new Error('Sarvam live transcript took too long'))
+      }, timeoutMs)
+      this.done = (text) => {
+        clearTimeout(timer)
+        resolve(text)
+      }
+      this.fail = (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+      if (this.pendingLen) this.flush()
+      this.sendMsg(JSON.stringify({ type: 'flush' }))
+      // Everything heard is already written out: nothing to wait for
+      if (!this.speaking && this.parts.length) this.settleSoon()
+    })
+  }
+
+  /** Stops streaming; a pending finish() rejects with `err`. */
+  abort(err = new Error('Sarvam live transcription stopped')) {
+    if (this.failed) return
+    this.failed = err
+    clearTimeout(this.settle)
+    this.close()
+    this.fail?.(err)
+  }
+
+  private text() {
+    return this.parts.join(' ').replace(/\s+/g, ' ').trim()
+  }
+
+  // After the flush, a moment for any last stretch to arrive
+  private settleSoon() {
+    clearTimeout(this.settle)
+    this.settle = setTimeout(() => this.resolveWith(this.text()), 150)
+  }
+
+  private resolveWith(text: string) {
+    const finish = this.done
+    if (!finish) return
+    clearTimeout(this.settle)
+    this.done = null
+    this.fail = null
+    this.failed = new Error('Sarvam live transcription finished')
+    this.close()
+    finish(text.trim())
+  }
+
+  private flush() {
+    const merged = new Float32Array(this.pendingLen)
+    let offset = 0
+    for (const chunk of this.pending.splice(0)) {
+      merged.set(chunk, offset)
+      offset += chunk.length
+    }
+    this.pendingLen = 0
+    this.sendMsg(toPcm16(merged))
+  }
+
+  private sendMsg(msg: ArrayBuffer | string) {
+    if (this.socket?.readyState === 1) this.socket.send(msg)
+    else this.queue.push(msg)
+  }
+
+  private onMessage(data: unknown) {
+    let msg: {
+      type?: string
+      data?: { transcript?: string; signal_type?: string; error?: string }
+    }
+    try {
+      msg = JSON.parse(String(data))
+    } catch {
+      return
+    }
+    if (msg.type === 'data') {
+      const text = msg.data?.transcript?.trim() ?? ''
+      if (text) this.parts.push(text)
+      this.speaking = false
+      this.onPreview?.(this.text())
+      if (this.done) this.settleSoon()
+    } else if (msg.type === 'events') {
+      if (msg.data?.signal_type === 'START_SPEECH') this.speaking = true
+    } else if (msg.type === 'error') {
+      this.abort(new Error(`Sarvam live: ${msg.data?.error ?? 'error'}`))
     }
   }
 
