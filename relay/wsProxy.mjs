@@ -16,6 +16,11 @@ const MAX_MESSAGE_BYTES = 1024 * 1024
 export const GROK_LIVE_URL = 'wss://api.x.ai/v1/stt'
 export const MUSE_LIVE_URL = 'wss://api.meta.ai/v1/asr/realtime'
 export const MUSE_MODEL = 'muse-voice-transcribe-1.0'
+export const SARVAM_LIVE_URL = 'wss://api.sarvam.ai/speech-to-text/ws'
+export const SARVAM_MODEL = 'saaras:v4'
+// Sarvam takes up to 50 key terms of up to 64 characters (saaras:v4)
+const SARVAM_TERMS = 50
+const SARVAM_TERM_CHARS = 64
 const MUSE_KEYWORD_CHARS = 30
 
 /** xAI accepts up to 100 key terms of up to 50 characters each. */
@@ -417,6 +422,164 @@ export function museLive(
   upstream.onerror = () => {
     client.send(
       JSON.stringify({ type: 'error', message: 'Muse live connection failed' })
+    )
+    finish('failed')
+  }
+  upstream.onclose = (e) =>
+    finish(
+      `done (${e?.code ?? 'closed'}${e?.reason ? ` ${String(e.reason).slice(0, 200)}` : ''})`
+    )
+}
+
+/** 16-bit mono PCM as a WAV file (each audio message to Sarvam is one). */
+export function pcmToWav(pcm, sampleRate = 16000) {
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16) // fmt chunk size
+  header.writeUInt16LE(1, 20) // PCM
+  header.writeUInt16LE(1, 22) // mono
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(sampleRate * 2, 28) // bytes per second
+  header.writeUInt16LE(2, 32) // bytes per sample
+  header.writeUInt16LE(16, 34) // bits per sample
+  header.write('data', 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+
+/**
+ * Pipes one browser socket to Sarvam's streaming speech-to-text (saaras:v4,
+ * Indian English). Sarvam takes the key in a header, so the browser can't
+ * connect itself. The browser sends 16 kHz PCM; each block goes to Sarvam as
+ * a small WAV file in its JSON audio message. The browser's
+ * {"type":"flush"} asks Sarvam for the text of what it has heard so far.
+ * Sarvam's replies ("data" with a transcript per stretch of speech, "events"
+ * for speech start and end, "error") go back unchanged.
+ */
+export function sarvamLive(
+  client,
+  {
+    env = process.env,
+    WebSocketImpl = globalThis.WebSocket,
+    log = console.log,
+    keyterms = [],
+  } = {}
+) {
+  const started = Date.now()
+  const key = env.SARVAM_API_KEY
+  if (!key || !WebSocketImpl) {
+    client.send(
+      JSON.stringify({
+        type: 'error',
+        data: {
+          error: key ? 'WebSocket client unavailable' : 'SARVAM_API_KEY not set',
+        },
+      })
+    )
+    return client.close(1011)
+  }
+  const terms = keyterms
+    .filter((term) => term.length <= SARVAM_TERM_CHARS)
+    .slice(0, SARVAM_TERMS)
+  const params = new URLSearchParams({
+    'language-code': 'en-IN',
+    model: SARVAM_MODEL,
+    mode: 'transcribe',
+    sample_rate: '16000',
+    input_audio_codec: 'wav',
+    vad_signals: 'true',
+    flush_signal: 'true',
+  })
+  if (terms.length) params.set('keyterms', JSON.stringify(terms))
+  const upstream = new WebSocketImpl(`${SARVAM_LIVE_URL}?${params}`, {
+    headers: { 'Api-Subscription-Key': key },
+  })
+  upstream.binaryType = 'arraybuffer'
+  let ready = false
+  const held = []
+  let heldBytes = 0
+  let done = false
+  const readiness = setTimeout(() => finish('readiness timeout'), 10_000)
+  readiness.unref?.()
+  const finish = (why) => {
+    if (done) return
+    done = true
+    clearTimeout(readiness)
+    held.length = 0
+    heldBytes = 0
+    log(`sarvam live ${why} after ${Date.now() - started} ms`)
+    try {
+      upstream.close()
+    } catch {
+      // Already closed
+    }
+    client.close()
+  }
+  // Audio as Sarvam's JSON message; a text message (flush) as it is
+  const toSarvam = (data) =>
+    typeof data === 'string'
+      ? data
+      : JSON.stringify({
+          audio: {
+            data: pcmToWav(Buffer.from(data)).toString('base64'),
+            sample_rate: 16000,
+            encoding: 'audio/wav',
+          },
+        })
+  upstream.onopen = () => {
+    ready = true
+    clearTimeout(readiness)
+    log(
+      `sarvam live ready in ${Date.now() - started} ms` +
+        (terms.length ? ` (${terms.length} key terms)` : '')
+    )
+    client.send(JSON.stringify({ type: 'ready' }))
+    for (const msg of held.splice(0)) upstream.send(toSarvam(msg))
+    heldBytes = 0
+  }
+  client.onmessage = (data) => {
+    if (done) return
+    const size =
+      typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+    if (
+      (ready ? upstream.bufferedAmount : heldBytes) + size >
+      MAX_MESSAGE_BYTES
+    )
+      return finish('audio backlog exceeded')
+    if (ready && upstream.readyState === 1) upstream.send(toSarvam(data))
+    else {
+      held.push(data)
+      heldBytes += size
+    }
+  }
+  client.onclose = () => finish('closed by browser')
+  upstream.onmessage = (e) => {
+    if (done) return
+    const text =
+      typeof e.data === 'string' ? e.data : Buffer.from(e.data).toString('utf8')
+    // Sarvam's errors say what was wrong with the request (never speech text)
+    if (text.includes('"error"')) {
+      try {
+        const reply = JSON.parse(text)
+        if (reply.type === 'error')
+          log(
+            `sarvam live error: ${String(reply.data?.code ?? '')} ${String(reply.data?.error ?? '').slice(0, 300)}`.trim()
+          )
+      } catch {
+        // Not JSON: passed on below
+      }
+    }
+    client.send(text)
+  }
+  upstream.onerror = () => {
+    client.send(
+      JSON.stringify({
+        type: 'error',
+        data: { error: 'Sarvam live connection failed' },
+      })
     )
     finish('failed')
   }

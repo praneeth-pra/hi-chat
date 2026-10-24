@@ -17,6 +17,7 @@ import {
   cleanKeyterms,
   grokLive,
   museLive,
+  sarvamLive,
 } from './wsProxy.mjs'
 import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
@@ -218,6 +219,8 @@ export async function liveToken({
     return liveTicket('grok', env.XAI_API_KEY, 'XAI_API_KEY')
   if (engine === 'muse')
     return liveTicket('muse', env.META_API_KEY, 'META_API_KEY')
+  if (engine === 'sarvam')
+    return liveTicket('sarvam', env.SARVAM_API_KEY, 'SARVAM_API_KEY')
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
   const key = env.ELEVENLABS_API_KEY
@@ -372,7 +375,7 @@ export function dictionaryTerms(
 function liveTokenEngine(body) {
   try {
     const engine = JSON.parse(body.toString('utf8')).engine
-    return ['grok', 'muse', 'soniox', 'cartesia'].includes(engine)
+    return ['grok', 'muse', 'sarvam', 'soniox', 'cartesia'].includes(engine)
       ? engine
       : 'elevenlabs'
   } catch {
@@ -625,9 +628,14 @@ export function createRelay(options = {}) {
       send(res, err.status ?? 400, { error: err.message })
     }
   })
-  // Grok and Muse live: the browser's WebSocket is piped to xAI or Meta
+  // Grok, Muse and Sarvam live: the browser's WebSocket is piped to xAI,
+  // Meta or Sarvam
   // (see wsProxy.mjs)
-  const LIVE_PATHS = { '/api/grok-live': 'grok', '/api/muse-live': 'muse' }
+  const LIVE_PATHS = {
+    '/api/grok-live': 'grok',
+    '/api/muse-live': 'muse',
+    '/api/sarvam-live': 'sarvam',
+  }
   // Remote mirror (mirror.mjs): nginx lets only signed-in browsers through
   // STUN (and TURN, when set up) for direct connections: the camera's, and
   // the mirror's between Hi-chat and /mirror
@@ -691,7 +699,7 @@ export function createRelay(options = {}) {
     const client = acceptWebSocket(req, socket, head)
     const keyterms = cleanKeyterms(url.searchParams.getAll('keyterm'))
     if (client)
-      (engine === 'muse' ? museLive : grokLive)(client, {
+      ({ muse: museLive, sarvam: sarvamLive }[engine] ?? grokLive)(client, {
         ...options,
         keyterms,
       })

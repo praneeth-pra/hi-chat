@@ -3,6 +3,7 @@ import {
   GrokLiveTranscriber,
   LiveTranscriber,
   MuseLiveTranscriber,
+  SarvamLiveTranscriber,
   LIVE_URL,
   CartesiaLiveTranscriber,
   elevenLabsTerms,
@@ -610,5 +611,71 @@ describe('elevenLabsTerms', () => {
       'EKS',
       'RBAC',
     ])
+  })
+})
+
+describe('SarvamLiveTranscriber', () => {
+  class SarvamSocket extends FakeSocket {
+    raw: (ArrayBuffer | string)[] = []
+    send(data: string) {
+      this.raw.push(data)
+    }
+  }
+  const connect = async (keyterms: string[] = []) => {
+    let socket!: SarvamSocket
+    const live = new SarvamLiveTranscriber(
+      Promise.resolve('abc123'),
+      (url) => {
+        socket = new SarvamSocket(url)
+        return socket as unknown as WebSocket
+      },
+      'https://chat.example',
+      keyterms
+    )
+    await tick()
+    return { live, socket }
+  }
+
+  it('streams through the relay, joins each stretch of speech, and flushes at the end', async () => {
+    const previews: string[] = []
+    const { live, socket } = await connect(['Koramangala'])
+    live.setPreviewListener((t) => previews.push(t))
+    expect(socket.url).toBe(
+      'wss://chat.example/api/sarvam-live?ticket=abc123&keyterm=Koramangala'
+    )
+    live.push(new Float32Array(1600))
+    socket.open()
+    expect((socket.raw[0] as ArrayBuffer).byteLength).toBe(3200)
+    socket.reply({ type: 'ready' })
+    socket.reply({ type: 'events', data: { signal_type: 'START_SPEECH' } })
+    socket.reply({ type: 'data', data: { transcript: 'I stay in Koramangala.' } })
+    socket.reply({ type: 'events', data: { signal_type: 'START_SPEECH' } })
+    const text = live.finish()
+    expect(socket.raw.at(-1)).toBe(JSON.stringify({ type: 'flush' }))
+    socket.reply({ type: 'data', data: { transcript: 'Near Ejipura.' } })
+    await expect(text).resolves.toBe('I stay in Koramangala. Near Ejipura.')
+    expect(previews).toEqual([
+      'I stay in Koramangala.',
+      'I stay in Koramangala. Near Ejipura.',
+    ])
+    expect(socket.closed).toBe(true)
+  })
+
+  it('finishes at once when everything heard is already written out', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    socket.reply({ type: 'events', data: { signal_type: 'START_SPEECH' } })
+    socket.reply({ type: 'data', data: { transcript: 'What is EKS?' } })
+    const started = Date.now()
+    await expect(live.finish()).resolves.toBe('What is EKS?')
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('fails on an error message', async () => {
+    const { live, socket } = await connect()
+    socket.open()
+    const text = live.finish()
+    socket.reply({ type: 'error', data: { error: 'invalid key' } })
+    await expect(text).rejects.toThrow('Sarvam live: invalid key')
   })
 })
