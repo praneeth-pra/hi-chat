@@ -9,6 +9,7 @@ import {
   SonioxLiveTranscriber,
   sonioxTerms,
   toPcm16Base64,
+  resetSonioxStrict,
 } from '../speechLive'
 
 class FakeSocket {
@@ -256,6 +257,7 @@ describe('SonioxLiveTranscriber', () => {
       sample_rate: 16000,
       num_channels: 1,
       language_hints: ['en'],
+      language_hints_strict: true,
       context: { terms: ['VPC', 'kubectl', 'S3 bucket'] },
     })
     expect(socket.raw[1]).toBeInstanceOf(ArrayBuffer)
@@ -286,6 +288,23 @@ describe('SonioxLiveTranscriber', () => {
     const text = live.finish()
     socket.reply({ error_code: 401, error_message: 'Invalid API key' })
     await expect(text).rejects.toThrow('Soniox live: Invalid API key')
+  })
+
+  it('stops asking for English-only if the model refuses it', async () => {
+    const first = await connect()
+    first.socket.open()
+    const text = first.live.finish()
+    first.socket.reply({
+      error_code: 400,
+      error_message: 'Model does not support language_hints_strict.',
+    })
+    await expect(text).rejects.toThrow('language_hints_strict')
+    const next = await connect()
+    next.socket.open()
+    const config = JSON.parse(next.socket.raw[0] as string)
+    expect(config.language_hints).toEqual(['en'])
+    expect(config).not.toHaveProperty('language_hints_strict')
+    resetSonioxStrict()
   })
 
   it('fails when the relay has no Soniox key', async () => {

@@ -1,9 +1,11 @@
 import fixesFile from './dictation-fixes.txt?raw'
+import { englishOnly } from './englishOnly'
 
 /**
  * Known dictation mistakes and their fixes (dictation-fixes.txt), applied to
  * every engine's text before the engines are compared, so a mistake two
- * engines share is fixed even when the judge is skipped.
+ * engines share is fixed even when the judge is skipped. Words in other
+ * scripts are dropped first, since dictation is English only.
  */
 
 export type Fix = { from: RegExp; to: string }
@@ -32,5 +34,5 @@ export function parseFixes(file: string): Fix[] {
 const FIXES = parseFixes(fixesFile)
 
 export function applyFixes(text: string, fixes: Fix[] = FIXES): string {
-  return fixes.reduce((t, f) => t.replace(f.from, f.to), text)
+  return fixes.reduce((t, f) => t.replace(f.from, f.to), englishOnly(text))
 }
