@@ -1144,7 +1144,7 @@ const ChatInput = ({
         >
           <div
             className={cn(
-              'relative z-20 px-0 pb-12 border border-main-view-fg/[0.08] rounded-3xl text-main-view-fg bg-main-view dark:bg-surface transition-[border-color]',
+              'relative z-20 px-0 pb-11 border border-main-view-fg/[0.08] rounded-3xl text-main-view-fg bg-main-view dark:bg-surface transition-[border-color]',
               isFocused && 'border-main-view-fg/20',
               isDragOver && 'ring-2 ring-accent border-accent'
             )}
@@ -1279,7 +1279,7 @@ const ChatInput = ({
           </div>
         </div>
 
-        <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full p-2.5">
+        <div className="@container/composer absolute z-20 bg-transparent bottom-0 w-full px-2.5 py-2">
           <div className="flex justify-between items-center w-full">
             <div className="px-1 flex items-center gap-1 flex-1 min-w-0">
               <div
