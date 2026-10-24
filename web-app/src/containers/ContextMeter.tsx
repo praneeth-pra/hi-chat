@@ -18,8 +18,8 @@ const secs = (s: number) => `${s.toFixed(s < 1 ? 2 : 1)} s`
 
 /**
  * Next to the model: the network time of the latest answer (sending the
- * question until the model's first byte), coloured green under 0.5 s, amber
- * under 1 s, red from 1 s. Hovering shows the whole wait (network, thinking,
+ * question until the model's first byte), coloured green under 1 s, amber
+ * under 1.5 s, red from 1.5 s. Hovering shows the whole wait (network, thinking,
  * and for a spoken question, stop talking → first word), how much the next
  * question sends, and whether this long chat is slowing answers down.
  * Before the first answer it shows nothing.

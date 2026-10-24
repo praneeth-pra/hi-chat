@@ -25,9 +25,9 @@ export const useLastReply = create<{
   set: (last) => set({ last }),
 }))
 
-/** Green under 0.5 s, amber under 1 s, red from 1 s. */
+/** Green under 1 s, amber under 1.5 s, red from 1.5 s. */
 export const networkLevel = (s: number) =>
-  s < 0.5 ? 'light' : s < 1 ? 'medium' : 'heavy'
+  s < 1 ? 'light' : s < 1.5 ? 'medium' : 'heavy'
 
 export const formatSeconds = (s: number) =>
   s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(1)} s`

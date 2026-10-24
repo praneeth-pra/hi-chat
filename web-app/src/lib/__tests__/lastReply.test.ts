@@ -6,9 +6,11 @@ describe('network meter', () => {
     expect(formatSeconds(0.312)).toBe('312 ms')
     expect(formatSeconds(1.26)).toBe('1.3 s')
   })
-  it('is green under 0.5 s, amber under 1 s, red from 1 s', () => {
+  it('is green under 1 s, amber under 1.5 s, red from 1.5 s', () => {
     expect(networkLevel(0.31)).toBe('light')
-    expect(networkLevel(0.7)).toBe('medium')
-    expect(networkLevel(1.2)).toBe('heavy')
+    expect(networkLevel(0.99)).toBe('light')
+    expect(networkLevel(1.2)).toBe('medium')
+    expect(networkLevel(1.5)).toBe('heavy')
+    expect(networkLevel(2.4)).toBe('heavy')
   })
 })
