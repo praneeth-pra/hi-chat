@@ -10,9 +10,9 @@ describe('describeTiming', () => {
   it('names the model that answered as Settings does', () => {
     const req = { messages: 1, chars: 1, tools: 0 }
     expect(
-      describeTiming(0, 1, {}, { ...req, model: 'claude-haiku-4-5' })
+      describeTiming(0, 1, {}, { ...req, model: 'openai/gpt-oss-20b' })
         .answered_by
-    ).toBe('Claude Haiku 4.5')
+    ).toBe('Groq gpt-oss-20b')
     expect(
       describeTiming(0, 1, {}, { ...req, model: 'gpt-oss-120b' }).answered_by
     ).toBe('Cerebras gpt-oss-120b')

@@ -18,8 +18,8 @@ provider and normal streaming/reasoning settings.
   correction from the second 120B provider, labelled as lacking a complete audit.
   If neither reviewer produces a usable correction, the grounded draft is shown
   with an explicit unverified warning. See [Accuracy setup and limitations](accuracy-mode.md).
-  Claude Sonnet 5.5 is the main reviewer when a Claude provider is configured,
-  with a parallel gpt-oss hedge. Personal and behavioural questions skip web
+  The reviewers are Groq's and Cerebras's gpt-oss-120b, run at the same time;
+  Claude is not used. Personal and behavioural questions skip web
   search and are checked against the assistant's instructions and documents.
 
 Configure Groq/Cerebras keys in Model Providers. Accuracy additionally requires

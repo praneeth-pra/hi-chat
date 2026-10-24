@@ -36,8 +36,6 @@ export function getProviderLogo(provider: string) {
       return '/images/model-provider/jan.png'
     case 'llamacpp':
       return '/images/model-provider/llamacpp.svg'
-    case 'anthropic':
-      return '/images/model-provider/anthropic.svg'
     case 'huggingface':
       return '/images/model-provider/huggingface.svg'
     case 'mistral':

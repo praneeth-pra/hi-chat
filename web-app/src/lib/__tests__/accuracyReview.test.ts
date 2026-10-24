@@ -5,7 +5,6 @@ import {
   verifyAccuracyCompletion,
   getWebEvidence,
   buildAccuracyQuery,
-  CLAUDE_WINDOW_MS,
 } from '../accuracyReview'
 import { sendCompletion } from '../completion'
 import type { ChatCompletionResponse } from '../completion'
@@ -209,82 +208,9 @@ describe('Accuracy review gate', () => {
     // Two parallel audits, then one recovery answer.
     expect(sendCompletion).toHaveBeenCalledTimes(3)
   })
-  it('uses Claude Sonnet 5.5 as the main reviewer with a gpt-oss hedge', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        stop_reason: 'end_turn',
-        content: [
-          {
-            type: 'text',
-            text:
-              'Here is the review:\n' +
-              JSON.stringify({
-                verdict: 'approved',
-                answer: null,
-                unsupportedClaims: [],
-                claims: [{ text: 'Unverified draft', support: 'qualified' }],
-              }),
-          },
-        ],
-      }),
-    }))
-    vi.stubGlobal('fetch', fetchMock)
-    let hedgeSignal: AbortSignal | undefined
-    vi.mocked(sendCompletion).mockImplementation(
-      (_thread, _provider, _messages, controller) => {
-        hedgeSignal = controller.signal
-        return new Promise(() => {})
-      }
-    )
-    const checked = await verifyAccuracyCompletion(
-      draft(),
-      thread,
-      [],
-      [
-        ...providers,
-        {
-          provider: 'Claude',
-          base_url: 'https://api.anthropic.com/v1',
-          api_key: 'sk-ant',
-        } as ModelProvider,
-      ],
-      'groq',
-      new AbortController().signal,
-      evidence
-    )
-    expect(await text(checked.completion)).toBe('Unverified draft')
-    expect(checked.review).toMatchObject({
-      verdict: 'approved',
-      verifier: 'Claude Sonnet 5.5',
-      model: 'claude-sonnet-5-5',
-    })
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [
-      string,
-      RequestInit,
-    ]
-    expect(url).toBe('https://api.anthropic.com/v1/messages')
-    const body = JSON.parse(String(init.body))
-    expect(body).toMatchObject({
-      model: 'claude-sonnet-5-5',
-      thinking: { type: 'between_tools' },
-    })
-    expect(body.messages.at(-1).content).toContain('candidateAnswer')
-    // The gpt-oss hedge ran on the other provider and was cancelled.
-    expect(vi.mocked(sendCompletion).mock.calls[0][1]).toMatchObject({
-      provider: 'cerebras',
-    })
-    expect(hedgeSignal?.aborted).toBe(true)
-  })
-  it('shows a valid gpt-oss audit once the Claude window passes', async () => {
-    let claudeSignal: AbortSignal | undefined
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init: RequestInit) => {
-        claudeSignal = init.signal ?? undefined
-        return new Promise(() => {})
-      })
-    )
+  it('never asks Claude, even with an old Anthropic key saved, and does not wait', async () => {
+    const fetchSpy = vi.fn(() => new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchSpy)
     vi.mocked(sendCompletion).mockResolvedValue(
       response({
         verdict: 'approved',
@@ -306,46 +232,15 @@ describe('Accuracy review gate', () => {
       new AbortController().signal,
       evidence
     )
-    const waited = Date.now() - started
-    expect(waited).toBeGreaterThanOrEqual(CLAUDE_WINDOW_MS - 50)
-    expect(waited).toBeLessThan(CLAUDE_WINDOW_MS + 1000)
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(fetchSpy).not.toHaveBeenCalled()
     expect(checked.review).toMatchObject({
       verdict: 'approved',
       verifier: 'cerebras 120B',
     })
-    expect(checked.review?.reviewAttempts).toContain('claude:cancelled')
-    expect(claudeSignal?.aborted).toBe(true)
-  })
-  it('falls back to the gpt-oss hedge when the Claude review fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: false, status: 529, json: async () => ({}) }))
-    )
-    vi.mocked(sendCompletion).mockResolvedValue(
-      response({
-        verdict: 'approved',
-        answer: null,
-        unsupportedClaims: [],
-        claims: [{ text: 'Unverified draft', support: 'qualified' }],
-      })
-    )
-    const checked = await verifyAccuracyCompletion(
-      draft(),
-      thread,
-      [],
-      [
-        ...providers,
-        { provider: 'anthropic', api_key: 'sk-ant' } as ModelProvider,
-      ],
-      'groq',
-      new AbortController().signal,
-      evidence
-    )
-    expect(checked.review).toMatchObject({
-      verdict: 'approved',
-      verifier: 'cerebras 120B',
-    })
-    expect(checked.review?.failureReasons).toContain('claude: provider-529')
+    expect(
+      (checked.review?.reviewAttempts ?? []).some((a) => a.startsWith('claude'))
+    ).toBe(false)
   })
   it('reviews a personal question without web sources', async () => {
     vi.mocked(sendCompletion).mockResolvedValue(
@@ -501,42 +396,6 @@ describe('Accuracy review gate', () => {
         expect.stringMatching(/^cerebras-repair:\d+ms:ok$/),
       ])
     )
-  })
-  it('waits out the Claude window before showing the recovery answer', async () => {
-    let claudeSignal: AbortSignal | undefined
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init: RequestInit) => {
-        claudeSignal = init.signal ?? undefined
-        return new Promise(() => {})
-      })
-    )
-    vi.mocked(sendCompletion).mockImplementation(async (...args) =>
-      (args[6]?.response_format as any).json_schema?.name ===
-      'accuracy_corrected_answer'
-        ? response({ answer: 'Recovered answer' })
-        : response({ verdict: 'approved', claims: 'bad' })
-    )
-    const started = Date.now()
-    const checked = await verifyAccuracyCompletion(
-      draft(),
-      thread,
-      [],
-      [
-        ...providers,
-        { provider: 'anthropic', api_key: 'sk-ant' } as ModelProvider,
-      ],
-      'groq',
-      new AbortController().signal,
-      evidence
-    )
-    const waited = Date.now() - started
-    expect(waited).toBeGreaterThanOrEqual(CLAUDE_WINDOW_MS - 50)
-    expect(waited).toBeLessThan(CLAUDE_WINDOW_MS + 1000)
-    expect(await text(checked.completion)).toBe('Recovered answer')
-    expect(checked.review?.fallback).toBe('reviewer-answer')
-    expect(checked.review?.reviewAttempts).toContain('claude:cancelled')
-    expect(claudeSignal?.aborted).toBe(true)
   })
   it('reports safe failure categories without echoing provider bodies or sensitive details', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})

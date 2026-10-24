@@ -61,18 +61,6 @@ describe('warmAnswer', () => {
     })
   })
 
-  it('a picked Claude model warms Claude with the answer headers', async () => {
-    store.selectedProvider = 'anthropic'
-    const warmAnswer = await load(false, 'speed')
-    const fetcher = okFetch()
-    warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
-    expect(urls(fetcher)).toEqual(['https://api.anthropic.com/v1/messages'])
-    expect(fetcher.mock.calls[0][1]!.headers).toMatchObject({
-      'x-api-key': 'sk-ant',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    })
-  })
-
   it('skips local models', async () => {
     store.selectedProvider = 'llamacpp'
     const warmAnswer = await load(false, 'speed')
@@ -91,13 +79,14 @@ describe('warmAnswer', () => {
     ])
   })
 
-  it('Auto · Accuracy warms search and Claude', async () => {
+  it('Auto · Accuracy warms search, Cerebras and Groq (never Claude)', async () => {
     const warmAnswer = await load(true, 'accuracy')
     const fetcher = okFetch()
     warmAnswer({}, fetcher as unknown as typeof fetch, 100_000)
     expect(urls(fetcher)).toEqual([
       '/api/search',
-      'https://api.anthropic.com/v1/messages',
+      'https://api.cerebras.ai/v1/chat/completions',
+      'https://api.groq.com/openai/v1/chat/completions',
     ])
     expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toEqual({
       warm: true,

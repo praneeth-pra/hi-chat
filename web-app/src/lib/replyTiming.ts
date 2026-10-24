@@ -119,7 +119,7 @@ export function describeTiming(
     auto_race: timing.autoEvents,
     // The model that actually answered (image questions go to a vision model)
     model_used: request.model,
-    // Its name as Settings shows it, e.g. "Claude Haiku 4.5"
+    // Its name as Settings shows it, e.g. "Groq gpt-oss-120b"
     answered_by:
       CHAT_MODELS.find((m) => m.model === request.model)?.label ??
       request.model,

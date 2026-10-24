@@ -404,7 +404,7 @@ export function speechLogLine(body, includeText = false) {
   )
   // Speed replies: timings only, every field known.
   const speed = line.match(
-    /^speed: model=(?:(?:openai_)?gpt-oss-(?:20|120)b|qwen_qwen3\.8-27b|qwen-3\.8-27b|claude-[a-z0-9.-]{1,40}|none) total=(?:\d{1,9}ms|none) first_byte=(?:\d{1,9}ms|none) first_words=(?:\d{1,9}ms|none) answer=(?:\d{1,9}ms|none) tokens=\d{1,7}(?: prompt_tokens=\d{1,7}(?: cached=\d{1,7})? queue=(?:\d{1,9}ms|none) prompt=(?:\d{1,9}ms|none) request=\d{1,7}KB)?(?: shown=(?:\d{1,9}ms|none) stalls=\d{1,6})? route=(?:direct|server|none) hidden=(?:yes|no)$/
+    /^speed: model=(?:(?:openai_)?gpt-oss-(?:20|120)b|qwen_qwen3\.8-27b|qwen-3\.8-27b|none) total=(?:\d{1,9}ms|none) first_byte=(?:\d{1,9}ms|none) first_words=(?:\d{1,9}ms|none) answer=(?:\d{1,9}ms|none) tokens=\d{1,7}(?: prompt_tokens=\d{1,7}(?: cached=\d{1,7})? queue=(?:\d{1,9}ms|none) prompt=(?:\d{1,9}ms|none) request=\d{1,7}KB)?(?: shown=(?:\d{1,9}ms|none) stalls=\d{1,6})? route=(?:direct|server|none) hidden=(?:yes|no)$/
   )
   if (speed) return speed[0]
   // The Windows app: a shortcut that waited for its window to run it.
@@ -419,7 +419,7 @@ export function speechLogLine(body, includeText = false) {
     const rules = {
       verdict: /^(approved|revised|uncertain|unverified|direct)$/,
       model:
-        /^(?:openai_)?gpt-oss-(?:20|120)b$|^claude-(?:sonnet|haiku|opus)-[0-9.-]+$/,
+        /^(?:openai_)?gpt-oss-(?:20|120)b$/,
       search: /^(ready|empty|unavailable|unconfigured|skipped)$/,
       sources: /^\d{1,2}$/,
       total: /^\d{1,9}ms$|^none$/,
@@ -432,10 +432,10 @@ export function speechLogLine(body, includeText = false) {
       unsupported: /^\d{1,5}$/,
       fallback: /^(none|grounded-draft|reviewer-answer)$/,
       failures: new RegExp(
-        `^(?:none|(?:groq|cerebras|claude):${reason}(?:,(?:groq|cerebras|claude):${reason})*)$`
+        `^(?:none|(?:groq|cerebras):${reason}(?:,(?:groq|cerebras):${reason})*)$`
       ),
       reviewers: new RegExp(
-        `^(?:none|(?:groq|cerebras|claude)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason}))(?:,(?:groq|cerebras|claude)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason})))*)$`
+        `^(?:none|(?:groq|cerebras)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason}))(?:,(?:groq|cerebras)(?:-repair)?:(?:cancelled|\\d{1,9}ms:(?:ok|${reason})))*)$`
       ),
     }
     const tokens = line.slice('accuracy:'.length).trim().split(' ')
