@@ -1,5 +1,5 @@
 /** Auto selects one useful stream and never combines answers from different models. */
-export type AutoMode = 'speed' | 'accuracy'
+export type AutoMode = 'speed' | 'accuracy' | 'instant'
 export const AUTO_MODES: {
   value: AutoMode
   label: string
@@ -16,7 +16,21 @@ export const AUTO_MODES: {
     description:
       '120B draft, required Exa web search, and correctness review before showing the answer.',
   },
+  {
+    value: 'instant',
+    label: 'Auto · Instant',
+    description:
+      'Aims to start the answer within 1 s: Cerebras 120B thinks as much as each question needs, Groq steps in only if it is slow.',
+  },
 ]
+/**
+ * Instant starts the first model alone (Cerebras) and the others only when it
+ * fails, sends nothing within HEDGE_FIRST_CHUNK_MS, or has no answer word
+ * within HEDGE_ANSWER_MS. Cerebras' first byte is ~0.36 s (Artificial
+ * Analysis), so this rarely costs a second request.
+ */
+export const HEDGE_FIRST_CHUNK_MS = 700
+export const HEDGE_ANSWER_MS = 2000
 export const AUTO_ANSWER_TIMEOUT_MS = 8000
 const MAX_BUFFERED_CHUNKS = 4096
 export type AutoAttempt<T> = {
@@ -95,6 +109,7 @@ export async function raceAutoAnswers<T>(
     abortWait: Promise<never>
   }
   const running = new Map<number, Running>()
+  const sentSomething = new Set<number>()
   const start = (index: number) => {
     const controller = new AbortController()
     let rejectAbort!: (reason: unknown) => void
@@ -130,7 +145,10 @@ export async function raceAutoAnswers<T>(
           throw new Error('Stream ended without an answer or tool request')
         if ((next.value as { error?: unknown } | null)?.error)
           throw new Error('Provider returned a stream error')
-        if (!buffered.length) onEvent?.(index, 'first-chunk')
+        if (!buffered.length) {
+          sentSomething.add(index)
+          onEvent?.(index, 'first-chunk')
+        }
         buffered.push(next.value)
         if (usefulAnswerChunk(next.value)) {
           const choices = (
@@ -189,6 +207,73 @@ export async function raceAutoAnswers<T>(
     Promise.resolve(run.iterator?.return?.()).catch(() => {})
     onEvent?.(index, 'cancelled')
   }
+  const serve = (winner: { index: number; buffered: T[] }) => {
+    if (outer.aborted) throw new DOMException('Aborted', 'AbortError')
+    for (const index of running.keys())
+      if (index !== winner.index) cancel(index)
+    const run = running.get(winner.index)!
+    onEvent?.(winner.index, 'winner')
+    const stream = (async function* () {
+      try {
+        for (const chunk of winner.buffered) {
+          if (outer.aborted || run.controller.signal.aborted) return
+          yield chunk
+        }
+        while (!outer.aborted && !run.controller.signal.aborted) {
+          const next = await Promise.race([run.iterator!.next(), run.abortWait])
+          if (next.done || outer.aborted || run.controller.signal.aborted)
+            return
+          yield next.value
+        }
+      } catch (error) {
+        if (!outer.aborted) throw error
+      } finally {
+        run.controller.abort()
+        run.cleanup()
+        Promise.resolve(run.iterator?.return?.()).catch(() => {})
+      }
+    })()
+    return { stream, winner: winner.index }
+  }
+  // Instant: the first attempt alone, the rest only when it is slow or fails
+  const hedged = () =>
+    new Promise<{ index: number; buffered: T[] }>((resolve, reject) => {
+      const backups = attempts.map((_, i) => i).slice(1)
+      let started = 0
+      let failed = 0
+      let backedUp = !backups.length
+      const timers: ReturnType<typeof setTimeout>[] = []
+      const settle = () => timers.forEach(clearTimeout)
+      const add = (index: number) => {
+        started += 1
+        start(index).then(
+          (winner) => {
+            settle()
+            resolve(winner)
+          },
+          () => {
+            failed += 1
+            if (index === 0) backUp()
+            if (failed === started && (backedUp || outer.aborted)) {
+              settle()
+              reject(new Error('All attempts failed'))
+            }
+          }
+        )
+      }
+      const backUp = () => {
+        if (backedUp || outer.aborted) return
+        backedUp = true
+        backups.forEach(add)
+      }
+      add(0)
+      timers.push(
+        setTimeout(() => {
+          if (!sentSomething.has(0)) backUp()
+        }, HEDGE_FIRST_CHUNK_MS),
+        setTimeout(backUp, HEDGE_ANSWER_MS)
+      )
+    })
   const groups =
     mode === 'speed'
       ? [attempts.map((_, i) => i)]
@@ -197,39 +282,11 @@ export async function raceAutoAnswers<T>(
           attempts.flatMap((a, i) => (a.tier === 'small' ? [i] : [])),
         ]
   try {
+    if (mode === 'instant') return serve(await hedged())
     for (const group of groups) {
       if (!group.length) continue
       try {
-        const winner = await firstSuccessful(group.map(start))
-        if (outer.aborted) throw new DOMException('Aborted', 'AbortError')
-        for (const index of running.keys())
-          if (index !== winner.index) cancel(index)
-        const run = running.get(winner.index)!
-        onEvent?.(winner.index, 'winner')
-        const stream = (async function* () {
-          try {
-            for (const chunk of winner.buffered) {
-              if (outer.aborted || run.controller.signal.aborted) return
-              yield chunk
-            }
-            while (!outer.aborted && !run.controller.signal.aborted) {
-              const next = await Promise.race([
-                run.iterator!.next(),
-                run.abortWait,
-              ])
-              if (next.done || outer.aborted || run.controller.signal.aborted)
-                return
-              yield next.value
-            }
-          } catch (error) {
-            if (!outer.aborted) throw error
-          } finally {
-            run.controller.abort()
-            run.cleanup()
-            Promise.resolve(run.iterator?.return?.()).catch(() => {})
-          }
-        })()
-        return { stream, winner: winner.index }
+        return serve(await firstSuccessful(group.map(start)))
       } catch (error) {
         if (outer.aborted) throw new DOMException('Aborted', 'AbortError')
         if (group === groups.at(-1)) throw error

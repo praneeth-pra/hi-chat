@@ -15,6 +15,7 @@ import {
   readyMicEarly,
   pickBest,
   gatherAuto,
+  fastAgreement,
   countedEngines,
   getAutoEngines,
   setAutoEngines,
@@ -826,5 +827,80 @@ describe('auto-stop on silence', () => {
     onBlock(rec, new Float32Array(2048).fill(0.1)) // speaking
     expect(rec.lastSound).toBe(first + 5000)
     vi.useRealTimers()
+  })
+})
+
+describe('Auto · Instant fast agreement', () => {
+  const later = (text: string, ms: number) =>
+    new Promise<string>((r) => setTimeout(() => r(text), ms))
+
+  it('sends the first final that matches another engine’s live text', async () => {
+    const live = new Map([['soniox', 'Uh, what is an AMI?']] as const)
+    const hit = await fastAgreement(
+      [
+        { engine: 'cartesia', text: later('What is an AMI?', 5) },
+        { engine: 'soniox', text: later('What is an AMI?', 500) },
+      ],
+      new Map(live)
+    )
+    expect(hit).toEqual({
+      engine: 'cartesia',
+      text: 'What is an AMI?',
+      with: 'soniox',
+      live: true,
+    })
+  })
+
+  it('applies known fixes before comparing', async () => {
+    const hit = await fastAgreement(
+      [
+        { engine: 'cartesia', text: later('migrate an EC2 instance now', 5) },
+        { engine: 'soniox', text: later('x', 500) },
+      ],
+      new Map([['soniox', 'migrate an EC 2 instance now']])
+    )
+    expect(hit?.engine).toBe('cartesia')
+  })
+
+  it('gives up when the words differ, or the question is very short', async () => {
+    expect(
+      await fastAgreement(
+        [
+          { engine: 'cartesia', text: later('What is an EMI?', 5) },
+          { engine: 'soniox', text: later('What is an AMI loan?', 10) },
+        ],
+        new Map([['soniox', 'What is an AMI loan']])
+      )
+    ).toBeUndefined()
+    expect(
+      await fastAgreement(
+        [
+          { engine: 'cartesia', text: later('Okay sure', 5) },
+          { engine: 'soniox', text: later('Okay sure', 10) },
+        ],
+        new Map()
+      )
+    ).toBeUndefined()
+  })
+
+  it('matches two finals when no live text was kept', async () => {
+    const hit = await fastAgreement(
+      [
+        {
+          engine: 'cartesia',
+          text: later('Explain the VPC peering limits', 5),
+        },
+        {
+          engine: 'soniox',
+          text: later('Explain the VPC peering limits.', 10),
+        },
+      ],
+      undefined
+    )
+    expect(hit).toMatchObject({
+      engine: 'soniox',
+      with: 'cartesia',
+      live: false,
+    })
   })
 })

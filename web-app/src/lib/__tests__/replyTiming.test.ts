@@ -118,6 +118,26 @@ describe('speedLogLine', () => {
       'speed: model=openai_gpt-oss-20b total=1830ms first_byte=210ms first_words=420ms answer=1410ms tokens=312 prompt_tokens=9100 cached=8960 queue=12ms prompt=45ms request=39KB route=direct hidden=no'
     )
   })
+  it('adds the Auto mode, thinking level and stop-to-first-word time', () => {
+    const t = describeTiming(
+      0,
+      500,
+      { usage: { completion_tokens_details: { reasoning_tokens: 37 } } },
+      { messages: 1, chars: 1, tools: 0 }
+    )
+    expect(
+      speedLogLine(t, undefined, {
+        mode: 'instant',
+        effort: 'low',
+        fromStopMs: 812.4,
+      })
+    ).toMatch(
+      / hidden=no mode=instant effort=low reasoning=37 from_stop=812ms$/
+    )
+    expect(speedLogLine(t, undefined, { mode: 'manual' })).toMatch(
+      / mode=manual effort=default reasoning=37 from_stop=none$/
+    )
+  })
   it('marks missing timings as none', () => {
     const t = describeTiming(0, 500, {}, { messages: 1, chars: 1, tools: 0 })
     expect(speedLogLine(t)).toBe(

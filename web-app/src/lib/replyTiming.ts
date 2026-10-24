@@ -14,7 +14,11 @@ export type StreamTiming = {
   attempts?: FetchAttempt[]
   /** Models skipped for this reply (Settings > General chat model order), and why. */
   fallbacks?: string[]
-  autoMode?: 'speed' | 'accuracy'
+  autoMode?: 'speed' | 'accuracy' | 'instant'
+  /** Auto · Instant: the thinking level picked for this question. */
+  effort?: 'low' | 'medium'
+  /** A dictated question: when you stopped speaking (ms since epoch). */
+  dictationStoppedAt?: number
   autoEvents?: {
     model: string
     provider: string
@@ -149,7 +153,13 @@ export function describeTiming(
  */
 export function speedLogLine(
   timings: ReturnType<typeof describeTiming>,
-  frames?: { shownMs: number | undefined; stalls: number }
+  frames?: { shownMs: number | undefined; stalls: number },
+  extra?: {
+    mode: 'speed' | 'accuracy' | 'instant' | 'manual'
+    effort?: 'low' | 'medium'
+    /** Stopped speaking → first answer word on screen, for dictated questions. */
+    fromStopMs?: number
+  }
 ) {
   const ms = (s: number | undefined) =>
     typeof s === 'number' && Number.isFinite(s)
@@ -182,5 +192,15 @@ export function speedLogLine(
       : []),
     `route=${route}`,
     `hidden=${timings.tab_hidden_at_send ? 'yes' : 'no'}`,
+    // Which Auto mode, the thinking level asked for, the thinking it took,
+    // and for a dictated question the whole wait: stop speaking → first word
+    ...(extra
+      ? [
+          `mode=${extra.mode}`,
+          `effort=${extra.effort ?? 'default'}`,
+          `reasoning=${Math.max(0, Math.round(Number(timings.reasoning_tokens) || 0))}`,
+          `from_stop=${extra.fromStopMs === undefined ? 'none' : `${Math.max(0, Math.round(extra.fromStopMs))}ms`}`,
+        ]
+      : []),
   ].join(' ')
 }

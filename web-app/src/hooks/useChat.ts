@@ -36,6 +36,8 @@ import { processAttachmentsForSend } from '@/lib/attachmentProcessing'
 import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
 import { withAnswerDetail, withMediumLength } from '@/lib/answerDetail'
+import { questionEffort } from '@/lib/questionEffort'
+import { takeDictationStop } from '@/lib/dictationDelivery'
 import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
 import {
@@ -910,6 +912,13 @@ export const useChat = () => {
           }
           const autoState = useChatAuto.getState()
           if (autoState.auto) streamTiming.autoMode = autoState.mode
+          streamTiming.dictationStoppedAt = takeDictationStop(message)
+          // Instant: as much thinking as this question needs, decided in code
+          const instantEffort = questionEffort(message)
+          if (autoState.auto && autoState.mode === 'instant')
+            streamTiming.effort = hasImages(requestMessages)
+              ? undefined
+              : instantEffort
           if (autoState.auto && autoState.mode === 'accuracy') {
             accuracyRequested = true
             useAppState.getState().setAccuracyStatus({
@@ -1014,7 +1023,9 @@ export const useChat = () => {
               autoState.auto && !hasImages(requestMessages)
                 ? autoState.mode === 'speed'
                   ? 'low'
-                  : 'medium'
+                  : autoState.mode === 'instant'
+                    ? instantEffort
+                    : 'medium'
                 : undefined
             )
             if (!res) throw new Error('No completion received')
@@ -1271,7 +1282,18 @@ export const useChat = () => {
           // Every reply outside Accuracy (which logs its own line): Auto ·
           // Speed and hand-picked models alike, so slow replies can be traced.
           const frames = stopFrameWatch()
-          if (!accuracyRequested) reportSpeech(speedLogLine(timings, frames))
+          if (!accuracyRequested)
+            reportSpeech(
+              speedLogLine(timings, frames, {
+                mode: streamTiming.autoMode ?? 'manual',
+                effort: streamTiming.effort,
+                fromStopMs:
+                  streamTiming.dictationStoppedAt && streamTiming.firstAnswerAt
+                    ? streamTiming.firstAnswerAt -
+                      streamTiming.dictationStoppedAt
+                    : undefined,
+              })
+            )
           recordReply(timings)
 
           // Create a final content object for adding to the thread
