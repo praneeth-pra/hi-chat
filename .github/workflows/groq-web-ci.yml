@@ -1,10 +1,25 @@
 name: Groq web build CI
 
+# The repo is private, so every minute counts against the free 2,000 a
+# month. Pull requests are checked once; main isn't re-checked after a merge
+# (Railway deploys main on its own). The Mac and Windows apps and docs have
+# their own workflows or need no build.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'mac-app/**'
+      - 'windows-app/**'
+      - '.github/workflows/mac-app.yml'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+# A new push to a pull request cancels its older run
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
