@@ -20,6 +20,7 @@ import {
 } from '@/lib/speechLive'
 import { applyFixes } from '@/lib/dictationFixes'
 import { warmAnswer } from '@/lib/answerWarm'
+import { useChatAuto } from '@/lib/chatModels'
 import { findMicDevice, getDictationMic } from '@/lib/micActivity'
 import { deliverDictation } from './dictationDelivery'
 import {
@@ -258,7 +259,9 @@ class DictationTap extends AudioWorkletProcessor {
 registerProcessor('dictation-tap', DictationTap)
 `
 
-type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'>
+type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'> & {
+  setPreviewListener?: (listener: (text: string) => void) => void
+}
 
 export type Recording = {
   rate: number
@@ -267,6 +270,8 @@ export type Recording = {
   live?: LiveStream
   /** Auto: the live engines that each get every block */
   autoLive?: { engine: DictationEngine; stream: LiveStream }[]
+  /** Auto: each engine's latest live text (Auto · Instant compares with it) */
+  heardLive?: Map<DictationEngine, string>
   /**
    * Every block at 16 kHz, for the batch route when the live engines fail
    * or hear nothing (~64 KB a second)
@@ -662,6 +667,56 @@ function autoLiveStreams() {
 }
 
 export type EngineText = { engine: DictationEngine; text: string }
+
+/** Fewer words than this never go out on the fast path. */
+const FAST_MIN_WORDS = 3
+
+/**
+ * Auto · Instant: resolves with the first engine's final text that matches,
+ * word for word (fillers, punctuation and case aside, known fixes applied),
+ * another engine's final text or, if that isn't in yet, what it has heard
+ * live so far. Two engines agreeing is the same bar as before; the live text
+ * just saves waiting ~250 ms for the slower engine to finish. Resolves
+ * undefined when no final matches, and the usual comparison decides.
+ */
+export function fastAgreement(
+  jobs: { engine: DictationEngine; text: Promise<string> }[],
+  heardLive: Map<DictationEngine, string> | undefined
+): Promise<
+  (EngineText & { with: DictationEngine; live: boolean }) | undefined
+> {
+  return new Promise((resolve) => {
+    const finals = new Map<DictationEngine, string>()
+    let left = jobs.length
+    if (!left) resolve(undefined)
+    jobs.forEach(({ engine, text }) =>
+      text
+        .then((t) => {
+          const mine = applyFixes(t.trim())
+          if (mine.split(/\s+/).length >= FAST_MIN_WORDS)
+            for (const other of jobs) {
+              if (other.engine === engine) continue
+              const final = finals.get(other.engine)
+              const theirs = final ?? heardLive?.get(other.engine)
+              if (theirs && textAgreement(mine, applyFixes(theirs)) === 1) {
+                resolve({
+                  engine,
+                  text: t.trim(),
+                  with: other.engine,
+                  live: final === undefined,
+                })
+                break
+              }
+            }
+          finals.set(engine, t.trim())
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (--left === 0) resolve(undefined)
+        })
+    )
+  })
+}
 export { textAgreement }
 
 /**
@@ -771,10 +826,14 @@ function begin(m: Mic) {
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
+    heardLive: new Map(),
     audio: [],
     limit: setTimeout(() => void stopDictation(), MAX_DICTATION_MS),
     lastSound: Date.now(),
   }
+  rec.autoLive?.forEach(({ engine, stream }) =>
+    stream.setPreviewListener?.((text) => rec.heardLive?.set(engine, text))
+  )
   recording = rec
   for (const block of m.preroll.splice(0)) onBlock(rec, block)
   useDictation.setState({ status: 'recording', startedAt: Date.now() })
@@ -831,7 +890,7 @@ export async function stopDictation() {
   // Stopped before the mic opened: nothing was said yet
   if (status === 'starting') return cancelDictation()
   if (status !== 'recording' || !recording) return
-  const { engine, live, autoLive, audio } = recording
+  const { engine, live, autoLive, audio, heardLive } = recording
   // Keep the live streams open for their last words; release() would end them
   recording.live = undefined
   recording.autoLive = undefined
@@ -864,15 +923,36 @@ export async function stopDictation() {
         timed(l.engine, l.stream.finish(LIVE_FINISH_MS))
       )
       const counted = countedEngines(jobs)
+      const gathered = gatherAuto(counted, AUTO_DEADLINE_MS)
+      const { auto: chatAuto, mode: chatMode } = useChatAuto.getState()
+      const fast =
+        chatAuto && chatMode === 'instant'
+          ? await Promise.race([
+              fastAgreement(counted, heardLive),
+              gathered.then(
+                () => undefined,
+                () => undefined
+              ),
+            ])
+          : undefined
+      if (fast) {
+        gathered.catch(() => {})
+        text = withoutFillers(applyFixes(fast.text))
+        void reportAuto(jobs, took, {
+          // e.g. fast-cartesia-soniox-live: Cartesia's final matched Soniox's live text
+          sent: `fast-${fast.engine}-${fast.with}${fast.live ? '-live' : ''}`,
+          totalMs: Date.now() - stoppedAt,
+        })
+      }
       // Known mistakes fixed first, so two engines sharing one still agree
       // on the right text
-      const results = (await gatherAuto(counted, AUTO_DEADLINE_MS)).map(
-        (r) => ({
-          ...r,
-          text: applyFixes(r.text),
-        })
-      )
-      const best = pickBest(results)
+      const results = fast
+        ? []
+        : (await gathered).map((r) => ({
+            ...r,
+            text: applyFixes(r.text),
+          }))
+      const best = fast ? undefined : pickBest(results)
       const judgeStart = Date.now()
       const elapsed = judgeStart - stoppedAt
       const judgeMs = Math.min(
@@ -889,17 +969,18 @@ export async function stopDictation() {
               judgeMs
             )
           : undefined
-      text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
+      if (!fast) text = withoutFillers(applyFixes(judged ?? best?.text ?? ''))
       // Logged once every engine has answered (or given up), so the ones
       // that lost the race still show what they heard
-      void reportAuto(jobs, took, {
-        sent: judged
-          ? `judge(${lastJudge?.model ?? '?'} ${lastJudge?.ms ?? '?'}ms)`
-          : (best?.engine ?? 'none'),
-        totalMs: Date.now() - stoppedAt,
-        judgeMs: best ? Date.now() - judgeStart : undefined,
-        judged,
-      })
+      if (!fast)
+        void reportAuto(jobs, took, {
+          sent: judged
+            ? `judge(${lastJudge?.model ?? '?'} ${lastJudge?.ms ?? '?'}ms)`
+            : (best?.engine ?? 'none'),
+          totalMs: Date.now() - stoppedAt,
+          judgeMs: best ? Date.now() - judgeStart : undefined,
+          judged,
+        })
     }
     if (!autoLive)
       reportSpeech(
@@ -924,7 +1005,7 @@ export async function stopDictation() {
         `dictation fallback (${liveError ? 'live failed' : 'live empty'}): ${Date.now() - stoppedAt} ms after stop, ${text.length} chars`
       )
     }
-    if (text) deliverDictation(text)
+    if (text) deliverDictation(text, stoppedAt)
     else toast(`${label} heard nothing`)
   } catch (err) {
     toast(`Dictation failed: ${(err as Error).message}`)

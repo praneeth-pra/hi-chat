@@ -148,7 +148,7 @@ function General() {
             <Card title="Chat">
               <CardItem
                 title="Auto mode"
-                description="Speed races Groq 20B, Groq 120B and Cerebras 120B. Accuracy prefers the two 120B models, with 20B as recovery. Both stream one answer and cancel unused requests. Racing can increase API usage; larger models do not guarantee correctness. Applies when Auto is selected; manually selected models keep their own settings."
+                description="Speed races Groq 20B, Groq 120B and Cerebras 120B. Accuracy prefers the two 120B models, with 20B as recovery. Instant starts Cerebras 120B alone, with as much thinking as each question needs (Low for definitions, Medium for design, debugging, coding or in-detail questions), sends spoken questions as soon as two engines agree, even on live text, and calls Groq only if Cerebras is slow. All stream one answer and cancel unused requests. Racing can increase API usage; larger models do not guarantee correctness. Applies when Auto is selected; manually selected models keep their own settings."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -181,7 +181,7 @@ function General() {
               />
               <CardItem
                 title="Chat thinking"
-                description="Applies to manually selected gpt-oss models. Auto Speed uses Low; Auto Accuracy uses Medium."
+                description="Applies to manually selected gpt-oss models. Auto Speed uses Low; Auto Accuracy uses Medium; Auto Instant picks per question."
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

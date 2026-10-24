@@ -39,4 +39,39 @@ describe('applyFixes', () => {
     expect(fixes).toHaveLength(1)
     expect(applyFixes('a Foo, bar b', fixes)).toBe('a Baz b')
   })
+
+  it('fixes the AWS words every engine missed, only when AWS is being discussed', () => {
+    expect(
+      applyFixes('How can we run containers on ECS with forget launch type?')
+    ).toBe('How can we run containers on ECS with Fargate launch type?')
+    expect(applyFixes('I forget the name of that tool.')).toBe(
+      'I forget the name of that tool.'
+    )
+    expect(
+      applyFixes(
+        'Can you tell me how we can use am I and also copy image function?'
+      )
+    ).toBe('Can you tell me how we can use AMI and also copy image function?')
+    expect(
+      applyFixes('If you want to upgrade an EMI, how is the process?')
+    ).toBe('If you want to upgrade an AMI, how is the process?')
+    expect(applyFixes('I pay an EMI on my loan.')).toBe(
+      'I pay an EMI on my loan.'
+    )
+    expect(applyFixes('Am I right?')).toBe('Am I right?')
+    expect(
+      applyFixes('How to migrate AC institutions from one region to another?')
+    ).toBe('How to migrate EC2 instances from one region to another?')
+    expect(applyFixes('Is E case managed Kubernetes?')).toBe(
+      'Is EKS managed Kubernetes?'
+    )
+  })
+
+  it('reads context words after @, counting earlier fixes', () => {
+    const fixes = parseFixes('EC 2 => EC2\nam I => AMI @ EC2, image')
+    expect(applyFixes('copy the am I of an EC 2', fixes)).toBe(
+      'copy the AMI of an EC2'
+    )
+    expect(applyFixes('am I late', fixes)).toBe('am I late')
+  })
 })

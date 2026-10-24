@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  HEDGE_ANSWER_MS,
+  HEDGE_FIRST_CHUNK_MS,
   raceAutoAnswers,
   usefulAnswerChunk,
   type AutoAttempt,
@@ -316,5 +318,176 @@ describe('race safety and deadlines', () => {
     await expect(raceAutoAnswers([], 'speed', c.signal)).rejects.toMatchObject({
       name: 'AbortError',
     })
+  })
+})
+
+describe('Auto · Instant', () => {
+  const gated = (started: number[], gates: ReturnType<typeof deferred>[]) =>
+    gates.map(
+      (gate, i): AutoAttempt<unknown> => ({
+        model: `model-${i}`,
+        tier: 'large',
+        run: async () => {
+          started.push(i)
+          return (async function* () {
+            yield await gate.promise
+          })()
+        },
+      })
+    )
+
+  it('runs Cerebras alone when it answers in time', async () => {
+    const started: number[] = []
+    const result = await raceAutoAnswers(
+      [
+        {
+          model: 'cerebras',
+          tier: 'large',
+          run: async () => {
+            started.push(0)
+            return chunks(role, answer('Fast'))
+          },
+        },
+        {
+          model: 'groq',
+          tier: 'large',
+          run: async () => {
+            started.push(1)
+            return chunks(answer('Backup'))
+          },
+        },
+      ],
+      'instant',
+      new AbortController().signal
+    )
+    expect(result.winner).toBe(0)
+    expect(started).toEqual([0])
+    expect(await collect(result.stream)).toEqual([role, answer('Fast')])
+  })
+
+  it('calls the backups at once when Cerebras fails', async () => {
+    const started: number[] = []
+    const result = await raceAutoAnswers(
+      [
+        {
+          model: 'cerebras',
+          tier: 'large',
+          run: async () => {
+            started.push(0)
+            throw new Error('429')
+          },
+        },
+        {
+          model: 'groq',
+          tier: 'large',
+          run: async () => {
+            started.push(1)
+            return chunks(answer('Backup'))
+          },
+        },
+      ],
+      'instant',
+      new AbortController().signal
+    )
+    expect(result.winner).toBe(1)
+    expect(started).toEqual([0, 1])
+  })
+
+  it('calls the backups when Cerebras sends nothing in time', async () => {
+    vi.useFakeTimers()
+    const started: number[] = []
+    const gates = [deferred<unknown>(), deferred<unknown>()]
+    const result = raceAutoAnswers(
+      gated(started, gates),
+      'instant',
+      new AbortController().signal
+    )
+    await tick()
+    expect(started).toEqual([0])
+    await vi.advanceTimersByTimeAsync(HEDGE_FIRST_CHUNK_MS + 1)
+    expect(started).toEqual([0, 1])
+    gates[1].resolve(answer('Backup'))
+    expect((await result).winner).toBe(1)
+    gates[0].resolve(answer('late'))
+  })
+
+  it('waits longer for a Cerebras that is thinking, then calls the backups', async () => {
+    vi.useFakeTimers()
+    const started: number[] = []
+    const gate = deferred<unknown>()
+    const backup = deferred<unknown>()
+    const result = raceAutoAnswers(
+      [
+        {
+          model: 'cerebras',
+          tier: 'large',
+          run: async () => {
+            started.push(0)
+            return (async function* () {
+              yield reasoning
+              yield await gate.promise
+            })()
+          },
+        },
+        {
+          model: 'groq',
+          tier: 'large',
+          run: async () => {
+            started.push(1)
+            return (async function* () {
+              yield await backup.promise
+            })()
+          },
+        },
+      ],
+      'instant',
+      new AbortController().signal
+    )
+    await vi.advanceTimersByTimeAsync(HEDGE_FIRST_CHUNK_MS + 1)
+    expect(started).toEqual([0])
+    await vi.advanceTimersByTimeAsync(HEDGE_ANSWER_MS)
+    expect(started).toEqual([0, 1])
+    gate.resolve(answer('Cerebras'))
+    expect((await result).winner).toBe(0)
+    backup.resolve(answer('late'))
+  })
+
+  it('fails only when every model has failed', async () => {
+    await expect(
+      raceAutoAnswers(
+        [
+          {
+            model: 'a',
+            tier: 'large',
+            run: async () => {
+              throw new Error('down')
+            },
+          },
+          {
+            model: 'b',
+            tier: 'small',
+            run: async () => {
+              throw new Error('down')
+            },
+          },
+        ],
+        'instant',
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Auto models could not start an answer')
+  })
+
+  it('stops waiting when the question is cancelled', async () => {
+    const started: number[] = []
+    const outer = new AbortController()
+    const result = raceAutoAnswers(
+      gated(started, [deferred<unknown>(), deferred<unknown>()]),
+      'instant',
+      outer.signal
+    )
+    await tick()
+    outer.abort()
+    await expect(result).rejects.toThrow('Aborted')
+    expect(started).toEqual([0])
   })
 })

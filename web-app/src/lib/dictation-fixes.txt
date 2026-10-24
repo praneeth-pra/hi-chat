@@ -56,3 +56,17 @@ separate the rights => separate the writes
 EK => EKS
 EKs => EKS
 E K S => EKS
+# From the speech logs (2026-10-24). After "@": only when one of these words
+# is in the same dictation, so everyday speech ("I forget") is left alone.
+E case => EKS
+AC institutions => EC2 instances
+AC institution => EC2 instance
+AC instances => EC2 instances
+AC instance => EC2 instance
+forget => Fargate @ ECS, EKS, AWS, container, containers, serverless, Kubernetes, launch type, task definition
+forgate => Fargate
+an EMI => an AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
+the EMI => the AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
+an am I => an AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
+the am I => the AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
+use am I => use AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch

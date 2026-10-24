@@ -554,6 +554,13 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
     speechLogLine(body(line.replace('openai_gpt-oss-20b', 'private_text'))),
     'speech diagnostic text omitted'
   )
+  // Auto mode, thinking level, thinking tokens and stop speaking → first word
+  const instant = `${full} mode=instant effort=low reasoning=42 from_stop=780ms`
+  assert.equal(speechLogLine(body(instant)), instant)
+  assert.equal(
+    speechLogLine(body(instant.replace('effort=low', 'effort=secret'))),
+    'speech diagnostic text omitted'
+  )
 })
 
 test('azure live: the key becomes a region-tagged token, never sent itself', async () => {
