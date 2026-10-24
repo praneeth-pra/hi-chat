@@ -15,7 +15,6 @@ import {
 } from '@tabler/icons-react'
 import AddEditAssistant from '@/containers/dialogs/AddEditAssistant'
 import { DeleteAssistantDialog } from '@/containers/dialogs'
-import { AvatarEmoji } from '@/containers/AvatarEmoji'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { PlatformGuard } from '@/lib/platform/PlatformGuard'
 import { PlatformFeature } from '@/lib/platform/types'
@@ -157,15 +156,6 @@ function AssistantContent() {
                 key={assistant.id}
               >
                 <div className="flex items-start gap-3 flex-1">
-                  {assistant?.avatar && (
-                    <div className="shrink-0 w-8 h-8 relative flex items-center justify-center bg-main-view-fg/4 rounded-md">
-                      <AvatarEmoji
-                        avatar={assistant?.avatar}
-                        imageClassName="w-5 h-5 object-contain"
-                        textClassName="text-lg"
-                      />
-                    </div>
-                  )}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-medium text-main-view-fg/80 line-clamp-1">
                       {assistant.name}

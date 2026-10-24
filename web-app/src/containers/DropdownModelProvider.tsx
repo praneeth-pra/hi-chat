@@ -581,7 +581,7 @@ const DropdownModelProvider = ({
             : 'w-60 p-0 backdrop-blur-2xl',
           searchValue.length === 0 && 'h-[320px]'
         )}
-        align={variant === 'plain' ? 'end' : 'start'}
+        align="start"
         sideOffset={10}
         alignOffset={-8}
         side={searchValue.length === 0 ? undefined : 'top'}

@@ -1289,6 +1289,17 @@ const ChatInput = ({
                   streamingContent && 'opacity-50 pointer-events-none'
                 )}
               >
+                {/* The model picker sits bottom left */}
+                <div
+                  data-testid="composer-model-selector"
+                  className="min-w-0 max-w-48 shrink"
+                >
+                  <DropdownModelProvider
+                    model={model}
+                    useLastUsedModel={initialMessage}
+                    variant="plain"
+                  />
+                </div>
                 {model?.provider === 'llamacpp' && loadingModel && (
                   <ModelLoader />
                 )}
@@ -1424,19 +1435,6 @@ const ChatInput = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <div
-                data-testid="composer-model-selector"
-                className={cn(
-                  'min-w-0 max-w-48',
-                  streamingContent && 'opacity-50 pointer-events-none'
-                )}
-              >
-                <DropdownModelProvider
-                  model={model}
-                  useLastUsedModel={initialMessage}
-                  variant="plain"
-                />
-              </div>
               {!initialMessage && (
                 <ContextMeter
                   messages={threadMessages || []}

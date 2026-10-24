@@ -37,6 +37,7 @@ import { renderInstructions } from '@/lib/instructionTemplate'
 import { withCodingRule } from '@/lib/codingAnswer'
 import { withAnswerDetail, withMediumLength } from '@/lib/answerDetail'
 import { questionEffort } from '@/lib/questionEffort'
+import { useLastReply } from '@/lib/lastReply'
 import { takeDictationStop } from '@/lib/dictationDelivery'
 import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
 import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
@@ -1282,6 +1283,24 @@ export const useChat = () => {
           // Every reply outside Accuracy (which logs its own line): Auto ·
           // Speed and hand-picked models alike, so slow replies can be traced.
           const frames = stopFrameWatch()
+          // For the meter next to the model: how fast this answer came back
+          {
+            const network = timings.wait_for_first_byte_s
+            const thinking = timings.thinking_s
+            useLastReply.getState().set({
+              network,
+              thinking,
+              firstWord:
+                network !== undefined ? network + (thinking ?? 0) : undefined,
+              fromStop:
+                streamTiming.dictationStoppedAt && streamTiming.firstAnswerAt
+                  ? (streamTiming.firstAnswerAt -
+                      streamTiming.dictationStoppedAt) /
+                    1000
+                  : undefined,
+              model: timings.answered_by,
+            })
+          }
           if (!accuracyRequested)
             reportSpeech(
               speedLogLine(timings, frames, {

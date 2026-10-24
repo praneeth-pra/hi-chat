@@ -216,7 +216,7 @@ export async function setupAssistant(
     ).catch(() => [] as string[]),
   ])
   return {
-    avatar: base?.avatar ?? '🧑‍💼',
+    avatar: base?.avatar ?? '',
     id: base?.id ?? Math.random().toString(36).substring(7),
     created_at: base?.created_at ?? Date.now(),
     name: assistantName(profile),

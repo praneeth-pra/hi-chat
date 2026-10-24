@@ -14,7 +14,6 @@ import {
   IconSettings,
 } from '@tabler/icons-react'
 import { useThreads } from '@/hooks/useThreads'
-import { AvatarEmoji } from '@/containers/AvatarEmoji'
 
 /** The assistant's name at the top left; each entry's gear edits it */
 const DropdownAssistant = () => {
@@ -72,16 +71,6 @@ const DropdownAssistant = () => {
                 }}
               >
                 <div className="text-main-view-fg/70 cursor-pointer flex gap-2 w-full">
-                  {assistant?.avatar && (
-                    <div className="shrink-0 relative w-4 h-4">
-                      <AvatarEmoji
-                        avatar={assistant?.avatar}
-                        imageClassName="object-cover"
-                        textClassName=""
-                      />
-                    </div>
-                  )}
-
                   <div className="text-left">
                     <span className="line-clamp-1">{assistant.name}</span>
                   </div>

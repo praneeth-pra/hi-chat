@@ -42,7 +42,9 @@ describe('assistant quick setup', () => {
     expect(assistantName({ ...long, company: 'Acme' })).toBe(
       'Senior Software Engineer'
     )
-    expect(assistantName({ ...long, company: '' }).length).toBeLessThanOrEqual(28)
+    expect(assistantName({ ...long, company: '' }).length).toBeLessThanOrEqual(
+      28
+    )
   })
 
   it('writes first-person instructions that forbid invented experience', () => {
@@ -170,13 +172,12 @@ describe('setupAssistant', () => {
     )
     expect(out.keyterms).toBeUndefined()
     expect(out.documents).toHaveLength(1)
-    expect(out.avatar).toBe('🧑‍💼')
+    expect(out.avatar).toBe('')
   })
 
   it('saves other context as its own document and points the instructions at it', async () => {
-    const { setupAssistant, OTHER_CONTEXT_NAME } = await import(
-      '../assistantSetup'
-    )
+    const { setupAssistant, OTHER_CONTEXT_NAME } =
+      await import('../assistantSetup')
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body))
       return body.response_format
