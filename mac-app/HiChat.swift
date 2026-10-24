@@ -200,8 +200,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     webView.setValue(false, forKey: "drawsBackground")
     if #available(macOS 13.3, *) { webView.isInspectable = true }
 
+    // Hi-chat is designed for a compact window beside your other apps
     panel = ChatPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
+      contentRect: NSRect(x: 0, y: 0, width: 480, height: 820),
       styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel],
       backing: .buffered, defer: false)
     panel.title = "Hi-chat"

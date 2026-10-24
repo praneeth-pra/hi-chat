@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import { ChatWidthSwitcher } from '@/containers/ChatWidthSwitcher'
 import { TokenCounterCompactSwitcher } from '@/containers/TokenCounterCompactSwitcher'
 import { ThreadScrollBehaviorSwitcher } from '@/containers/ThreadScrollBehaviorSwitcher'
+import { useSmallScreen } from '@/hooks/useMediaQuery'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute(route.settings.interface as any)({
@@ -25,6 +26,7 @@ export const Route = createFileRoute(route.settings.interface as any)({
 
 function InterfaceSettings() {
   const { t } = useTranslation()
+  const isSmallScreen = useSmallScreen()
   const { resetInterface } = useInterfaceSettings()
   const { resetCodeBlockStyle } = useCodeblock()
 
@@ -83,11 +85,16 @@ function InterfaceSettings() {
 
             {/* Chat Message */}
             <Card>
-              <CardItem
-                title={t('settings:interface.chatWidth')}
-                description={t('settings:interface.chatWidthDesc')}
-              />
-              <ChatWidthSwitcher />
+              {/* Both widths look the same in a compact window */}
+              {!isSmallScreen && (
+                <>
+                  <CardItem
+                    title={t('settings:interface.chatWidth')}
+                    description={t('settings:interface.chatWidthDesc')}
+                  />
+                  <ChatWidthSwitcher />
+                </>
+              )}
               <CardItem
                 title={t('settings:interface.tokenCounterCompact')}
                 description={t('settings:interface.tokenCounterCompactDesc')}

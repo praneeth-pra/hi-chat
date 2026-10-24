@@ -57,6 +57,8 @@ const HeaderPage = ({ children }: HeaderPageProps) => {
         'h-12 text-main-view-fg flex items-center shrink-0',
         // Mobile-first responsive padding
         isMobile ? 'px-3' : 'px-4',
+        // Room for the settings menu button, fixed at the top right
+        isMobile && currentPath.startsWith('/settings') && 'pr-11',
         // macOS-specific padding when panel is closed
         (IS_MACOS && isSmallScreen) || (IS_MACOS && !open) ? 'pl-20' : '',
         children === undefined && 'border-none'
