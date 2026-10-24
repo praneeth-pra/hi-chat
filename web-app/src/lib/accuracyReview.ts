@@ -557,6 +557,9 @@ export function parseAccuracyVerdict(
   }
 }
 
+/** How long audits may keep running after the recovery answer is ready. */
+export const AUDIT_GRACE_MS = 2500
+
 /** Buffer the draft: unchecked answer text must never reach the UI in Accuracy. */
 export async function verifyAccuracyCompletion(
   completion: ChatCompletionResponse,
@@ -569,7 +572,8 @@ export async function verifyAccuracyCompletion(
   onPhase?: (phase: 'drafting' | 'verifying') => void,
   answerPrefix = '',
   draftStartedAt = Date.now(),
-  draftModel?: string
+  draftModel?: string,
+  auditGraceMs = AUDIT_GRACE_MS
 ): Promise<{ completion: ChatCompletionResponse; review?: AccuracyReview }> {
   requireAccuracyEvidence(evidence)
   onPhase?.('drafting')
@@ -871,6 +875,12 @@ export async function verifyAccuracyCompletion(
     (a, b) => Number(a.name !== 'cerebras') - Number(b.name !== 'cerebras')
   )[0]
   if (repairer) runs.push(start(repairer, true))
+  // Once the recovery answer is ready, audits get only a short extra wait:
+  // most slow audits fail validation anyway, so waiting longer mostly
+  // delays the same recovery answer.
+  let graceTimer: ReturnType<typeof setTimeout> | undefined
+  let graceOver: Promise<void> | undefined
+  let graceDone = false
   try {
     for (;;) {
       if (signal.aborted) throw signal.reason
@@ -879,13 +889,24 @@ export async function verifyAccuracyCompletion(
       const best = audits.find((run) => run.checked)
       if (best?.checked) return accept(best.reviewer, best.checked, false)
       const auditsFailed = audits.every((run) => run.settled && !run.checked)
-      if (repairRun?.checked && auditsFailed)
+      if (repairRun?.checked && (auditsFailed || graceDone))
         return accept(repairRun.reviewer, repairRun.checked, true)
+      if (repairRun?.checked && !graceOver)
+        graceOver = new Promise<void>((resolve) => {
+          graceTimer = setTimeout(() => {
+            graceDone = true
+            resolve()
+          }, auditGraceMs)
+        })
       const pending = runs.filter((run) => !run.settled)
       if (!pending.length) break
-      await Promise.race(pending.map((run) => run.promise))
+      await Promise.race([
+        ...pending.map((run) => run.promise),
+        ...(graceOver ? [graceOver] : []),
+      ])
     }
   } finally {
+    clearTimeout(graceTimer)
     for (const run of runs)
       if (!run.settled)
         attempts.push(
