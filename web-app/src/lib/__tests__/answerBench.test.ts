@@ -1,3 +1,4 @@
+import { CODING_ANSWER_RULE } from '../codingAnswer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   answerOnce,
@@ -64,9 +65,10 @@ describe('answerBench', () => {
           .calls[0][1] as RequestInit
       ).body as string
     )
+    // The same instructions a live answer gets, short-code rule included
     expect(body.messages[0]).toEqual({
       role: 'system',
-      content: 'Answer as P.',
+      content: `Answer as P.\n\n${CODING_ANSWER_RULE}`,
     })
   })
 

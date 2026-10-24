@@ -53,17 +53,24 @@ const convertToolPartToApiContentPart = (part: ToolResult['content'][0]) => {
  * @fileoverview Helper functions for creating chat completion request.
  * These functions are used to create chat completion request objects
  */
-// Only the most recent messages are sent with each request. Resending a whole
-// long chat makes every reply slower and uses up Groq's per-minute token limit.
+// Only the recent messages are sent with each request. Resending a whole long
+// chat makes every reply slower and uses up Groq's per-minute token limit.
 export const MAX_CONTEXT_MESSAGES = 20
+// Older messages are let go CONTEXT_STEP at a time rather than one a turn:
+// the request then starts the same way for several questions, so Groq and
+// Cerebras reuse the part they have already read instead of reading it all
+// again every turn. Between 20 and 29 messages go along
+export const CONTEXT_STEP = 10
 
-// Keeps the last `max` messages, starting on a user message
+// Keeps the recent messages (see above), starting on a user message
 export const recentMessages = (
   messages: ThreadMessage[],
-  max = MAX_CONTEXT_MESSAGES
+  max = MAX_CONTEXT_MESSAGES,
+  step = CONTEXT_STEP
 ): ThreadMessage[] => {
   if (messages.length <= max) return messages
-  const recent = messages.slice(-max)
+  const start = Math.floor((messages.length - max) / step) * step
+  const recent = messages.slice(start)
   const firstUser = recent.findIndex((m) => m.role === 'user')
   return firstUser > 0 ? recent.slice(firstUser) : recent
 }
@@ -79,19 +86,20 @@ export class CompletionMessagesBuilder {
       })
     }
     this.messages.push(
-      ...recentMessages(messages.filter((e) => !e.metadata?.error))
-        .map<ChatCompletionMessageParam>((msg) => {
-          const param = this.toCompletionParamFromThread(msg)
-          // In constructor context, normalize empty user text to a placeholder
-          if (
-            param.role === 'user' &&
-            typeof param.content === 'string' &&
-            param.content === ''
-          ) {
-            return { ...param, content: '.' }
-          }
-          return param
-        })
+      ...recentMessages(
+        messages.filter((e) => !e.metadata?.error)
+      ).map<ChatCompletionMessageParam>((msg) => {
+        const param = this.toCompletionParamFromThread(msg)
+        // In constructor context, normalize empty user text to a placeholder
+        if (
+          param.role === 'user' &&
+          typeof param.content === 'string' &&
+          param.content === ''
+        ) {
+          return { ...param, content: '.' }
+        }
+        return param
+      })
     )
   }
 
@@ -102,10 +110,12 @@ export class CompletionMessagesBuilder {
     const inlineFileContents = Array.isArray(
       (msg.metadata as any)?.inline_file_contents
     )
-      ? ((msg.metadata as any)?.inline_file_contents as Array<{
-          name?: string
-          content?: string
-        }>).filter((f) => f?.content)
+      ? (
+          (msg.metadata as any)?.inline_file_contents as Array<{
+            name?: string
+            content?: string
+          }>
+        ).filter((f) => f?.content)
       : []
 
     const buildInlineText = (base: string) => {
