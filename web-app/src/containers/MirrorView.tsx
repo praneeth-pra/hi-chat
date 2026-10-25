@@ -68,6 +68,9 @@ import {
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { cn } from '@/lib/utils'
 
+/** The server's close code for a link that has ended (relay/mirror.mjs). */
+const LINK_ENDED = 4001
+
 // The remote mirror's viewer: open /mirror on another signed-in computer to
 // follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
@@ -77,6 +80,8 @@ import { cn } from '@/lib/utils'
 function useMirror(link?: string) {
   const [state, setState] = useState<MirrorState>(emptyMirror)
   const [connected, setConnected] = useState(false)
+  // A link that has ended ("New link" in Hi-chat, or its app gone 12 h)
+  const [ended, setEnded] = useState(false)
   // Round trip to Hi-chat's server, in ms, from the pings below
   const [lag, setLag] = useState<number | null>(null)
   // With a direct channel to Hi-chat open: the round trip over it
@@ -163,13 +168,21 @@ function useMirror(link?: string) {
         if (m.t === 'rtc') return peer.receive(m)
         for (const x of seq.take(m, 'relay')) queue(x)
       }
-      socket.onclose = () => {
+      socket.onclose = (e) => {
         if (ws !== socket) return
         setConnected(false)
         setLag(null)
         // Hi-chat offers again once the server introduces us again
         peer.closeAll()
         if (stopped) return
+        // The link has ended: clear the old conversation and stop trying
+        if (e.code === LINK_ENDED) {
+          stopped = true
+          pending = []
+          setState(emptyMirror)
+          setEnded(true)
+          return
+        }
         retry = setTimeout(connect, retryMs)
         retryMs = Math.min(retryMs * 2, 15_000)
       }
@@ -231,6 +244,7 @@ function useMirror(link?: string) {
   return {
     state,
     connected,
+    ended,
     lag: direct ? (directLag ?? lag) : lag,
     direct,
     controllable,
@@ -267,7 +281,7 @@ function useLook(look: MirrorState['look']) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected, lag, direct, controllable, sendInput } =
+  const { state, connected, ended, lag, direct, controllable, sendInput } =
     useMirror(link)
   const cam = useCameraSender({ link })
   useLook(state.look)
@@ -439,6 +453,19 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
         }
       : { maxWidth: column }
 
+  if (ended)
+    return (
+      <div
+        data-testid="mirror-link-ended"
+        className="flex h-full flex-col items-center justify-center gap-2 bg-main-view px-6 text-center text-main-view-fg"
+      >
+        <h1 className="text-base font-semibold">This mirror link has ended</h1>
+        <p className="max-w-sm text-sm text-main-view-fg/60">
+          Hi-chat made a new link. Open the new one from Hi-chat to keep
+          watching.
+        </p>
+      </div>
+    )
   return (
     <div className="flex h-full flex-col bg-main-view text-main-view-fg">
       <header className="flex items-center gap-3 border-b border-main-view-fg/10 bg-main-view/80 px-4 py-2.5 backdrop-blur">

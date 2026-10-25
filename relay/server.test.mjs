@@ -589,3 +589,39 @@ test('azure live: the key becomes a region-tagged token, never sent itself', asy
     { status: 503 }
   )
 })
+
+test('mirror link: an unknown or ended link is told so (4001), not refused', async () => {
+  const { request } = await import('node:http')
+  const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const frame = await new Promise((resolve, reject) => {
+      const req = request({
+        host: '127.0.0.1',
+        port: server.address().port,
+        path: `/api/mirror-link?link=${'A'.repeat(24)}`,
+        headers: {
+          'connection': 'Upgrade',
+          'upgrade': 'websocket',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+        },
+      })
+      req.on('upgrade', (res, socket, head) => {
+        assert.equal(res.statusCode, 101)
+        const chunks = [head]
+        socket.on('data', (d) => chunks.push(d))
+        socket.on('end', () => resolve(Buffer.concat(chunks)))
+        socket.on('error', reject)
+      })
+      req.on('response', (res) => reject(new Error(`HTTP ${res.statusCode}`)))
+      req.on('error', reject)
+      req.end()
+    })
+    // A close frame (opcode 8) carrying code 4001
+    assert.equal(frame[0] & 0x0f, 8)
+    assert.equal(frame.readUInt16BE(2), 4001)
+  } finally {
+    server.close()
+  }
+})

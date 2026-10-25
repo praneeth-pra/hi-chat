@@ -93,7 +93,8 @@ jobs:
           L=AAAAAAAAAAAAAAAAAAAAAAAA
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/m/$L)" = 200
           curl -s http://localhost:8081/m/$L | grep -qi '<div id="root"'
-          test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/mirror-link?link=$L")" = 404
+          # An unknown or ended link is opened, then closed with 4001 at once
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/mirror-link?link=$L" || true)" = 101
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/camera?role=send&link=$L")" = 401
           # The app's code loads without login; pages and APIs still don't
           test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:8081/assets/$asset")" = 200
