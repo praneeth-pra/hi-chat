@@ -46,7 +46,8 @@ COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 ENV PORT=80
 # Dictation transcription keys; set them as Railway variables.
 ENV ELEVENLABS_API_KEY=""
-# Optional Azure Speech test engine (en-IN), e.g. AZURE_SPEECH_REGION=centralindia
+# Optional Azure Speech test engine (MAI-Transcribe-2-Streaming), from a Speech
+# resource in a region that serves it, e.g. AZURE_SPEECH_REGION=southeastasia
 ENV AZURE_SPEECH_KEY=""
 ENV AZURE_SPEECH_REGION=""
 # Optional web sources for Accuracy mode; set securely in Railway.

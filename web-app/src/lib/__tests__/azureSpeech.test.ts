@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { AzureLiveTranscriber, azureAuth, azurePhrases } from '../azureSpeech'
+import {
+  AZURE_MODEL,
+  AzureLiveTranscriber,
+  azureAuth,
+  azureEndpoint,
+} from '../azureSpeech'
 
 describe('azureAuth', () => {
   it("splits the relay's region and token", () => {
@@ -12,21 +17,14 @@ describe('azureAuth', () => {
   })
 })
 
-describe('azurePhrases', () => {
-  it('keeps each term once, tidied, up to the limit', () => {
-    expect(
-      azurePhrases([' EKS ', 'eks', 'NAT  gateway', '', 'Fargate'])
-    ).toEqual(['EKS', 'NAT gateway', 'Fargate'])
-    expect(azurePhrases(['a', 'b', 'c'], 2)).toEqual(['a', 'b'])
-  })
-})
-
 /** A stand-in for the Speech SDK: records what the transcriber does. */
 function fakeSdk() {
   const written: ArrayBuffer[] = []
-  const phrases: string[] = []
   const state: {
     language?: string
+    endpoint?: string
+    token?: string
+    model?: string
     closed: boolean
     recognizer?: {
       recognizing?: (r: unknown, e: { result: { text: string } }) => void
@@ -54,11 +52,20 @@ function fakeSdk() {
     },
     AudioConfig: { fromStreamInput: () => ({}) },
     SpeechConfig: {
-      fromAuthorizationToken: () => ({
-        set speechRecognitionLanguage(v: string) {
-          state.language = v
-        },
-      }),
+      fromEndpoint: (url: URL) => {
+        state.endpoint = url.toString()
+        return {
+          set speechRecognitionLanguage(v: string) {
+            state.language = v
+          },
+          set authorizationToken(v: string) {
+            state.token = v
+          },
+          setModel: (name: string) => {
+            state.model = name
+          },
+        }
+      },
     },
     SpeechRecognizer: class {
       constructor() {
@@ -72,31 +79,33 @@ function fakeSdk() {
       }
       close() {}
     },
-    PhraseListGrammar: {
-      fromRecognizer: () => ({ addPhrase: (p: string) => phrases.push(p) }),
-    },
     ResultReason: { RecognizedSpeech: 3 },
     CancellationReason: { Error: 1, EndOfStream: 0 },
   }
-  return { sdk: async () => sdk as never, written, phrases, state }
+  return { sdk: async () => sdk as never, written, state }
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
 describe('AzureLiveTranscriber', () => {
-  it('streams Indian English with the key terms, and joins each stretch at the end', async () => {
+  it('streams to MAI-Transcribe-2 with the token, and joins each stretch at the end', async () => {
     const fake = fakeSdk()
     const previews: string[] = []
     const live = new AzureLiveTranscriber(
-      Promise.resolve({ token: 'centralindia:tok', terms: ['Koramangala'] }),
-      ['EKS'],
+      Promise.resolve({ token: 'southeastasia:tok' }),
       fake.sdk
     )
     live.setPreviewListener((t) => previews.push(t))
     live.push(new Float32Array(1600)) // before the SDK is ready: held
     await tick()
-    expect(fake.state.language).toBe('en-IN')
-    expect(fake.phrases).toEqual(['EKS', 'Koramangala'])
+    expect(fake.state.endpoint).toBe(
+      'wss://southeastasia.stt.speech.microsoft.com/speech/universal/v2'
+    )
+    expect(fake.state.endpoint).toBe(azureEndpoint('southeastasia'))
+    expect(fake.state.model).toBe(AZURE_MODEL)
+    expect(fake.state.model).toBe('MAI-Transcribe-2-Streaming')
+    expect(fake.state.token).toBe('tok')
+    expect(fake.state.language).toBe('en-US')
     expect(fake.state.started).toBe(true)
     expect(fake.written[0].byteLength).toBe(3200)
     const r = fake.state.recognizer!
@@ -120,8 +129,7 @@ describe('AzureLiveTranscriber', () => {
   it('fails with Azure’s reason when it reports an error', async () => {
     const fake = fakeSdk()
     const live = new AzureLiveTranscriber(
-      Promise.resolve({ token: 'centralindia:tok' }),
-      [],
+      Promise.resolve({ token: 'southeastasia:tok' }),
       fake.sdk
     )
     await tick()

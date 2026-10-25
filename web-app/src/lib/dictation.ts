@@ -58,7 +58,7 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
-  { value: 'azure', label: 'Azure (Indian English, test)' },
+  { value: 'azure', label: 'Azure MAI-Transcribe-2 (test)' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
 
@@ -584,10 +584,7 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       elevenLabsTerms(keyTerms())
     )
   if (engine === 'azure')
-    return new AzureLiveTranscriber(
-      fetchLiveKeyWithTerms('azure'),
-      withCodingTerms(keyTerms())
-    )
+    return new AzureLiveTranscriber(fetchLiveKeyWithTerms('azure'))
   if (engine === 'soniox')
     return new SonioxLiveTranscriber(
       fetchLiveKeyWithTerms('soniox'),

@@ -1,13 +1,22 @@
 import { toPcm16 } from './speechLive'
 
 /**
- * One clip streamed to Azure Speech (Indian English, en-IN) with Microsoft's
- * Speech SDK, loaded only when this engine runs. The relay turns
- * AZURE_SPEECH_KEY into a token valid 10 minutes ("region:token"), so the key
- * never reaches the browser. Azure writes out each stretch of speech as it
- * hears it end; `finish()` ends the audio, Azure writes out the rest, and
- * the stretches are joined. Key terms go in as a phrase list.
+ * One clip streamed to Microsoft's MAI-Transcribe-2-Streaming (#1 on
+ * Artificial Analysis' streaming leaderboard, Oct 2026) through Azure Speech,
+ * with Microsoft's Speech SDK loaded only when this engine runs. The relay
+ * turns AZURE_SPEECH_KEY into a token valid 10 minutes ("region:token"), so
+ * the key never reaches the browser. The model is in preview and served in
+ * a few regions only (southeastasia, centralus, swedencentral), so the Speech
+ * resource must be in one of them. Azure writes out each stretch of speech as
+ * it hears it end; `finish()` ends the audio, Azure writes out the rest, and
+ * the stretches are joined. Phrase lists aren't documented for this model, so
+ * key terms aren't sent; the app's own fixes still apply to its text.
  */
+
+/** The model, and the endpoint that serves it. */
+export const AZURE_MODEL = 'MAI-Transcribe-2-Streaming'
+export const azureEndpoint = (region: string) =>
+  `wss://${region}.stt.speech.microsoft.com/speech/universal/v2`
 type Sdk = typeof import('microsoft-cognitiveservices-speech-sdk')
 
 const loadSdk = (): Promise<Sdk> =>
@@ -21,20 +30,6 @@ export function azureAuth(value: string): { region: string; token: string } {
   if (!/^[a-z0-9]{2,40}$/.test(region) || !token)
     throw new Error('Azure token missing')
   return { region, token }
-}
-
-/** Azure's phrase list: the key terms, without repeats. */
-export function azurePhrases(keyterms: string[], max = 500): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const raw of keyterms) {
-    const term = raw.replace(/\s+/g, ' ').trim()
-    if (!term || seen.has(term.toLowerCase())) continue
-    seen.add(term.toLowerCase())
-    out.push(term)
-    if (out.length === max) break
-  }
-  return out
 }
 
 type Recognizer = {
@@ -67,19 +62,15 @@ export class AzureLiveTranscriber {
   }
 
   constructor(
-    // The relay's "region:token", and P's dictionary terms
-    auth: Promise<{ token: string; terms?: string[] }>,
-    keyterms: string[] = [],
+    // The relay's "region:token"
+    auth: Promise<{ token: string }>,
     sdk: () => Promise<Sdk> = loadSdk
   ) {
     Promise.all([auth, sdk()]).then(
       ([value, s]) => {
         if (this.failed) return
         try {
-          this.start(s, azureAuth(value.token), [
-            ...keyterms,
-            ...(value.terms ?? []),
-          ])
+          this.start(s, azureAuth(value.token))
         } catch (err) {
           this.abort(err as Error)
         }
@@ -88,24 +79,18 @@ export class AzureLiveTranscriber {
     )
   }
 
-  private start(
-    s: Sdk,
-    { region, token }: { region: string; token: string },
-    keyterms: string[]
-  ) {
+  private start(s: Sdk, { region, token }: { region: string; token: string }) {
     const format = s.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1)
     const push = s.AudioInputStream.createPushStream(format)
-    const config = s.SpeechConfig.fromAuthorizationToken(token, region)
-    config.speechRecognitionLanguage = 'en-IN'
+    const config = s.SpeechConfig.fromEndpoint(new URL(azureEndpoint(region)))
+    config.authorizationToken = token
+    config.setModel(AZURE_MODEL)
+    // Dictation is English only; the model handles Indian accents itself
+    config.speechRecognitionLanguage = 'en-US'
     const recognizer = new s.SpeechRecognizer(
       config,
       s.AudioConfig.fromStreamInput(push)
     )
-    const phrases = azurePhrases(keyterms)
-    if (phrases.length) {
-      const list = s.PhraseListGrammar.fromRecognizer(recognizer)
-      for (const p of phrases) list.addPhrase(p)
-    }
     recognizer.recognizing = (_r, e) => {
       this.hearing = e.result.text ?? ''
       this.onPreview?.(this.text(true))

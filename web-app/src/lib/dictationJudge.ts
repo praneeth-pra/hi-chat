@@ -54,7 +54,7 @@ export const DICTATION_JUDGE_PROMPT = `You get one dictation, transcribed by sev
 
 const ENGINE_NAMES: Record<string, string> = {
   elevenlabs: 'ElevenLabs',
-  azure: 'Azure',
+  azure: 'Azure MAI-Transcribe-2',
   soniox: 'Soniox',
   cartesia: 'Cartesia',
 }
