@@ -59,6 +59,7 @@ E K S => EKS
 # From the speech logs (2026-10-24). After "@": only when one of these words
 # is in the same dictation, so everyday speech ("I forget") is left alone.
 E case => EKS
+eCase => EKS
 AC institutions => EC2 instances
 AC institution => EC2 instance
 AC instances => EC2 instances

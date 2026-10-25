@@ -58,7 +58,7 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
-  { value: 'azure', label: 'Azure MAI-Transcribe-2 (test)' },
+  { value: 'azure', label: 'Azure MAI-Transcribe-2' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
 
@@ -603,18 +603,20 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
 /** Engines Auto can race, in tie-break order. */
 export const AUTO_ENGINE_CHOICES = [
   'cartesia',
+  // Microsoft's MAI-Transcribe-2: the most accurate on P's questions (25 Oct,
+  // 6 of 6 technical terms), so it wins ties after Cartesia. Off until
+  // ticked in Settings, since it needs its own Azure key
+  'azure',
   'soniox',
   'elevenlabs',
-  // Indian English, on trial: off until ticked in Settings, and even then
-  // only logged beside the others (TEST_ENGINES), never used
-  'azure',
 ] as const satisfies readonly DictationEngine[]
 /**
  * Engines on trial: they hear every clip and their text is logged beside the
  * others' (for comparing on real interviews), but it never counts towards
- * what is sent, so trying one can't make dictation worse or slower.
+ * what is sent, so trying one can't make dictation worse or slower. None
+ * right now: Azure (MAI-Transcribe-2) graduated on 25 Oct.
  */
-export const TEST_ENGINES: readonly DictationEngine[] = ['azure']
+export const TEST_ENGINES: readonly DictationEngine[] = []
 
 /** The engines whose text decides what is sent: all but the ones on trial,
  * unless only engines on trial were chosen. */
@@ -722,7 +724,7 @@ export { textAgreement }
  */
 export function withoutFillers(text: string): string {
   const clean = text
-    .replace(/,?\s*\b(?:u+h+|u+m+|uhm|e+rm|h+m+)\b[,.]?(?=\s|$)/gi, '')
+    .replace(/,?\s*\b(?:u+h+|u+m+|uhm|e+rm|h+m+|m{2,})\b[,.]?(?=\s|$)/gi, '')
     .replace(/^[\s.…,-]+/, '')
     .replace(/\s{2,}/g, ' ')
     .trim()

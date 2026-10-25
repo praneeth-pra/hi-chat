@@ -541,7 +541,7 @@ describe('dictation', () => {
     localStorage.removeItem('dictation-auto-engines')
   })
 
-  it('an engine on trial (Azure) is logged but never decides what is sent', () => {
+  it('Azure (MAI-Transcribe-2) counts like the other engines', () => {
     const jobs = [
       { engine: 'cartesia' as const },
       { engine: 'azure' as const },
@@ -549,10 +549,9 @@ describe('dictation', () => {
     ]
     expect(countedEngines(jobs).map((j) => j.engine)).toEqual([
       'cartesia',
+      'azure',
       'soniox',
     ])
-    // Chosen on its own, it is used: there's nothing else to send
-    expect(countedEngines([{ engine: 'azure' as const }])).toHaveLength(1)
   })
 
   it('logs the engines that lost the race once they answer', async () => {
@@ -588,6 +587,11 @@ describe('dictation', () => {
     expect(withoutFillers('Uh, my career started in TCS')).toBe(
       'My career started in TCS'
     )
+    // MAI-Transcribe-2 writes the "mm" before a question
+    expect(
+      withoutFillers('Mm. Can you tell me how we can modify an EC2 instance?')
+    ).toBe('Can you tell me how we can modify an EC2 instance?')
+    expect(withoutFillers('A comma, then mm, more')).toBe('A comma, then more')
   })
   it('cancel then start again while the mic opens records once, on an open mic', async () => {
     setKeepMicReady(false)
