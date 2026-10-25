@@ -77,4 +77,45 @@ describe('applyFixes', () => {
     )
     expect(applyFixes('am I late', fixes)).toBe('am I late')
   })
+
+  it('fixes the cloud terms from 25 Oct, only in context', () => {
+    expect(
+      applyFixes(
+        'Can you explain how Carpenter differs from cluster autoscaler in any case?'
+      )
+    ).toBe(
+      'Can you explain how Karpenter differs from cluster autoscaler in EKS?'
+    )
+    expect(applyFixes('In any case, the deploy failed.')).toBe(
+      'In any case, the deploy failed.'
+    )
+    expect(applyFixes('My carpenter fixed the door.')).toBe(
+      'My carpenter fixed the door.'
+    )
+    expect(
+      applyFixes(
+        'How do you know a case with Azure CNI overlay and Selenium for network policies?'
+      )
+    ).toBe(
+      'How do you know AKS with Azure CNI overlay and Cilium for network policies?'
+    )
+    expect(applyFixes('I automate tests with Selenium and Playwright.')).toBe(
+      'I automate tests with Selenium and Playwright.'
+    )
+    expect(applyFixes('Amazon Kinesis Data Warehouse vs Event Hubs')).toBe(
+      'Amazon Kinesis Data Firehose vs Event Hubs'
+    )
+    expect(applyFixes('Snowflake is a data warehouse')).toBe(
+      'Snowflake is a data warehouse'
+    )
+    expect(
+      applyFixes('connect an Azure virtual van to a transit gateway')
+    ).toBe('connect an Azure Virtual WAN to a transit gateway')
+    expect(applyFixes('AWS AIM Identity Center')).toBe(
+      'AWS IAM Identity Center'
+    )
+    expect(
+      applyFixes('Aurora serverless V 2 over Cosmos DB for postgress SQL')
+    ).toBe('Aurora Serverless v2 over Cosmos DB for PostgreSQL')
+  })
 })

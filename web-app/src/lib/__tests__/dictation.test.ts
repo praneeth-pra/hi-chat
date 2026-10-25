@@ -16,6 +16,8 @@ import {
   pickBest,
   gatherAuto,
   fastAgreement,
+  trimStrayStart,
+  longestAgreeing,
   countedEngines,
   getAutoEngines,
   setAutoEngines,
@@ -508,7 +510,7 @@ describe('dictation', () => {
       )
       await vi.advanceTimersByTimeAsync(950)
       await expect(cut).resolves.toHaveLength(2)
-      // Nothing heard by the deadline: the first text goes as it arrives
+      // Nothing heard by the deadline: the first text goes soon after it arrives
       let cartesia!: (t: string) => void
       const slow = gatherAuto(
         [
@@ -520,6 +522,8 @@ describe('dictation', () => {
       )
       await vi.advanceTimersByTimeAsync(1200)
       cartesia('What is EKS?')
+      // ...after a short wait for the others, which tend to land together
+      await vi.advanceTimersByTimeAsync(200)
       await expect(slow).resolves.toEqual([
         { engine: 'cartesia', text: 'What is EKS?' },
       ])
@@ -906,5 +910,96 @@ describe('Auto · Instant fast agreement', () => {
       with: 'cartesia',
       live: false,
     })
+  })
+})
+
+describe('stray words and cut-off texts', () => {
+  it('drops words one engine heard before the question began', () => {
+    const out = trimStrayStart([
+      { engine: 'cartesia', text: 'And also let me know about EBS.' },
+      {
+        engine: 'azure',
+        text: 'top rather than the And also let me know about EBS.',
+      },
+      { engine: 'soniox', text: 'And also, uh, let me know about EBS.' },
+      { engine: 'elevenlabs', text: 'And also let me know about EBS.' },
+    ])
+    expect(out[1].text).toBe('And also let me know about EBS.')
+    expect(out[0].text).toBe('And also let me know about EBS.')
+    expect(
+      trimStrayStart([
+        { engine: 'azure', text: 'you. When would you pick Aurora?' },
+        { engine: 'soniox', text: 'When would you pick Aurora?' },
+        { engine: 'elevenlabs', text: 'When would you pick Aurora?' },
+      ])[0].text
+    ).toBe('When would you pick Aurora?')
+  })
+
+  it('leaves texts alone without two engines agreeing on the start', () => {
+    const results = [
+      { engine: 'cartesia' as const, text: 'So what is VPC?' },
+      { engine: 'azure' as const, text: 'What is VPC?' },
+    ]
+    expect(trimStrayStart(results)).toEqual(results)
+    const many = [
+      {
+        engine: 'cartesia' as const,
+        text: 'one two three four five six seven',
+      },
+      { engine: 'azure' as const, text: 'seven' },
+      { engine: 'soniox' as const, text: 'seven' },
+    ]
+    expect(trimStrayStart(many)[0].text).toBe(many[0].text)
+  })
+
+  it('past the deadline, sends the whole question rather than a cut-off one', () => {
+    const results = [
+      {
+        engine: 'cartesia' as const,
+        text: 'How do you enable DDoS protection to your account? So',
+      },
+      {
+        engine: 'azure' as const,
+        text: 'How do you enable DDoS protection to your account. So what are the options?',
+      },
+      {
+        engine: 'soniox' as const,
+        text: 'How do you enable DDoS protection to your ac',
+      },
+    ]
+    expect(longestAgreeing(results, results[0])?.engine).toBe('azure')
+    expect(longestAgreeing(results, undefined)).toBeUndefined()
+    // A different question isn't picked just for being longer
+    expect(
+      longestAgreeing(
+        [
+          { engine: 'cartesia', text: 'What is EKS?' },
+          {
+            engine: 'azure',
+            text: 'Tell me everything about something else entirely now',
+          },
+        ],
+        { engine: 'cartesia', text: 'What is EKS?' }
+      )?.engine
+    ).toBe('cartesia')
+  })
+
+  it('past the deadline, waits a moment for the others before sending', async () => {
+    vi.useFakeTimers()
+    const later = (text: string, ms: number) =>
+      new Promise<string>((r) => setTimeout(() => r(text), ms))
+    const out = gatherAuto(
+      [
+        { engine: 'cartesia', text: later('to your account? So', 3000) },
+        {
+          engine: 'azure',
+          text: later('to your account. So what are the options?', 3070),
+        },
+      ],
+      1200
+    )
+    await vi.advanceTimersByTimeAsync(3300)
+    expect((await out).map((r) => r.engine)).toEqual(['cartesia', 'azure'])
+    vi.useRealTimers()
   })
 })
