@@ -15,7 +15,7 @@ import { acceptWebSocket } from './wsProxy.mjs'
 import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
-import { createMirrorHub } from './mirror.mjs'
+import { createMirrorHub, LINK_ENDED } from './mirror.mjs'
 import { createCameraHub, createIceSource } from './camera.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
@@ -627,10 +627,13 @@ export function createRelay(options = {}) {
       if (!sameOriginRequest(req))
         return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
       const link = url.searchParams.get('link')
-      if (!mirror.isLink(link))
-        return socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client) mirror.join(client, 'view', { link })
+      if (!client) return
+      // An ended link (replaced, or its app gone 12 h) is told so with 4001,
+      // the code a replaced link's viewers get, so the page clears and stops
+      // trying rather than keep showing the old conversation
+      if (!mirror.isLink(link)) return client.close(LINK_ENDED)
+      mirror.join(client, 'view', { link })
       return
     }
     if (url.pathname === '/api/mirror') {

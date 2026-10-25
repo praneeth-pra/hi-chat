@@ -195,6 +195,8 @@ function pong(ws, raw) {
 
 /** A mirror link's secret: random, URL-safe, long enough not to guess. */
 export const LINK_RE = /^[A-Za-z0-9_-]{22,64}$/
+/** Close code for a link's viewer when the link has ended. */
+export const LINK_ENDED = 4001
 // A link keeps working this long after its app closes, so a restart (or the
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
@@ -332,7 +334,7 @@ export function createMirrorHub({
     links.delete(secret)
     const ch = channels.get(secret)
     if (!ch) return
-    for (const v of [...ch.viewers]) v.close(4001)
+    for (const v of [...ch.viewers]) v.close(LINK_ENDED)
   }
 
   // A finished reply arrives as a message, so the stream ends with it. It is
