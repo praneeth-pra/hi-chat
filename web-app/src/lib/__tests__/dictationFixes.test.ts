@@ -65,6 +65,9 @@ describe('applyFixes', () => {
     expect(applyFixes('Is E case managed Kubernetes?')).toBe(
       'Is EKS managed Kubernetes?'
     )
+    expect(applyFixes('upgrade an eCase cluster')).toBe(
+      'upgrade an EKS cluster'
+    )
   })
 
   it('reads context words after @, counting earlier fixes', () => {
