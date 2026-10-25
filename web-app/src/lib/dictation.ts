@@ -142,6 +142,13 @@ const AUTO_GRACE_MS = 1000
  */
 const AUTO_SHORT_GRACE_MS = 500
 /**
+ * Past the deadline (a network spike: on 25 Oct every engine took ~8 s),
+ * the first text that arrives waits this long for the others, which tend to
+ * land together; Cartesia's cut-off "...to your account? So" went out 73 ms
+ * before Azure's whole question.
+ */
+const LATE_GRACE_MS = 200
+/**
  * Auto: the text goes out by this long after you stop, whatever is late. In
  * the 12-14 Oct mock interviews 40 of 154 clips took longer, 32 of them
  * waiting on the judge. 1.2 s lets the judge finish on almost all of them
@@ -757,6 +764,61 @@ export function pickBest(results: EngineText[]): EngineText | undefined {
   return best
 }
 
+const FILLER_WORDS = new Set(['uh', 'um', 'uhm', 'umm', 'erm', 'hmm', 'mm'])
+/** A word as compared: lower case, letters and digits only, fillers dropped. */
+const contentWord = (w: string) => {
+  const n = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+  return n && !FILLER_WORDS.has(n) ? n : ''
+}
+/** At most this many words heard before the question get dropped. */
+const MAX_STRAY_WORDS = 5
+
+/**
+ * Drops words one engine heard before the question began, when most of the
+ * others start a few words later: MAI-Transcribe-2 wrote "top rather than
+ * the And also let me know..." and "you. When would you pick..." on 25 Oct,
+ * where every other engine started at "And" / "When".
+ */
+export function trimStrayStart(results: EngineText[]): EngineText[] {
+  return results.map((r) => {
+    if (!r.text) return r
+    const firsts = results
+      .filter((o) => o !== r && o.text)
+      .map((o) => o.text.split(/\s+/).map(contentWord).find(Boolean))
+      .filter((w): w is string => !!w)
+    if (firsts.length < 2) return r
+    const counts = new Map<string, number>()
+    for (const w of firsts) counts.set(w, (counts.get(w) ?? 0) + 1)
+    const [start, votes] = [...counts].sort((a, b) => b[1] - a[1])[0]
+    if (votes < 2 || votes * 2 <= firsts.length) return r
+    const tokens = r.text.split(/\s+/).filter(Boolean)
+    let seen = 0
+    for (let i = 0; i < tokens.length && seen <= MAX_STRAY_WORDS; i++) {
+      const w = contentWord(tokens[i])
+      if (!w) continue
+      if (w === start) {
+        if (seen === 0) return r
+        const rest = tokens.slice(i).join(' ')
+        return { ...r, text: rest.charAt(0).toUpperCase() + rest.slice(1) }
+      }
+      seen++
+    }
+    return r
+  })
+}
+
+/** The longest text that still agrees with `best` (cut-off texts are its start). */
+export function longestAgreeing(
+  results: EngineText[],
+  best: EngineText | undefined
+): EngineText | undefined {
+  if (!best) return best
+  const words = (t: string) => t.split(/\s+/).filter(Boolean).length
+  return results
+    .filter((r) => r.text && textAgreement(r.text, best.text) >= 0.6)
+    .reduce((a, b) => (words(b.text) > words(a.text) ? b : a), best)
+}
+
 /**
  * Waits for every engine, but only AUTO_GRACE_MS once the first has text,
  * not at all once two engines hear the same words, only AUTO_SHORT_GRACE_MS
@@ -773,6 +835,7 @@ export function gatherAuto(
     const done: EngineText[] = []
     const errors: string[] = []
     let left = jobs.length
+    let lateGrace: ReturnType<typeof setTimeout> | undefined
     let grace: ReturnType<typeof setTimeout> | undefined
     let late = false
     const deadline =
@@ -784,6 +847,7 @@ export function gatherAuto(
           }, deadlineMs)
     const finish = () => {
       clearTimeout(grace)
+      clearTimeout(lateGrace)
       clearTimeout(deadline)
       if (!done.length && errors.length) reject(new Error(errors.join('; ')))
       // Keep the engines' order, so ties go to the first (Cartesia)
@@ -798,8 +862,10 @@ export function gatherAuto(
             ? done.filter((d) => d.text).map((d) => textAgreement(d.text, text))
             : []
           done.push({ engine, text })
-          if (scores.some((s) => s === 1) || (late && text)) finish()
-          else if (scores.some((s) => s >= SKIP_AGREEMENT)) {
+          if (scores.some((s) => s === 1)) finish()
+          else if (late && text) {
+            if (!lateGrace) lateGrace = setTimeout(finish, LATE_GRACE_MS)
+          } else if (scores.some((s) => s >= SKIP_AGREEMENT)) {
             clearTimeout(grace)
             grace = setTimeout(finish, AUTO_SHORT_GRACE_MS)
           } else if (text && !grace)
@@ -947,11 +1013,19 @@ export async function stopDictation() {
       // on the right text
       const results = fast
         ? []
-        : (await gathered).map((r) => ({
-            ...r,
-            text: applyFixes(r.text),
-          }))
-      const best = fast ? undefined : pickBest(results)
+        : trimStrayStart(
+            (await gathered).map((r) => ({
+              ...r,
+              text: applyFixes(r.text),
+            }))
+          )
+      // Past the deadline some engines may have been cut off: the longest
+      // text that agrees with the vote is the whole question
+      const best = fast
+        ? undefined
+        : Date.now() - stoppedAt > AUTO_DEADLINE_MS
+          ? longestAgreeing(results, pickBest(results))
+          : pickBest(results)
       const judgeStart = Date.now()
       const elapsed = judgeStart - stoppedAt
       const judgeMs = Math.min(

@@ -71,3 +71,16 @@ the EMI => the AMI @ EC2, instance, instances, image, images, AWS, launch, snaps
 an am I => an AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
 the am I => the AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
 use am I => use AMI @ EC2, instance, instances, image, images, AWS, launch, snapshot, copy, golden, upgrade, Packer, patch
+# From the speech logs (2026-10-25)
+virtual van => Virtual WAN
+Carpenter => Karpenter @ autoscaler, Kubernetes, EKS, AKS, node group, nodes, cluster
+Selenium => Cilium @ CNI, network policy, network policies, eBPF
+Data Warehouse => Data Firehose @ Kinesis
+AWS AIM => AWS IAM
+AIM Identity Center => IAM Identity Center
+Serverless V 2 => Serverless v2
+postgress SQL => PostgreSQL
+postgress => Postgres
+in any case => in EKS @ Karpenter, autoscaler, node group
+in each case => in EKS @ Karpenter, autoscaler, node group
+a case => AKS @ Azure CNI, CNI overlay
