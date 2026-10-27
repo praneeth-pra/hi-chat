@@ -73,18 +73,24 @@
   // mic back to you. (Meant for laptops in different places: in one room the
   // remote mic would pick this up and echo it into the call.)
   const sink = new Audio()
-  // Chrome may block sound until the page has been clicked; play on the next
-  // click or key press then
-  const playSink = () =>
-    sink.play().catch(() => {
-      const retry = () => {
-        removeEventListener('pointerdown', retry, true)
-        removeEventListener('keydown', retry, true)
-        sink.play().catch(() => {})
-      }
-      addEventListener('pointerdown', retry, true)
-      addEventListener('keydown', retry, true)
-    })
+  sink.autoplay = true
+  // It can stop without a word: Chrome blocks sound until the page has been
+  // clicked, a play() started before the remote sound arrives can come to
+  // nothing, and a new connection's track resets the element. So it plays
+  // again whenever it isn't: when the sound starts, on every click or key
+  // press, and every couple of seconds
+  const playSink = () => {
+    if (sink.srcObject && sink.paused) sink.play().catch(() => {})
+  }
+  addEventListener('pointerdown', playSink, true)
+  addEventListener('keydown', playSink, true)
+  document.addEventListener('visibilitychange', playSink)
+  setInterval(playSink, 2000)
+  function hearRemote(track) {
+    sink.srcObject = new MediaStream([track])
+    track.addEventListener('unmute', playSink)
+    playSink()
+  }
 
   const send = (m) =>
     document.dispatchEvent(
@@ -257,10 +263,7 @@
         const at = e.transceiver?.mid
         if (at != null && (at === mid || at === callMid)) return
         pump(e.track.kind, e.track)
-        if (e.track.kind === 'audio') {
-          sink.srcObject = new MediaStream([e.track])
-          playSink()
-        }
+        if (e.track.kind === 'audio') hearRemote(e.track)
       }
       await peer.setRemoteDescription({ type: 'offer', sdp: m.sdp })
       const lane =
