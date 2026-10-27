@@ -333,15 +333,19 @@
     return { ...info, toJSON: () => info }
   }
 
-  /** Whether a constraint asks for device `id`. */
-  function asksFor(c, id) {
-    if (!c || typeof c !== 'object') return false
-    const d = c.deviceId
-    const ids = []
-    for (const v of [d, d?.exact, d?.ideal])
-      if (typeof v === 'string') ids.push(v)
-      else if (Array.isArray(v)) ids.push(...v)
-    return ids.includes(id)
+  /**
+   * Whether a constraint asks for device `id`, in any form a call page uses:
+   * deviceId as a string, a list, { exact } or { ideal }, or inside
+   * `advanced`. Anything not understood here goes to the real getUserMedia,
+   * which ignores an unknown id and opens the built-in webcam instead
+   */
+  function asksFor(c, id, depth = 0) {
+    if (c === id) return true
+    if (!c || typeof c !== 'object' || depth > 4) return false
+    if (Array.isArray(c)) return c.some((v) => asksFor(v, id, depth + 1))
+    return ['deviceId', 'exact', 'ideal', 'advanced'].some(
+      (k) => k in c && asksFor(c[k], id, depth + 1)
+    )
   }
 
   md.enumerateDevices = async function () {
@@ -377,6 +381,12 @@
   md.getUserMedia = async function (constraints = {}) {
     const video = asksFor(constraints.video, CAM)
     const audio = asksFor(constraints.audio, MIC)
+    // What the call asked for, to see in DevTools why a device wasn't used
+    console.info(
+      '[Hi-chat camera] getUserMedia',
+      JSON.stringify(constraints),
+      { remoteCamera: video, remoteMic: audio }
+    )
     if (!video && !audio) return realGetUserMedia(constraints)
     start()
     const tracks = []
