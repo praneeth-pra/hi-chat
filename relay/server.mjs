@@ -188,7 +188,6 @@ export async function liveToken({
   fetchImpl = fetch,
   engine = 'elevenlabs',
 } = {}) {
-  if (engine === 'azure') return azureToken({ env, fetchImpl })
   if (engine === 'soniox') return sonioxKey({ env, fetchImpl })
   if (engine === 'cartesia') return cartesiaToken({ env, fetchImpl })
   const key = env.ELEVENLABS_API_KEY
@@ -213,39 +212,6 @@ export async function liveToken({
     )
   const { token } = await res.json()
   return token
-}
-
-/**
- * Azure live (a test engine): a token valid 10 minutes lets the browser's
- * Speech SDK connect without seeing AZURE_SPEECH_KEY. The region is public.
- */
-export const AZURE_REGION_RE = /^[a-z0-9]{2,40}$/
-export async function azureToken({
-  env = process.env,
-  fetchImpl = fetch,
-} = {}) {
-  const region = String(env.AZURE_SPEECH_REGION ?? '')
-    .trim()
-    .toLowerCase()
-  if (!env.AZURE_SPEECH_KEY || !AZURE_REGION_RE.test(region))
-    throw Object.assign(
-      new Error('AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set'),
-      { status: 503 }
-    )
-  const res = await fetchImpl(
-    `https://${region}.api.cognitive.microsoft.com/sts/v1.0/issueToken`,
-    {
-      method: 'POST',
-      headers: { 'Ocp-Apim-Subscription-Key': env.AZURE_SPEECH_KEY },
-      signal: AbortSignal.timeout(15_000),
-    }
-  )
-  if (!res.ok)
-    throw Object.assign(
-      new Error(`Azure token failed (${res.status}): ${await errorText(res)}`),
-      { status: 502 }
-    )
-  return `${region}:${await res.text()}`
 }
 
 /**
@@ -344,7 +310,7 @@ export function dictionaryTerms(
 function liveTokenEngine(body) {
   try {
     const engine = JSON.parse(body.toString('utf8')).engine
-    return ['soniox', 'cartesia', 'azure'].includes(engine)
+    return ['soniox', 'cartesia'].includes(engine)
       ? engine
       : 'elevenlabs'
   } catch {
@@ -528,8 +494,8 @@ export function createRelay(options = {}) {
         engine = liveTokenEngine(await readBody(req))
         const token = await liveToken({ ...options, engine })
         console.log(`live token ${engine} ${Date.now() - started} ms`)
-        // Soniox, Cartesia and Azure are sent the dictionary as key terms
-        if (engine === 'soniox' || engine === 'cartesia' || engine === 'azure')
+        // Soniox and Cartesia are sent the dictionary as key terms
+        if (engine === 'soniox' || engine === 'cartesia')
           return send(res, 200, { token, terms: dictionaryTerms() })
         return send(res, 200, { token })
       } catch (err) {

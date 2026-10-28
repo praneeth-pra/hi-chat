@@ -7,7 +7,6 @@ import {
   transcribeAll,
   clipLogLine,
   dictionaryTerms,
-  azureToken,
 } from './server.mjs'
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
@@ -560,33 +559,6 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   assert.equal(
     speechLogLine(body(instant.replace('effort=low', 'effort=secret'))),
     'speech diagnostic text omitted'
-  )
-})
-
-test('azure live: the key becomes a region-tagged token, never sent itself', async () => {
-  const calls = []
-  const fetchImpl = async (url, init) => {
-    calls.push({ url, headers: init.headers })
-    return new Response('tok123')
-  }
-  const env = { AZURE_SPEECH_KEY: 'k', AZURE_SPEECH_REGION: ' CentralIndia ' }
-  assert.equal(await azureToken({ env, fetchImpl }), 'centralindia:tok123')
-  assert.equal(
-    calls[0].url,
-    'https://centralindia.api.cognitive.microsoft.com/sts/v1.0/issueToken'
-  )
-  assert.equal(calls[0].headers['Ocp-Apim-Subscription-Key'], 'k')
-  assert.equal(
-    await liveToken({ env, fetchImpl, engine: 'azure' }),
-    'centralindia:tok123'
-  )
-  await assert.rejects(azureToken({ env: {}, fetchImpl }), { status: 503 })
-  await assert.rejects(
-    azureToken({
-      env: { AZURE_SPEECH_KEY: 'k', AZURE_SPEECH_REGION: 'evil.com/x' },
-      fetchImpl,
-    }),
-    { status: 503 }
   )
 })
 
