@@ -662,22 +662,20 @@ export function createRelay(options = {}) {
       mirror.join(client, 'view', { link })
       return
     }
+    // Hi-chat sending its conversation. Watching is only through a link
+    // (/m/<link>, above): the signed-in /mirror page is gone
     if (url.pathname === '/api/mirror') {
       if (!sameOriginRequest(req))
         return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n')
+      if (url.searchParams.get('role') !== 'send')
+        return socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
       if (client)
-        mirror.join(
-          client,
-          url.searchParams.get('role') === 'send' ? 'send' : 'view',
-          // A sender may name its app's link, for that link's viewers
-          url.searchParams.get('role') === 'send'
-            ? {
-                link: url.searchParams.get('link') ?? undefined,
-                born: url.searchParams.get('born') ?? undefined,
-              }
-            : {}
-        )
+        mirror.join(client, 'send', {
+          // The app's link, for that link's viewers
+          link: url.searchParams.get('link') ?? undefined,
+          born: url.searchParams.get('born') ?? undefined,
+        })
       return
     }
     return socket.destroy()

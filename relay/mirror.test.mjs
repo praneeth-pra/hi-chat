@@ -202,10 +202,11 @@ test('snapshots keep known fields and stay under the size cap', () => {
 test('the relay serves /api/mirror over real WebSockets', async () => {
   const server = createRelay({ env: {} })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
-  const base = `ws://127.0.0.1:${server.address().port}/api/mirror`
-  const open = (role) =>
+  const base = `ws://127.0.0.1:${server.address().port}/api`
+  const link = 'L'.repeat(24)
+  const open = (path) =>
     new Promise((resolve, reject) => {
-      const ws = new WebSocket(`${base}?role=${role}`)
+      const ws = new WebSocket(`${base}/${path}`)
       const got = []
       const waiters = []
       ws.onmessage = (e) => {
@@ -221,8 +222,12 @@ test('the relay serves /api/mirror over real WebSockets', async () => {
       check()
     })
   try {
-    const sender = await open('send')
-    const viewer = await open('view')
+    const sender = await open(
+      `mirror?role=send&link=${link}&born=${Date.now()}`
+    )
+    // Watching is only through a link: the signed-in /mirror is gone
+    await assert.rejects(open('mirror?role=view'))
+    const viewer = await open(`mirror-link?link=${link}`)
     await until(sender, (g) => g.some((m) => m.t === 'viewers' && m.n === 1))
     sender.ws.send(snap([{ id: 'u1', role: 'user', text: 'Hi' }]))
     sender.ws.send(JSON.stringify({ t: 'stream', id: 'a1', text: 'Hey' }))

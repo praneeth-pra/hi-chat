@@ -372,7 +372,7 @@ describe('remote mirror', () => {
         location: {
           protocol: 'https:',
           host: 'hi.example',
-          pathname: '/mirror',
+          pathname: `/m/${'L'.repeat(24)}`,
         } as Location,
       })
       expect(FakeSocket.last).toBe(before)
@@ -390,7 +390,7 @@ describe('remote mirror', () => {
       })
       const ws = FakeSocket.last
       ws.open()
-      location.pathname = '/mirror'
+      location.pathname = `/m/${'L'.repeat(24)}`
       ws.hear({ t: 'viewers', n: 1 })
       await vi.advanceTimersByTimeAsync(100)
       expect(ws.sent).toEqual([])

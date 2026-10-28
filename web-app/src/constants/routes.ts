@@ -1,7 +1,6 @@
 export const route = {
   // home as new chat or thread
   home: '/',
-  mirror: '/mirror',
   settings: {
     index: '/settings',
     model_providers: '/settings/providers',

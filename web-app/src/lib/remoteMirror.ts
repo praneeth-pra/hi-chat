@@ -24,12 +24,9 @@ import {
   onMirrorLinkRenewed,
 } from '@/lib/mirrorLink'
 
-export const MIRROR_PATH = '/mirror'
-// The remote laptop's page follows the conversation and sends the camera, so
-// it never sends a conversation of its own over the real one
-const NOT_SENDING = [MIRROR_PATH]
-const notSending = (pathname: string) =>
-  NOT_SENDING.includes(pathname) || linkFromPath(pathname) !== null
+// The remote laptop's page (/m/<link>) follows the conversation and sends the
+// camera, so it never sends a conversation of its own over the real one
+const notSending = (pathname: string) => linkFromPath(pathname) !== null
 const PING_MS = 30_000
 // How often to check whether this app's link ran out
 const LINK_CHECK_MS = 15_000

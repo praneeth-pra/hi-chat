@@ -11,7 +11,6 @@
 // Import Routes
 
 import { Route as rootRoute } from './routes/__root'
-import { Route as MirrorImport } from './routes/mirror'
 import { Route as IndexImport } from './routes/index'
 import { Route as ThreadsThreadIdImport } from './routes/threads/$threadId'
 import { Route as SettingsShortcutsImport } from './routes/settings/shortcuts'
@@ -25,12 +24,6 @@ import { Route as SettingsProvidersIndexImport } from './routes/settings/provide
 import { Route as SettingsProvidersProviderNameImport } from './routes/settings/providers/$providerName'
 
 // Create/Update Routes
-
-const MirrorRoute = MirrorImport.update({
-  id: '/mirror',
-  path: '/mirror',
-  getParentRoute: () => rootRoute,
-} as any)
 
 const IndexRoute = IndexImport.update({
   id: '/',
@@ -110,13 +103,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexImport
       parentRoute: typeof rootRoute
     }
-    '/mirror': {
-      id: '/mirror'
-      path: '/mirror'
-      fullPath: '/mirror'
-      preLoaderRoute: typeof MirrorImport
-      parentRoute: typeof rootRoute
-    }
     '/m/$link': {
       id: '/m/$link'
       path: '/m/$link'
@@ -194,7 +180,6 @@ declare module '@tanstack/react-router' {
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/mirror': typeof MirrorRoute
   '/m/$link': typeof MLinkRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -209,7 +194,6 @@ export interface FileRoutesByFullPath {
 
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/mirror': typeof MirrorRoute
   '/m/$link': typeof MLinkRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -225,7 +209,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
-  '/mirror': typeof MirrorRoute
   '/m/$link': typeof MLinkRoute
   '/settings/app-keys': typeof SettingsAppKeysRoute
   '/settings/assistant': typeof SettingsAssistantRoute
@@ -242,7 +225,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/mirror'
     | '/m/$link'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -256,7 +238,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/mirror'
     | '/m/$link'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -270,7 +251,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/mirror'
     | '/m/$link'
     | '/settings/app-keys'
     | '/settings/assistant'
@@ -286,7 +266,6 @@ export interface FileRouteTypes {
 
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  MirrorRoute: typeof MirrorRoute
   MLinkRoute: typeof MLinkRoute
   SettingsAppKeysRoute: typeof SettingsAppKeysRoute
   SettingsAssistantRoute: typeof SettingsAssistantRoute
@@ -301,7 +280,6 @@ export interface RootRouteChildren {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  MirrorRoute: MirrorRoute,
   MLinkRoute: MLinkRoute,
   SettingsAppKeysRoute: SettingsAppKeysRoute,
   SettingsAssistantRoute: SettingsAssistantRoute,
@@ -325,7 +303,6 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
-        "/mirror",
         "/m/$link",
         "/settings/app-keys",
         "/settings/assistant",
@@ -340,9 +317,6 @@ export const routeTree = rootRoute
     },
     "/": {
       "filePath": "index.tsx"
-    },
-    "/mirror": {
-      "filePath": "mirror.tsx"
     },
     "/m/$link": {
       "filePath": "m/$link.tsx"

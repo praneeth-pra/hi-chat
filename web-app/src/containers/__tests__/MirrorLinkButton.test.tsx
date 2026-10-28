@@ -74,3 +74,50 @@ describe('mirror link button', () => {
     }
   })
 })
+
+describe('camera extension download, in Hi-chat', () => {
+  it('fetches the key and saves the zip', async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url === '/api/camera-key'
+        ? new Response(JSON.stringify({ key: 'k1' }))
+        : new Response(`// ${url}`)
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {})
+    try {
+      const user = await opened()
+      await user.click(
+        screen.getByRole('button', { name: /Download the camera extension/ })
+      )
+      expect(fetchMock).toHaveBeenCalledWith('/api/camera-key', {
+        method: 'POST',
+      })
+      expect(fetchMock).toHaveBeenCalledWith('/hichat-extension/page.js')
+      expect(click).toHaveBeenCalled()
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      click.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('says so when it fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 401 }))
+    )
+    try {
+      const user = await opened()
+      await user.click(
+        screen.getByRole('button', { name: /Download the camera extension/ })
+      )
+      expect(screen.getByRole('alert').textContent).toMatch(/Couldn't/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { IconCheck, IconCopy, IconLink, IconLinkOff } from '@tabler/icons-react'
+import {
+  IconCheck,
+  IconCopy,
+  IconDownload,
+  IconLink,
+  IconLinkOff,
+} from '@tabler/icons-react'
 import {
   Popover,
   PopoverContent,
@@ -13,6 +19,7 @@ import {
   renewMirrorLink,
   shareMirrorLink,
 } from '@/lib/mirrorLink'
+import { downloadCameraExtension } from '@/lib/remoteCamera'
 import { cn } from '@/lib/utils'
 
 // This app's mirror link, in the chat header: copy it to follow this app's
@@ -27,6 +34,19 @@ export function MirrorLinkButton() {
   const [copied, setCopied] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [open, setOpen] = useState(false)
+  const [download, setDownload] = useState<'busy' | 'failed' | null>(null)
+
+  // The camera extension, for the call's computer: it holds the camera key,
+  // so it's downloaded here, signed in
+  const getExtension = async () => {
+    setDownload('busy')
+    try {
+      await downloadCameraExtension()
+      setDownload(null)
+    } catch {
+      setDownload('failed')
+    }
+  }
 
   const copy = async () => {
     const next = mirrorLinkUrl(window.location, shareMirrorLink())
@@ -165,6 +185,21 @@ export function MirrorLinkButton() {
               </button>
             </div>
           ) : null}
+          <div className="flex items-center justify-between gap-2 border-t border-main-view-fg/10 pt-2.5 text-xs">
+            <button
+              type="button"
+              onClick={getExtension}
+              disabled={download === 'busy'}
+              className="inline-flex items-center gap-1.5 text-main-view-fg/60 hover:text-main-view-fg disabled:opacity-50"
+            >
+              <IconDownload size={14} /> Download the camera extension
+            </button>
+            {download === 'failed' && (
+              <span role="alert" className="text-destructive">
+                Couldn't download it
+              </span>
+            )}
+          </div>
         </div>
       </PopoverContent>
     </Popover>

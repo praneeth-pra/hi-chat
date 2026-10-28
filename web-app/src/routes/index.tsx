@@ -2,6 +2,7 @@
 import { createFileRoute, useSearch } from '@tanstack/react-router'
 import ChatInput from '@/containers/ChatInput'
 import HeaderPage from '@/containers/HeaderPage'
+import { AppActions } from '@/containers/ThreadActions'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { useTools } from '@/hooks/useTools'
 import { cn } from '@/lib/utils'
@@ -87,10 +88,16 @@ function Index() {
   return (
     <div className="flex h-full flex-col justify-center pb-[calc(env(safe-area-inset-bottom)+env(safe-area-inset-top))]">
       <HeaderPage>
-        <div className="flex items-center justify-between w-full pr-2">
-          {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
-            <DropdownAssistant />
-          )}
+        <div className="flex items-center justify-between w-full gap-2">
+          <div className="flex min-w-0 flex-1">
+            {PlatformFeatures[PlatformFeature.ASSISTANTS] && (
+              <DropdownAssistant />
+            )}
+          </div>
+          {/* The same buttons as in a chat, before the first question */}
+          <div className="relative z-20 flex shrink-0 items-center gap-1 text-main-view-fg/40">
+            <AppActions />
+          </div>
         </div>
       </HeaderPage>
       <div

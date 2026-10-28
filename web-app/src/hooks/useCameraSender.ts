@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  EXTENSION_FILES,
-  extensionConfig,
+  downloadCameraExtension,
+  fetchCameraKey,
   startCameraSender,
-  zipFiles,
   type CameraStatus,
 } from '@/lib/remoteCamera'
 
@@ -30,12 +29,6 @@ export const store = (k: string, v: string | null) => {
   } catch {
     // private window
   }
-}
-
-async function fetchKey(): Promise<string> {
-  const res = await fetch('/api/camera-key', { method: 'POST' })
-  if (!res.ok) throw new Error(`Couldn't get the camera key (${res.status})`)
-  return (await res.json()).key
 }
 
 const savedChoice = (): { cam?: string; mic?: string } => {
@@ -71,7 +64,7 @@ export function useCameraSender({ link }: { link?: string } = {}) {
   useEffect(() => {
     // A mirror link has no login, so no key: the link itself lets it send
     if (link) return
-    fetchKey().then(setKey, (e) => setError(String(e.message ?? e)))
+    fetchCameraKey().then(setKey, (e) => setError(String(e.message ?? e)))
   }, [link])
 
   const open = useCallback(async () => {
@@ -216,20 +209,10 @@ export function useCameraSender({ link }: { link?: string } = {}) {
 
   useEffect(() => () => sender.current?.stop(), [])
 
-  const downloadExtension = useCallback(async () => {
-    const files: Record<string, string> = {}
-    for (const name of EXTENSION_FILES)
-      files[`hichat-camera/${name}`] =
-        name === 'config.js'
-          ? extensionConfig(window.location.origin, key)
-          : await (await fetch(`/hichat-extension/${name}`)).text()
-    const blob = new Blob([zipFiles(files)], { type: 'application/zip' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'hichat-camera.zip'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
-  }, [key])
+  const downloadExtension = useCallback(
+    () => downloadCameraExtension(key),
+    [key]
+  )
 
   return {
     key,
