@@ -2,8 +2,9 @@ import { viaGroqProxy } from '@/lib/groqProxy'
 import { dictionaryTerms, extractKeyTerms } from '@/lib/keyTerms'
 
 /**
- * Quick setup: from a resume (and optionally a job description) build the
- * whole interview assistant, so the user only has to pick the files. A
+ * Quick setup: from a resume and/or a job description (both optional, along
+ * with free-text notes) build the whole interview assistant, so the user
+ * only has to pick the files. A
  * gpt-oss-120b call reads who the candidate is and what the role wants;
  * the instructions themselves come from a fixed template so the rules that
  * matter (first person, never invent experience) are always there.
@@ -22,13 +23,13 @@ export type CandidateProfile = {
 /** Enough of the resume and job description for the model to read. */
 const MAX_SOURCE_CHARS = 40_000
 
-export const PROFILE_PROMPT = `You read a candidate's resume and, if given, the job description they are interviewing for. Return only a JSON object with these keys:
-"candidate": the candidate's full name from the resume, or "" if it is not there.
-"role": the job title they are interviewing for (from the job description, else the role the resume targets, e.g. "Data Analyst").
+export const PROFILE_PROMPT = `You read a candidate's resume and the job description they are interviewing for (either may be missing), plus any notes they added. Return only a JSON object with these keys:
+"candidate": the candidate's full name from the resume or notes, or "" if it is not there.
+"role": the job title they are interviewing for (from the job description, else the role the resume or notes target, e.g. "Data Analyst").
 "company": the hiring company from the job description, or "".
 "title": the role in at most 3 words, abbreviated where common, e.g. "ML Engineer" for "Senior Software Engineer, Machine Learning Infrastructure".
 "summary": one short line describing the candidate for this role, e.g. "Data analyst, 4 years in SQL, Power BI and Python".
-"focus": up to 8 short phrases naming what the job description stresses most (skills, tools, responsibilities); if there is no job description, the candidate's strongest areas from the resume.`
+"focus": up to 8 short phrases naming what the job description stresses most (skills, tools, responsibilities); if there is no job description, the candidate's strongest areas from the resume or notes.`
 
 type Provider = { apiKey?: string; baseUrl?: string; model: string }
 
@@ -37,15 +38,21 @@ export async function extractProfile(
   resume: string,
   jobDescription: string,
   providers: Provider[],
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  notes = ''
 ): Promise<CandidateProfile> {
   const usable = providers.filter((p) => p.apiKey)
   if (!usable.length) throw new Error('Add a Groq or Cerebras API key first')
   const content =
-    `Resume:\n${resume.slice(0, MAX_SOURCE_CHARS)}` +
+    (resume.trim()
+      ? `Resume:\n${resume.slice(0, MAX_SOURCE_CHARS)}`
+      : 'No resume was given.') +
     (jobDescription.trim()
       ? `\n\nJob description:\n${jobDescription.slice(0, MAX_SOURCE_CHARS)}`
-      : '\n\nNo job description was given.')
+      : '\n\nNo job description was given.') +
+    (notes.trim()
+      ? `\n\nNotes from the candidate:\n${notes.slice(0, MAX_SOURCE_CHARS)}`
+      : '')
   let lastError: unknown
   for (const p of usable) {
     try {
@@ -135,18 +142,30 @@ export const OTHER_CONTEXT_NAME = 'Other context'
 export function buildInstructions(
   profile: CandidateProfile,
   hasJobDescription: boolean,
-  hasOtherContext = false
+  hasOtherContext = false,
+  hasResume = true
 ): string {
-  const who = profile.candidate || 'the candidate in the resume'
+  const who =
+    profile.candidate ||
+    (hasResume ? 'the candidate in the resume' : 'the candidate')
   const role = profile.role ? `the ${profile.role} role` : 'this role'
   const at = profile.company ? ` at ${profile.company}` : ''
   const lines = [
     `You are ${who}, interviewing for ${role}${at}. Answer every question the way ${who} would say it in the interview: first person, natural and confident.`,
     '',
-    '- Your background is the resume in your documents. Use its real employers, projects, tools, numbers and dates.',
-    '- Never invent experience, projects, results, skills or numbers (metrics, timings, percentages) that are not in the resume. When a question goes beyond it, answer from the closest related experience or explain how you would approach it, without claiming you have done it.',
-    '- For technical questions, explain the concept clearly. When the resume shows you used it, end with one short line on how you used it there; when it does not, leave that line out.',
-    '- For behavioural questions, use a real situation from the resume: the situation, what you did, and the result.',
+    ...(hasResume
+      ? [
+          '- Your background is the resume in your documents. Use its real employers, projects, tools, numbers and dates.',
+          '- Never invent experience, projects, results, skills or numbers (metrics, timings, percentages) that are not in the resume. When a question goes beyond it, answer from the closest related experience or explain how you would approach it, without claiming you have done it.',
+          '- For technical questions, explain the concept clearly. When the resume shows you used it, end with one short line on how you used it there; when it does not, leave that line out.',
+          '- For behavioural questions, use a real situation from the resume: the situation, what you did, and the result.',
+        ]
+      : [
+          `- There is no resume, so you only know your background from ${hasOtherContext ? `"${OTHER_CONTEXT_NAME}" in your documents and ` : ''}what the user says in the conversation.`,
+          '- Never invent experience, employers, projects, results, skills or numbers (metrics, timings, percentages). When a question asks about your past work and nothing above covers it, explain how you would approach it, without claiming you have done it.',
+          '- For technical questions, explain the concept clearly.',
+          '- For behavioural questions, give the structure of a strong answer (the situation, what you did, and the result) using only real details you have, and keep the rest general.',
+        ]),
   ]
   if (hasJobDescription)
     lines.push(
@@ -156,12 +175,37 @@ export function buildInstructions(
     lines.push(`- Your strongest areas: ${profile.focus.join(', ')}.`)
   if (hasOtherContext)
     lines.push(
-      `- "${OTHER_CONTEXT_NAME}" in your documents is what you added beyond the resume, such as why you are moving on, notice period, salary expectations or location. Treat it as true about you and use it when a question touches it.`
+      `- "${OTHER_CONTEXT_NAME}" in your documents is what you added${hasResume ? ' beyond the resume' : ' about yourself'}, such as why you are moving on, notice period, salary expectations or location. Treat it as true about you and use it when a question touches it.`
     )
   return lines.join('\n')
 }
 
 export type SetupFile = { name: string; text: string }
+
+/**
+ * Splits a saved assistant's documents back into resume, job description and
+ * notes. Older assistants have no kind: the first document is the resume.
+ */
+export function savedSetupFiles(documents: Assistant['documents'] = []): {
+  resume?: SetupFile
+  jd?: SetupFile
+  notes: string
+} {
+  const strip = (d?: { name: string; text: string }) =>
+    d ? { name: d.name, text: d.text } : undefined
+  const notes = documents.find((d) => d.name === OTHER_CONTEXT_NAME)?.text ?? ''
+  if (documents.some((d) => d.kind))
+    return {
+      resume: strip(documents.find((d) => d.kind === 'resume')),
+      jd: strip(documents.find((d) => d.kind === 'job')),
+      notes,
+    }
+  return {
+    resume: strip(documents[0]),
+    jd: strip(documents.slice(1).find((d) => d.name !== OTHER_CONTEXT_NAME)),
+    notes,
+  }
+}
 
 export type SetupKeys = {
   groq?: { apiKey?: string; baseUrl?: string }
@@ -169,26 +213,33 @@ export type SetupKeys = {
 }
 
 /**
- * Builds the whole assistant from the resume, optional job description and
- * optional notes the resume doesn't cover. Editing keeps the assistant's id,
- * emoji, creation time and settings.
+ * Builds the whole assistant from the resume, job description and notes the
+ * resume doesn't cover. Each is optional, but at least one is needed. Editing
+ * keeps the assistant's id, emoji, creation time and settings.
  */
 export async function setupAssistant(
-  resume: SetupFile,
+  resume: SetupFile | undefined,
   jobDescription: SetupFile | undefined,
   keys: SetupKeys,
   base?: Assistant,
   fetchImpl: typeof fetch = fetch,
   otherContext = ''
 ): Promise<Assistant> {
+  const cv = resume?.text.trim() ? resume : undefined
   const jd = jobDescription?.text.trim() ? jobDescription : undefined
   const notes = otherContext.trim()
     ? { name: OTHER_CONTEXT_NAME, text: otherContext.trim() }
     : undefined
-  const documents = [resume, ...(jd ? [jd] : []), ...(notes ? [notes] : [])]
+  if (!cv && !jd && !notes)
+    throw new Error('Add a resume, a job description or some context first')
+  const documents = [
+    ...(cv ? [{ ...cv, kind: 'resume' as const }] : []),
+    ...(jd ? [{ ...jd, kind: 'job' as const }] : []),
+    ...(notes ? [notes] : []),
+  ]
   const [profile, terms] = await Promise.all([
     extractProfile(
-      resume.text,
+      cv?.text ?? '',
       jd?.text ?? '',
       [
         {
@@ -202,14 +253,19 @@ export async function setupAssistant(
           model: 'gpt-oss-120b',
         },
       ],
-      fetchImpl
+      fetchImpl,
+      notes?.text
     ),
     // Key terms come from both files (resume capped so the JD always fits).
     // They only help dictation, so a failure doesn't stop setup
     extractKeyTerms(
-      `Resume:\n${resume.text.slice(0, MAX_SOURCE_CHARS)}` +
-        (jd ? `\n\nJob description:\n${jd.text}` : '') +
-        (notes ? `\n\n${OTHER_CONTEXT_NAME}:\n${notes.text}` : ''),
+      [
+        cv && `Resume:\n${cv.text.slice(0, MAX_SOURCE_CHARS)}`,
+        jd && `Job description:\n${jd.text}`,
+        notes && `${OTHER_CONTEXT_NAME}:\n${notes.text}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       keys.groq ?? {},
       dictionaryTerms(),
       fetchImpl
@@ -221,7 +277,7 @@ export async function setupAssistant(
     created_at: base?.created_at ?? Date.now(),
     name: assistantName(profile),
     description: profile.summary,
-    instructions: buildInstructions(profile, !!jd, !!notes),
+    instructions: buildInstructions(profile, !!jd, !!notes, !!cv),
     documents,
     ...(terms.length ? { keyterms: terms } : {}),
     parameters: base?.parameters ?? {},

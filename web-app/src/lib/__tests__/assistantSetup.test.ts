@@ -193,9 +193,82 @@ describe('setupAssistant', () => {
       '  Notice period: 30 days  '
     )
     expect(out.documents).toEqual([
-      { name: 'resume.pdf', text: 'Priya resume' },
+      { name: 'resume.pdf', text: 'Priya resume', kind: 'resume' },
       { name: OTHER_CONTEXT_NAME, text: 'Notice period: 30 days' },
     ])
     expect(out.instructions).toContain(`"${OTHER_CONTEXT_NAME}"`)
+  })
+
+  it('sets up from a job description alone, without a resume', async () => {
+    const { setupAssistant } = await import('../assistantSetup')
+    const bodies: string[] = []
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      bodies.push(body.messages.at(-1).content)
+      return body.response_format
+        ? reply(JSON.stringify({ ...profile, candidate: '' }))
+        : reply('SQL')
+    })
+    const out = await setupAssistant(
+      undefined,
+      { name: 'jd.pdf', text: 'Data Analyst at Acme' },
+      { groq: { apiKey: 'g' } },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    )
+    expect(out.documents).toEqual([
+      { name: 'jd.pdf', text: 'Data Analyst at Acme', kind: 'job' },
+    ])
+    expect(out.name).toBe('Acme · Data Analyst')
+    expect(out.instructions).toContain('There is no resume')
+    expect(out.instructions).toContain('Never invent experience')
+    expect(out.instructions).not.toContain('the resume in your documents')
+    expect(bodies.every((b) => !b.includes('Resume:'))).toBe(true)
+    expect(bodies[0]).toContain('No resume was given.')
+  })
+
+  it('needs at least a resume, a job description or some context', async () => {
+    const { setupAssistant } = await import('../assistantSetup')
+    await expect(
+      setupAssistant(
+        undefined,
+        undefined,
+        { groq: { apiKey: 'g' } },
+        undefined,
+        vi.fn(),
+        '  '
+      )
+    ).rejects.toThrow('Add a resume')
+  })
+})
+
+describe('savedSetupFiles', () => {
+  it('reads older assistants by position', async () => {
+    const { savedSetupFiles } = await import('../assistantSetup')
+    expect(
+      savedSetupFiles([
+        { name: 'cv.pdf', text: 'cv' },
+        { name: 'jd.pdf', text: 'jd' },
+        { name: 'Other context', text: 'notes' },
+      ])
+    ).toEqual({
+      resume: { name: 'cv.pdf', text: 'cv' },
+      jd: { name: 'jd.pdf', text: 'jd' },
+      notes: 'notes',
+    })
+  })
+
+  it('reads the kind when there is no resume', async () => {
+    const { savedSetupFiles } = await import('../assistantSetup')
+    expect(
+      savedSetupFiles([
+        { name: 'jd.pdf', text: 'jd', kind: 'job' },
+        { name: 'Other context', text: 'notes' },
+      ])
+    ).toEqual({
+      resume: undefined,
+      jd: { name: 'jd.pdf', text: 'jd' },
+      notes: 'notes',
+    })
   })
 })

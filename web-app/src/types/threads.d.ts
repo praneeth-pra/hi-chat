@@ -63,7 +63,8 @@ type Assistant = {
   instructions: string
   parameters: Record<string, unknown>
   // Text pulled from uploaded files, added to the instructions on each message
-  documents?: { name: string; text: string }[]
+  // kind marks the resume and job description made by quick setup
+  documents?: { name: string; text: string; kind?: 'resume' | 'job' }[]
   // Technical words dictation is likely to hear (key terms for transcription)
   keyterms?: string[]
   // tool_steps?: number
