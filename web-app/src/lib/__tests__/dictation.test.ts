@@ -377,13 +377,13 @@ describe('dictation', () => {
   })
 
   it('Auto streams every block to each live engine', () => {
-    const azure = { push: vi.fn() }
+    const soniox = { push: vi.fn() }
     const eleven = { push: vi.fn() }
     const rec = {
       rate: 16000,
       engine: 'auto',
       autoLive: [
-        { engine: 'azure', stream: azure },
+        { engine: 'soniox', stream: soniox },
         { engine: 'elevenlabs', stream: eleven },
       ],
       audio: [],
@@ -391,7 +391,7 @@ describe('dictation', () => {
     const loud = new Float32Array(2048).fill(0.2)
     for (let i = 0; i < 35; i++) onBlock(rec, loud)
     for (let i = 0; i < 5; i++) onBlock(rec, new Float32Array(2048))
-    expect(azure.push).toHaveBeenCalledTimes(40)
+    expect(soniox.push).toHaveBeenCalledTimes(40)
     expect(eleven.push).toHaveBeenCalledTimes(40)
   })
 
@@ -534,10 +534,10 @@ describe('dictation', () => {
 
   it('Auto races the engines chosen in Settings, in tie-break order', () => {
     expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
-    setAutoEngines(['azure', 'cartesia'])
-    expect(getAutoEngines()).toEqual(['cartesia', 'azure'])
+    setAutoEngines(['elevenlabs', 'cartesia'])
+    expect(getAutoEngines()).toEqual(['cartesia', 'elevenlabs'])
     // Removed engines saved earlier are dropped
-    setAutoEngines(['grok', 'muse', 'soniox'] as never)
+    setAutoEngines(['grok', 'muse', 'azure', 'soniox'] as never)
     expect(getAutoEngines()).toEqual(['soniox'])
     // None chosen falls back to the default three
     setAutoEngines([])
@@ -545,36 +545,41 @@ describe('dictation', () => {
     localStorage.removeItem('dictation-auto-engines')
   })
 
-  it('Azure (MAI-Transcribe-2) counts like the other engines', () => {
+  it('every chosen engine counts (none on trial)', () => {
     const jobs = [
       { engine: 'cartesia' as const },
-      { engine: 'azure' as const },
+      { engine: 'elevenlabs' as const },
       { engine: 'soniox' as const },
     ]
     expect(countedEngines(jobs).map((j) => j.engine)).toEqual([
       'cartesia',
-      'azure',
+      'elevenlabs',
       'soniox',
     ])
   })
 
+  it('Azure is gone: a saved Azure choice falls back to Auto', () => {
+    localStorage.setItem('dictation-engine', 'azure')
+    expect(getDictationEngine()).toBe('auto')
+    localStorage.removeItem('dictation-engine')
+  })
+
   it('logs the engines that lost the race once they answer', async () => {
-    let lateAzure!: (t: string) => void
+    let lateSoniox!: (t: string) => void
     const done = reportAuto(
       [
-        { engine: 'azure', text: new Promise((r) => (lateAzure = r)) },
-        { engine: 'soniox', text: Promise.resolve('What is EKS?') },
+        { engine: 'soniox', text: new Promise((r) => (lateSoniox = r)) },
         { engine: 'cartesia', text: Promise.resolve('What is EKS?') },
         { engine: 'elevenlabs', text: Promise.reject(new Error('down')) },
       ],
-      { soniox: 300, cartesia: 120 },
-      { sent: 'soniox', totalMs: 310 }
+      { cartesia: 120 },
+      { sent: 'cartesia', totalMs: 130 }
     )
-    lateAzure('What is EKS? ')
+    lateSoniox('What is EKS? ')
     await done
     const line = reportSpeech.mock.calls.at(-1)?.[0] as string
-    expect(line).toContain('sent=soniox total=310ms')
-    expect(line).toContain('azure: "What is EKS?"')
+    expect(line).toContain('sent=cartesia total=130ms')
+    expect(line).toContain('soniox: "What is EKS?"')
     expect(line).toContain('elevenlabs: failed (down)')
   })
 
@@ -591,7 +596,7 @@ describe('dictation', () => {
     expect(withoutFillers('Uh, my career started in TCS')).toBe(
       'My career started in TCS'
     )
-    // MAI-Transcribe-2 writes the "mm" before a question
+    // Some engines write the "mm" before a question
     expect(
       withoutFillers('Mm. Can you tell me how we can modify an EC2 instance?')
     ).toBe('Can you tell me how we can modify an EC2 instance?')
@@ -918,17 +923,16 @@ describe('stray words and cut-off texts', () => {
     const out = trimStrayStart([
       { engine: 'cartesia', text: 'And also let me know about EBS.' },
       {
-        engine: 'azure',
+        engine: 'soniox',
         text: 'top rather than the And also let me know about EBS.',
       },
-      { engine: 'soniox', text: 'And also, uh, let me know about EBS.' },
-      { engine: 'elevenlabs', text: 'And also let me know about EBS.' },
+      { engine: 'elevenlabs', text: 'And also, uh, let me know about EBS.' },
     ])
     expect(out[1].text).toBe('And also let me know about EBS.')
     expect(out[0].text).toBe('And also let me know about EBS.')
     expect(
       trimStrayStart([
-        { engine: 'azure', text: 'you. When would you pick Aurora?' },
+        { engine: 'cartesia', text: 'you. When would you pick Aurora?' },
         { engine: 'soniox', text: 'When would you pick Aurora?' },
         { engine: 'elevenlabs', text: 'When would you pick Aurora?' },
       ])[0].text
@@ -938,7 +942,7 @@ describe('stray words and cut-off texts', () => {
   it('leaves texts alone without two engines agreeing on the start', () => {
     const results = [
       { engine: 'cartesia' as const, text: 'So what is VPC?' },
-      { engine: 'azure' as const, text: 'What is VPC?' },
+      { engine: 'soniox' as const, text: 'What is VPC?' },
     ]
     expect(trimStrayStart(results)).toEqual(results)
     const many = [
@@ -946,8 +950,8 @@ describe('stray words and cut-off texts', () => {
         engine: 'cartesia' as const,
         text: 'one two three four five six seven',
       },
-      { engine: 'azure' as const, text: 'seven' },
       { engine: 'soniox' as const, text: 'seven' },
+      { engine: 'elevenlabs' as const, text: 'seven' },
     ]
     expect(trimStrayStart(many)[0].text).toBe(many[0].text)
   })
@@ -959,7 +963,7 @@ describe('stray words and cut-off texts', () => {
         text: 'How do you enable DDoS protection to your account? So',
       },
       {
-        engine: 'azure' as const,
+        engine: 'elevenlabs' as const,
         text: 'How do you enable DDoS protection to your account. So what are the options?',
       },
       {
@@ -967,7 +971,7 @@ describe('stray words and cut-off texts', () => {
         text: 'How do you enable DDoS protection to your ac',
       },
     ]
-    expect(longestAgreeing(results, results[0])?.engine).toBe('azure')
+    expect(longestAgreeing(results, results[0])?.engine).toBe('elevenlabs')
     expect(longestAgreeing(results, undefined)).toBeUndefined()
     // A different question isn't picked just for being longer
     expect(
@@ -975,7 +979,7 @@ describe('stray words and cut-off texts', () => {
         [
           { engine: 'cartesia', text: 'What is EKS?' },
           {
-            engine: 'azure',
+            engine: 'soniox',
             text: 'Tell me everything about something else entirely now',
           },
         ],
@@ -992,14 +996,14 @@ describe('stray words and cut-off texts', () => {
       [
         { engine: 'cartesia', text: later('to your account? So', 3000) },
         {
-          engine: 'azure',
+          engine: 'soniox',
           text: later('to your account. So what are the options?', 3070),
         },
       ],
       1200
     )
     await vi.advanceTimersByTimeAsync(3300)
-    expect((await out).map((r) => r.engine)).toEqual(['cartesia', 'azure'])
+    expect((await out).map((r) => r.engine)).toEqual(['cartesia', 'soniox'])
     vi.useRealTimers()
   })
 })

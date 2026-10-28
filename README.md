@@ -13,7 +13,7 @@ The continuous Speaker listener has been removed.
 - `relay/` - small Node server that keeps the speech API keys on the server:
   `/api/transcribe` forwards clips to ElevenLabs (also the dictation
   fallback), and `/api/live-token` hands out short-lived tokens so the
-  browser can stream live to ElevenLabs, Soniox, Cartesia and Azure
+  browser can stream live to ElevenLabs, Soniox and Cartesia
 - `nginx.conf`, `Dockerfile` - the production image (static app, Groq
   pass-through at `/api/groq/`, transcription relay)
 

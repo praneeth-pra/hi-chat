@@ -31,7 +31,6 @@ import {
   warmJudges,
 } from '@/lib/dictationJudge'
 import { withCodingTerms } from '@/lib/keyTerms'
-import { AzureLiveTranscriber } from '@/lib/azureSpeech'
 import { useDictationEnabled } from '@/hooks/useDictationEnabled'
 
 /**
@@ -48,7 +47,6 @@ import { useDictationEnabled } from '@/hooks/useDictationEnabled'
  * is sent, else a judge model writes the best version.
  */
 export type DictationEngine =
-  | 'azure'
   | 'elevenlabs'
   | 'soniox'
   | 'cartesia'
@@ -58,7 +56,6 @@ export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'soniox', label: 'Soniox (live)' },
   { value: 'cartesia', label: 'Cartesia (live)' },
   { value: 'elevenlabs', label: 'ElevenLabs (live)' },
-  { value: 'azure', label: 'Azure MAI-Transcribe-2' },
 ]
 const ENGINE_STORAGE_KEY = 'dictation-engine'
 
@@ -145,7 +142,7 @@ const AUTO_SHORT_GRACE_MS = 500
  * Past the deadline (a network spike: on 25 Oct every engine took ~8 s),
  * the first text that arrives waits this long for the others, which tend to
  * land together; Cartesia's cut-off "...to your account? So" went out 73 ms
- * before Azure's whole question.
+ * before another engine's whole question.
  */
 const LATE_GRACE_MS = 200
 /**
@@ -590,8 +587,6 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
       undefined,
       elevenLabsTerms(keyTerms())
     )
-  if (engine === 'azure')
-    return new AzureLiveTranscriber(fetchLiveKeyWithTerms('azure'))
   if (engine === 'soniox')
     return new SonioxLiveTranscriber(
       fetchLiveKeyWithTerms('soniox'),
@@ -610,10 +605,6 @@ function liveStream(engine: DictationEngine): LiveStream | undefined {
 /** Engines Auto can race, in tie-break order. */
 export const AUTO_ENGINE_CHOICES = [
   'cartesia',
-  // Microsoft's MAI-Transcribe-2: the most accurate on P's questions (25 Oct,
-  // 6 of 6 technical terms), so it wins ties after Cartesia. Off until
-  // ticked in Settings, since it needs its own Azure key
-  'azure',
   'soniox',
   'elevenlabs',
 ] as const satisfies readonly DictationEngine[]
@@ -621,7 +612,8 @@ export const AUTO_ENGINE_CHOICES = [
  * Engines on trial: they hear every clip and their text is logged beside the
  * others' (for comparing on real interviews), but it never counts towards
  * what is sent, so trying one can't make dictation worse or slower. None
- * right now: Azure (MAI-Transcribe-2) graduated on 25 Oct.
+ * right now: Azure (MAI-Transcribe-2) was removed on 28 Oct after it was
+ * the furthest from the other engines on real interviews.
  */
 export const TEST_ENGINES: readonly DictationEngine[] = []
 
@@ -775,7 +767,7 @@ const MAX_STRAY_WORDS = 5
 
 /**
  * Drops words one engine heard before the question began, when most of the
- * others start a few words later: MAI-Transcribe-2 wrote "top rather than
+ * others start a few words later: one engine wrote "top rather than
  * the And also let me know..." and "you. When would you pick..." on 25 Oct,
  * where every other engine started at "And" / "When".
  */
