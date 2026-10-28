@@ -237,6 +237,15 @@ describe('remote mirror', () => {
       return ws
     }
 
+    it("answers a link's door: a wrong code is told back", async () => {
+      const ws = start()
+      ws.hear({ t: 'knock', from: 'v1', ask: true })
+      ws.hear({ t: 'knock', from: 'v1', code: 'xxxx' })
+      expect(ws.sent.at(-1)).toEqual({ t: 'gate', to: 'v1', left: 4 })
+      ws.hear({ t: 'knock', from: 'v2', code: '1234' })
+      expect(ws.sent.at(-1)).toEqual({ t: 'gate', to: 'v2', left: 0 })
+    })
+
     it('ends its link at 90 minutes and goes on with a new one', async () => {
       const ws = start()
       const link = new URL(ws.url.replace('wss:', 'https:')).searchParams.get(

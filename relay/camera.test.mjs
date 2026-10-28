@@ -282,15 +282,37 @@ test("a link's remote camera is cut off when the link ends", async () => {
       ws.onerror = () => reject(new Error('refused'))
     })
   try {
+    const heard = (ws, t) =>
+      new Promise((r) => {
+        const was = ws.onmessage
+        ws.onmessage = (e) => {
+          was?.(e)
+          const m = JSON.parse(e.data)
+          if (m.t === t) r(m)
+        }
+      })
     const app = await opened(
       `${base}/api/mirror?role=send&link=${link}&born=${Date.now()}`
     )
-    const cam = await opened(`${base}/api/camera?role=send&link=${link}`)
+    // Without the ticket from typing the code, no camera
+    await assert.rejects(opened(`${base}/api/camera?role=send&link=${link}`))
+    const viewer = await opened(`${base}/api/mirror-link?link=${link}`)
+    const knocked = heard(app, 'knock')
+    const admitted = heard(viewer, 'admitted')
+    viewer.send(JSON.stringify({ t: 'code', code: '4821' }))
+    app.send(JSON.stringify({ t: 'admit', to: (await knocked).from }))
+    const { ticket } = await admitted
+    const cam = await opened(
+      `${base}/api/camera?role=send&link=${link}&ticket=${ticket}`
+    )
     const closed = new Promise((r) => (cam.onclose = (e) => r(e.code)))
     app.send(JSON.stringify({ t: 'revoke', link }))
     assert.equal(await closed, 4001)
     // and the link no longer lets a camera in
-    await assert.rejects(opened(`${base}/api/camera?role=send&link=${link}`))
+    await assert.rejects(
+      opened(`${base}/api/camera?role=send&link=${link}&ticket=${ticket}`)
+    )
+    viewer.close()
     app.close()
   } finally {
     server.closeAllConnections?.()

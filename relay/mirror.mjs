@@ -271,7 +271,9 @@ export function createMirrorHub({
   // '' is the signed-in /mirror, where every app sends; a link's secret
   // names its own channel, where only that app sends
   const channels = new Map()
-  const links = new Map() // secret -> { live, until, born }
+  const links = new Map() // secret -> { live, until, born, tickets }
+  // A link's viewer waiting at the door: its id -> how to let it in
+  const doors = new Map()
   const dead = new Map() // ended secret -> when to forget it
   const senderChannels = new Map() // sender socket -> its channels
 
@@ -288,6 +290,7 @@ export function createMirrorHub({
         look: null,
         typing: null,
         images: new Map(), // key -> JSON of its 'img' message
+        waiting: new Set(), // a link's viewers not yet let in with a code
       }
       channels.set(name, ch)
     }
@@ -295,7 +298,7 @@ export function createMirrorHub({
   }
   const tidy = (name) => {
     const ch = channels.get(name)
-    if (name && ch && !ch.senders.size && !ch.viewers.size)
+    if (name && ch && !ch.senders.size && !ch.viewers.size && !ch.waiting.size)
       channels.delete(name)
   }
   const toViewers = (ch, data) => {
@@ -315,7 +318,9 @@ export function createMirrorHub({
     for (const name of names) {
       const ch = channels.get(name)
       if (!ch) continue
-      toViewers(ch, JSON.stringify({ t: 'sender', on: ch.senders.size > 0 }))
+      const on = JSON.stringify({ t: 'sender', on: ch.senders.size > 0 })
+      toViewers(ch, on)
+      for (const v of ch.waiting) v.send(on)
       for (const s of ch.senders) sendCount(s)
     }
   }
@@ -353,7 +358,7 @@ export function createMirrorHub({
     dead.set(secret, now() + LINK_DEAD_MS)
     const ch = channels.get(secret)
     if (ch) {
-      for (const v of [...ch.viewers]) v.close(LINK_ENDED)
+      for (const v of [...ch.viewers, ...ch.waiting]) v.close(LINK_ENDED)
       // Its app stops sending there (the signed-in /mirror goes on)
       for (const s of ch.senders)
         senderChannels.set(
@@ -513,6 +518,9 @@ export function createMirrorHub({
     }
     // "New link": the app's old link stops working now
     if (m?.t === 'revoke') return end(m.link)
+    // Letting a link's viewer in (the right code), or telling it the code
+    // was wrong
+    if (m?.t === 'admit' || m?.t === 'gate') return atDoor(ws, m)
     // Setting up a direct connection with one of its viewers
     if (m?.t === 'rtc') return rtcToViewer(ws, m)
     const handle = Object.hasOwn(HANDLERS, m?.t) ? HANDLERS[m.t] : null
@@ -576,7 +584,12 @@ export function createMirrorHub({
     senderChannels.set(ws, names)
     for (const name of names) channel(name).senders.add(ws)
     if (names[1]) {
-      const l = links.get(link) ?? { live: 0, until: 0, born: 0 }
+      const l = links.get(link) ?? {
+        live: 0,
+        until: 0,
+        born: 0,
+        tickets: new Set(),
+      }
       l.live += 1
       l.born = bornAt(link, born)
       links.set(link, l)
@@ -602,35 +615,116 @@ export function createMirrorHub({
         ws.send(peerNote(ids.get(v), true, name))
   }
 
-  function joinViewer(ws, link) {
+  // The app that answers a link's door: its newest window
+  const doorman = (ch) => [...ch.senders].at(-1)
+
+  function atDoor(ws, m) {
+    const door = typeof m.to === 'string' && doors.get(m.to)
+    if (!door || !(senderChannels.get(ws) ?? []).includes(door.name)) return
+    if (m.t === 'admit') return door.admit()
+    const left = Number.isInteger(m.left) ? Math.max(0, m.left) : 0
+    door.ws.send(
+      JSON.stringify({
+        t: 'code',
+        ok: false,
+        left,
+        ...(m.spent === true ? { spent: true } : {}),
+      })
+    )
+  }
+
+  /** Whether `ticket` was given to a viewer of `link` let in with a code. */
+  function ticketOk(link, ticket) {
+    return (
+      typeof ticket === 'string' &&
+      isLink(link) &&
+      links.get(link).tickets.has(ticket)
+    )
+  }
+
+  // A link's viewer sees nothing until Hi-chat lets it in: it asks for a
+  // code (Hi-chat shows it), then types it. Let in, it gets a ticket, which
+  // lets it back in after a dropped connection, and lets its camera send
+  function joinViewer(ws, link, ticket) {
     const name = link ?? ''
     const ch = channel(name)
-    ch.viewers.add(ws)
     const id = newId(ws, 'view', [name])
+    let waiting = !!name && !ticketOk(name, ticket)
+    let knocks = 0
+    const knock = (raw) => {
+      let m
+      try {
+        m = JSON.parse(raw)
+      } catch {
+        return
+      }
+      const to = doorman(ch)
+      if (!to || ++knocks > 40) return
+      if (m?.t === 'unlock')
+        to.send(JSON.stringify({ t: 'knock', from: id, ask: true }))
+      else if (m?.t === 'code' && /^\d{4}$/.test(m.code ?? ''))
+        to.send(JSON.stringify({ t: 'knock', from: id, code: m.code }))
+    }
     // Viewers mostly listen; a ping gets a pong (echoing its `n`, so the page
     // can time the round trip), which also keeps an idle socket open: nginx
     // closes one that hears nothing for 120 s. They also answer a sender's
     // offer of a direct connection
     ws.onmessage = (raw) => {
       if (typeof raw !== 'string' || raw.length > MAX_SDP + 4096) return
-      if (!pong(ws, raw)) rtcToSender(ws, name, raw)
+      if (pong(ws, raw)) return
+      if (waiting) knock(raw)
+      else rtcToSender(ws, name, raw)
     }
     ws.onclose = () => {
       forget(ws)
+      if (waiting) {
+        doors.delete(id)
+        ch.waiting.delete(ws)
+        doorman(ch)?.send(JSON.stringify({ t: 'knock', from: id, gone: true }))
+        tidy(name)
+        return
+      }
       ch.viewers.delete(ws)
       for (const s of ch.senders) s.send(peerNote(id, false))
       status([name])
       tidy(name)
     }
-    for (const img of ch.images.values()) ws.send(img)
-    if (ch.snap) ws.send(JSON.stringify(ch.snap))
-    if (ch.stream) ws.send(JSON.stringify({ t: 'stream', ...ch.stream }))
-    if (ch.phase) ws.send(JSON.stringify({ t: 'phase', phase: ch.phase }))
-    if (ch.scroll) ws.send(ch.scroll)
-    if (ch.look) ws.send(ch.look)
-    if (ch.typing) ws.send(ch.typing)
-    status([name])
-    for (const s of ch.senders) s.send(peerNote(id, true, name))
+    const enter = () => {
+      if (name) {
+        const l = links.get(name)
+        if (!l) return ws.close(LINK_ENDED)
+        if (!ticketOk(name, ticket)) {
+          ticket = randomBytes(18).toString('base64url')
+          l.tickets.add(ticket)
+        }
+        ws.send(JSON.stringify({ t: 'admitted', ticket }))
+      }
+      ch.viewers.add(ws)
+      for (const img of ch.images.values()) ws.send(img)
+      if (ch.snap) ws.send(JSON.stringify(ch.snap))
+      if (ch.stream) ws.send(JSON.stringify({ t: 'stream', ...ch.stream }))
+      if (ch.phase) ws.send(JSON.stringify({ t: 'phase', phase: ch.phase }))
+      if (ch.scroll) ws.send(ch.scroll)
+      if (ch.look) ws.send(ch.look)
+      if (ch.typing) ws.send(ch.typing)
+      status([name])
+      for (const s of ch.senders) s.send(peerNote(id, true, name))
+    }
+    if (!waiting) return enter()
+    ch.waiting.add(ws)
+    doors.set(id, {
+      ws,
+      name,
+      admit() {
+        if (!waiting) return
+        waiting = false
+        doors.delete(id)
+        ch.waiting.delete(ws)
+        enter()
+      },
+    })
+    ws.send(JSON.stringify({ t: 'gate' }))
+    ws.send(JSON.stringify({ t: 'sender', on: ch.senders.size > 0 }))
   }
 
   return {
@@ -638,13 +732,15 @@ export function createMirrorHub({
      * Adds a socket from acceptWebSocket. A sender (signed in) sends to the
      * signed-in /mirror and, with `link`, to that link's viewers too. A viewer
      * watches the signed-in /mirror, or with `link` (checked with isLink
-     * first) only that app. `born` is when the app made its link.
+     * first) only that app, once let in with a code (or its `ticket`).
+     * `born` is when the app made its link.
      */
-    join(ws, role, { link, born } = {}) {
+    join(ws, role, { link, born, ticket } = {}) {
       if (role === 'send') joinSender(ws, link, born)
-      else joinViewer(ws, link)
+      else joinViewer(ws, link, ticket)
     },
     isLink,
+    ticketOk,
     sweep,
     get counts() {
       const ch = channels.get('')

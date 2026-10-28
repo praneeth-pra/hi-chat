@@ -1,7 +1,8 @@
-// Remote mirror, sending side: while another signed-in browser has /mirror
-// open, Hi-chat sends it the open conversation over /api/mirror (see
-// relay/mirror.mjs), and a reply as it streams. With no viewer it sends
-// nothing but a ping now and then.
+// Remote mirror, sending side: while a computer has this app's mirror link
+// (/m/<link>) open, and was let in with the code shown here, Hi-chat sends
+// it the open conversation over /api/mirror (see relay/mirror.mjs), and a
+// reply as it streams. With no viewer it sends nothing but a ping now and
+// then.
 //
 // Latency first: a reply's text goes out the moment it arrives from the
 // model (mirrorStreamTap), changes to the conversation as soon as they
@@ -16,7 +17,8 @@ import { useMessages } from '@/hooks/useMessages'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
 import { toast } from 'sonner'
-import { CODE_TTL_MS, createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
+import { createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
+import { CODE_TTL_MS, createGate, type Knock } from '@/lib/mirrorGate'
 import {
   linkFromPath,
   mirrorLinkBorn,
@@ -311,15 +313,15 @@ function nativeBridge(): { postMessage(m: unknown): void } | null {
   return w.webkit?.messageHandlers?.hiChat ?? null
 }
 
-const CODE_TOAST = 'mirror-control-code'
+const CODE_TOAST = 'mirror-link-code'
 
-/** Shows the code a mirror link's viewer types to control this Mac. */
-function showControlCode(code: string | null) {
+/** Shows the code a mirror link's viewer types to get in. */
+function showLinkCode(code: string | null) {
   if (!code) return toast.dismiss(CODE_TOAST)
-  toast(`Mirror control code: ${code}`, {
+  toast(`Mirror link code: ${code}`, {
     id: CODE_TOAST,
     description:
-      'Someone on a mirror link asked to control this Mac. Give them this code only if you trust them.',
+      'Someone opened your mirror link and asked for a code. Give it only if it is you: it shows this conversation, the shared screen and (on the Mac) lets them control it.',
     duration: CODE_TTL_MS,
   })
 }
@@ -400,14 +402,20 @@ export function startRemoteMirror({
         signal: (m) => {
           if (open()) ws!.send(JSON.stringify(m))
         },
-        // In the Mac app, a signed-in /mirror may control this computer while
-        // it is shared: its mouse and key actions go to the app to replay
+        // In the Mac app, a viewer let in with the code may control this
+        // computer while it is shared: its mouse and key actions go to the
+        // app to replay
         canControl: nativeBridge() !== null,
         onInput: (m) => nativeBridge()?.postMessage({ input: m }),
-        // A mirror link's viewer asked to control: the code to give them
-        onCode: showControlCode,
       })
     : null
+  // The link's door: the code to give a viewer, and checking what it types
+  const gate = createGate({
+    reply: (m) => {
+      if (open()) ws!.send(JSON.stringify(m))
+    },
+    onCode: showLinkCode,
+  })
   const send = (data: { t: string } & Record<string, unknown>) => {
     if (!open()) return
     if (!SEQUENCED.has(data.t)) return ws!.send(JSON.stringify(data))
@@ -632,6 +640,8 @@ export function startRemoteMirror({
       }
       // Setting up direct channels with viewers
       if (m.t === 'peer' || m.t === 'rtc') return direct?.receive(m)
+      // A viewer at the link's door
+      if (m.t === 'knock') return gate.knock(m as unknown as Knock)
       if (m.t !== 'viewers' || typeof m.n !== 'number') return
       const had = viewers
       viewers = m.n
@@ -649,6 +659,7 @@ export function startRemoteMirror({
       stayAwake(false)
       // The server introduces the viewers again on reconnecting
       direct?.closeAll()
+      gate.clear()
       if (stopped) return
       retryTimer = setTimeout(connect, retryMs)
       retryMs = Math.min(retryMs * 2, 30_000)
@@ -701,6 +712,7 @@ export function startRemoteMirror({
     ws = null
     viewers = 0
     direct?.closeAll()
+    gate.clear()
     was?.close()
     clearTimeout(retryTimer)
     connect()
@@ -733,6 +745,7 @@ export function startRemoteMirror({
     clearInterval(linkCheck)
     clearTimeout(retryTimer)
     direct?.closeAll()
+    gate.clear()
     ws?.close()
     ws = null
   }

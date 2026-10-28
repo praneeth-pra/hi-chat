@@ -18,6 +18,13 @@ function fakeSocket() {
   return ws
 }
 
+// A link's viewer typing the code, and its app letting it in
+function letIn(app, viewer) {
+  viewer.onmessage(JSON.stringify({ t: 'code', code: '4821' }))
+  const knock = app.got.filter((m) => m.t === 'knock').at(-1)
+  app.onmessage(JSON.stringify({ t: 'admit', to: knock.from }))
+}
+
 const snap = (msgs, title = 'Plans') =>
   JSON.stringify({ t: 'snap', title, msgs })
 
@@ -228,12 +235,19 @@ test('the relay serves /api/mirror over real WebSockets', async () => {
     // Watching is only through a link: the signed-in /mirror is gone
     await assert.rejects(open('mirror?role=view'))
     const viewer = await open(`mirror-link?link=${link}`)
+    // Let in with the code Hi-chat checks
+    await until(viewer, (g) => g.some((m) => m.t === 'gate'))
+    viewer.ws.send(JSON.stringify({ t: 'code', code: '4821' }))
+    await until(sender, (g) => g.some((m) => m.t === 'knock'))
+    const knock = sender.got.find((m) => m.t === 'knock')
+    assert.equal(knock.code, '4821')
+    sender.ws.send(JSON.stringify({ t: 'admit', to: knock.from }))
     await until(sender, (g) => g.some((m) => m.t === 'viewers' && m.n === 1))
     sender.ws.send(snap([{ id: 'u1', role: 'user', text: 'Hi' }]))
     sender.ws.send(JSON.stringify({ t: 'stream', id: 'a1', text: 'Hey' }))
     await until(viewer, (g) => g.some((m) => m.t === 'stream'))
     assert.deepEqual(
-      viewer.got.filter((m) => m.t !== 'sender'),
+      viewer.got.filter((m) => !['sender', 'gate', 'admitted'].includes(m.t)),
       [
         {
           t: 'snap',
@@ -272,6 +286,7 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
     viaLink.onclose()
   }
   hub.join(viaLink, 'view', { link })
+  letIn(appA, viaLink)
   hub.join(signedIn, 'view')
   assert.deepEqual(viaLink.got.at(-1), { t: 'sender', on: true })
 
@@ -634,14 +649,17 @@ test('direct connections: updates keep their sender and sequence number', () => 
   assert.deepEqual(lastOf(viewer, 'phase'), { t: 'phase', phase: 'drafting' })
 })
 
-test("a link's viewer is marked, so Hi-chat never lets it control", () => {
+test("a link's viewer is marked, and only introduced once let in", () => {
   const hub = createMirrorHub()
   const app = fakeSocket()
   hub.join(app, 'send', { link: 'L'.repeat(24) })
   const signedIn = fakeSocket()
   hub.join(signedIn, 'view')
   assert.equal(lastOf(app, 'peer').link, undefined)
-  hub.join(fakeSocket(), 'view', { link: 'L'.repeat(24) })
+  const viaLink = fakeSocket()
+  hub.join(viaLink, 'view', { link: 'L'.repeat(24) })
+  assert.equal(app.got.filter((m) => m.t === 'peer').length, 1)
+  letIn(app, viaLink)
   assert.equal(lastOf(app, 'peer').link, true)
 })
 
@@ -698,4 +716,83 @@ test('answers keep how long the model thought', () => {
     msgs: [{ id: 'a', role: 'assistant', text: 'Hi', thinking: 'x' }],
   })
   assert.equal(bad.msgs[0].thinking, undefined)
+})
+
+test("a link's viewer sees nothing until Hi-chat lets it in with the code", () => {
+  const hub = createMirrorHub()
+  const link = 'L'.repeat(24)
+  const app = fakeSocket()
+  const other = fakeSocket() // another app, on its own link
+  hub.join(app, 'send', { link })
+  hub.join(other, 'send', { link: 'O'.repeat(24) })
+  app.onmessage(snap([{ id: 'a', role: 'user', text: 'private' }]))
+
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view', { link })
+  assert.deepEqual(
+    viewer.got.map((m) => m.t),
+    ['gate', 'sender'],
+    'only the door and whether Hi-chat is on'
+  )
+  app.onmessage(snap([{ id: 'b', role: 'user', text: 'still private' }]))
+  assert.equal(viewer.got.filter((m) => m.t === 'snap').length, 0)
+  assert.deepEqual(lastOf(app, 'viewers'), { t: 'viewers', n: 0 })
+
+  // Asking for a code, then a wrong one: Hi-chat says so
+  viewer.onmessage(JSON.stringify({ t: 'unlock' }))
+  const ask = lastOf(app, 'knock')
+  assert.equal(ask.ask, true)
+  viewer.onmessage(JSON.stringify({ t: 'code', code: 'abcd' })) // not a code
+  assert.equal(lastOf(app, 'knock'), ask)
+  viewer.onmessage(JSON.stringify({ t: 'code', code: '1111' }))
+  assert.equal(lastOf(app, 'knock').code, '1111')
+  app.onmessage(JSON.stringify({ t: 'gate', to: ask.from, left: 4 }))
+  assert.deepEqual(lastOf(viewer, 'code'), { t: 'code', ok: false, left: 4 })
+
+  // Another app can't let it in
+  other.onmessage(JSON.stringify({ t: 'admit', to: ask.from }))
+  assert.equal(viewer.got.filter((m) => m.t === 'snap').length, 0)
+
+  // The right code: in, with everything so far and a ticket
+  app.onmessage(JSON.stringify({ t: 'admit', to: ask.from }))
+  const { ticket } = lastOf(viewer, 'admitted')
+  assert.match(ticket, /^[A-Za-z0-9_-]{24}$/)
+  assert.equal(lastOf(viewer, 'snap').msgs[0].text, 'still private')
+  assert.equal(lastOf(app, 'peer').link, true)
+  assert.equal(hub.ticketOk(link, ticket), true)
+  assert.equal(hub.ticketOk(link, 'x'.repeat(24)), false)
+  assert.equal(hub.ticketOk('O'.repeat(24), ticket), false)
+
+  // Its ticket lets it back in after a dropped connection, no code
+  viewer.onclose()
+  const back = closable()
+  hub.join(back, 'view', { link, ticket })
+  assert.equal(back.got[0].t, 'admitted')
+  assert.equal(lastOf(back, 'snap').msgs[0].text, 'still private')
+  // and a made-up one doesn't
+  const guess = fakeSocket()
+  hub.join(guess, 'view', { link, ticket: 'x'.repeat(24) })
+  assert.equal(guess.got[0].t, 'gate')
+
+  // Leaving the door: Hi-chat hides the code
+  guess.onmessage(JSON.stringify({ t: 'unlock' }))
+  const from = lastOf(app, 'knock').from
+  guess.onclose()
+  assert.deepEqual(lastOf(app, 'knock'), { t: 'knock', from, gone: true })
+
+  // The link ending ends its tickets
+  app.onmessage(JSON.stringify({ t: 'revoke', link }))
+  assert.equal(hub.ticketOk(link, ticket), false)
+})
+
+test("a link's door takes only so many knocks", () => {
+  const hub = createMirrorHub()
+  const link = 'L'.repeat(24)
+  const app = fakeSocket()
+  hub.join(app, 'send', { link })
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view', { link })
+  for (let i = 0; i < 100; i++)
+    viewer.onmessage(JSON.stringify({ t: 'code', code: '0000' }))
+  assert.equal(app.got.filter((m) => m.t === 'knock').length, 40)
 })

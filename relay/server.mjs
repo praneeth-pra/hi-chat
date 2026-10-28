@@ -621,13 +621,17 @@ export function createRelay(options = {}) {
     if (url.pathname === '/api/camera') {
       const role = url.searchParams.get('role') === 'send' ? 'send' : 'view'
       // The camera key, or for sending from a mirror link (no login there),
-      // the link itself while its app keeps it
+      // the link and the ticket its viewer got for typing the code
       const keyed = cameraKeyOk(
         url.searchParams.get('key'),
         options.env ?? process.env
       )
       const link = url.searchParams.get('link')
-      const viaLink = !keyed && role === 'send' && mirror.isLink(link)
+      // Only a viewer let in with the code has a ticket
+      const viaLink =
+        !keyed &&
+        role === 'send' &&
+        mirror.ticketOk(link, url.searchParams.get('ticket'))
       if (!keyed && !viaLink)
         return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
@@ -659,7 +663,10 @@ export function createRelay(options = {}) {
       // so with 4001, the code a replaced link's viewers get, so the page
       // clears and stops trying rather than keep showing the old conversation
       if (!mirror.isLink(link)) return client.close(LINK_ENDED)
-      mirror.join(client, 'view', { link })
+      mirror.join(client, 'view', {
+        link,
+        ticket: url.searchParams.get('ticket') ?? undefined,
+      })
       return
     }
     // Hi-chat sending its conversation. Watching is only through a link

@@ -2,15 +2,15 @@ import { IconBroadcast, IconBroadcastOff } from '@tabler/icons-react'
 import { useRemoteSession } from '@/hooks/useRemoteSession'
 import { cn } from '@/lib/utils'
 
-// In the chat header: turns the remote session (the mirror to /mirror) on
-// and off. Off, the mirror doesn't run, so it costs Hi-chat nothing.
+// In the chat header: turns the remote session (the mirror to this app's
+// link, /m/<link>) on and off. Off, the mirror doesn't run, so it costs Hi-chat nothing.
 
 export function RemoteSessionButton() {
   const on = useRemoteSession((s) => s.on)
   const setOn = useRemoteSession((s) => s.setOn)
   const label = on
-    ? 'Remote session on: /mirror follows this chat. Click to stop.'
-    : 'Remote session off. Click to send this chat to /mirror.'
+    ? 'Remote session on: the mirror link follows this chat. Click to stop.'
+    : 'Remote session off. Click to send this chat to the mirror link.'
   return (
     <button
       type="button"

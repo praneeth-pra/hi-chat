@@ -16,7 +16,6 @@ import {
   IconGripVertical,
   IconLayoutSidebarRightCollapse,
   IconLoader2,
-  IconLock,
   IconMaximize,
   IconMessageCircle,
   IconPencil,
@@ -36,7 +35,6 @@ import {
   createDirectViewer,
   createSeqFilter,
   type RemoteInput,
-  type UnlockState,
 } from '@/lib/mirrorDirect'
 import {
   createClickCounter,
@@ -73,8 +71,9 @@ import { cn } from '@/lib/utils'
 /** The server's close code for a link that has ended (relay/mirror.mjs). */
 const LINK_ENDED = 4001
 
-// The remote mirror's viewer: open /mirror on another signed-in computer to
-// follow the conversation open in Hi-chat, live (see lib/remoteMirror.ts).
+// The remote mirror's viewer: open an app's link (/m/<link>) on another
+// computer and type the code Hi-chat shows, to follow the conversation open
+// in that app, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
 // computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
 // presents in Meet, its shared screen fills the space left of the text.
@@ -94,19 +93,22 @@ function useMirror(link?: string) {
   const [controllable, setControllable] = useState(false)
   const sendInputRef = useRef<(m: RemoteInput) => boolean>(() => false)
   const sendInput = useCallback((m: RemoteInput) => sendInputRef.current(m), [])
-  // On a link: whether a code would unlock control, and how the last went
-  const [unlock, setUnlock] = useState<UnlockState>({ can: false })
-  const unlockRef = useRef<{
-    ask: () => boolean
-    code: (code: string) => boolean
-  }>({ ask: () => false, code: () => false })
+  // On a link: shut until the code Hi-chat shows is typed, and how the
+  // last code went. Let in, the ticket lets this page back in after a
+  // dropped connection (and lets its camera send)
+  const [gate, setGate] = useState<Gate>({ shut: !!link })
+  const [ticket, setTicket] = useState<string | undefined>()
+  const toServer = useRef<(m: object) => boolean>(() => false)
   const askForCode = useCallback(() => {
-    if (!unlockRef.current.ask()) return false
-    // The box starts fresh; Hi-chat says again if the code is used up
-    setUnlock((u) => ({ can: u.can }))
+    if (!toServer.current({ t: 'unlock' })) return false
+    // The box starts fresh; Hi-chat says again if no code is left
+    setGate((g) => ({ shut: g.shut, asked: true }))
     return true
   }, [])
-  const sendCode = useCallback((c: string) => unlockRef.current.code(c), [])
+  const sendCode = useCallback(
+    (code: string) => toServer.current({ t: 'code', code }),
+    []
+  )
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -149,12 +151,13 @@ function useMirror(link?: string) {
         if (!open) setDirectLag(null)
       },
       onControl: setControllable,
-      onUnlock: setUnlock,
     })
     sendInputRef.current = (m) => peer.sendInput(m)
-    unlockRef.current = {
-      ask: () => peer.askForCode(),
-      code: (c) => peer.sendCode(c),
+    let pass: string | undefined
+    toServer.current = (m) => {
+      if (ws?.readyState !== WebSocket.OPEN) return false
+      ws.send(JSON.stringify(m))
+      return true
     }
     const ping = () => {
       const n = performance.now()
@@ -165,7 +168,8 @@ function useMirror(link?: string) {
     }
     const connect = () => {
       const socket = new WebSocket(
-        mirrorSocketUrl(window.location, 'view', link)
+        mirrorSocketUrl(window.location, 'view', link) +
+          (link && pass ? `&ticket=${encodeURIComponent(pass)}` : '')
       )
       ws = socket
       socket.onopen = () => {
@@ -187,6 +191,22 @@ function useMirror(link?: string) {
         }
         // Hi-chat offering a direct channel
         if (m.t === 'rtc') return peer.receive(m)
+        // A link's door: shut until the code, then in
+        if (m.t === 'gate') return setGate((g) => ({ ...g, shut: true }))
+        if (m.t === 'admitted') {
+          const t = (m as { ticket?: unknown }).ticket
+          if (typeof t === 'string') setTicket((pass = t))
+          return setGate({ shut: false })
+        }
+        if (m.t === 'code') {
+          const c = m as { left?: unknown; spent?: unknown }
+          return setGate({
+            shut: true,
+            asked: true,
+            left: typeof c.left === 'number' ? Math.max(0, c.left) : 0,
+            ...(c.spent === true ? { spent: true } : {}),
+          })
+        }
         for (const x of seq.take(m, 'relay')) queue(x)
       }
       socket.onclose = (e) => {
@@ -270,7 +290,8 @@ function useMirror(link?: string) {
     direct,
     controllable,
     sendInput,
-    unlock,
+    gate,
+    ticket,
     askForCode,
     sendCode,
   }
@@ -301,8 +322,8 @@ function useLook(look: MirrorState['look']) {
 }
 
 /**
- * The mirror page: signed in at /mirror (every app's conversation, the one in
- * front showing), or through an app's own link at /m/<link> without login.
+ * The mirror page, through an app's own link at /m/<link> without login,
+ * once let in with the code Hi-chat shows.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
   const {
@@ -313,11 +334,12 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
     direct,
     controllable,
     sendInput,
-    unlock,
+    gate,
+    ticket,
     askForCode,
     sendCode,
   } = useMirror(link)
-  const cam = useCameraSender({ link })
+  const cam = useCameraSender({ link, ticket })
   useLook(state.look)
   // Hi-chat's own column width, so lines break where they break there
   const column = state.look?.width || TEXT_WIDTH
@@ -500,6 +522,15 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
         </p>
       </div>
     )
+  if (link && gate.shut)
+    return (
+      <LinkDoor
+        gate={gate}
+        hiChatOn={state.senderOn}
+        askForCode={askForCode}
+        sendCode={sendCode}
+      />
+    )
   return (
     <div className="flex h-full flex-col bg-main-view text-main-view-fg">
       <header className="flex items-center gap-3 border-b border-main-view-fg/10 bg-main-view/80 px-4 py-2.5 backdrop-blur">
@@ -677,9 +708,6 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             stream={cam.screen}
             width={wide ? screenWidth : undefined}
             canEdit={controllable}
-            unlock={unlock}
-            askForCode={askForCode}
-            sendCode={sendCode}
             sendInput={sendInput}
             onEditing={cam.setFastScreen}
             readStats={cam.screenStats}
@@ -986,74 +1014,114 @@ function screenStatsTitle(s: ScreenStats) {
   ].join(' ')
 }
 
+/** A link's door: shut until the code Hi-chat shows is typed. */
+export type Gate = {
+  shut: boolean
+  /** A code was asked for */
+  asked?: boolean
+  /** After a wrong (or run-out) code: tries left; 0 asks for a new code */
+  left?: number
+  /** Too many wrong codes: only a reload brings a new one */
+  spent?: boolean
+}
+
 /**
- * The code box on a mirror link: the 4 digits Hi-chat shows on the shared
- * computer. Starts empty; says how many tries are left after a wrong code.
+ * A mirror link's first page: nothing of the conversation, the shared
+ * screen or the camera until the 4-digit code Hi-chat shows is typed. The
+ * box starts empty; it says how many tries are left after a wrong code.
  */
-function UnlockCode({
-  unlock,
-  onCode,
-  onClose,
+function LinkDoor({
+  gate,
+  hiChatOn,
+  askForCode,
+  sendCode,
 }: {
-  unlock: UnlockState
-  onCode: (code: string) => boolean
-  onClose: () => void
+  gate: Gate
+  /** Whether Hi-chat is open at the other end, to show a code */
+  hiChatOn: boolean
+  askForCode: () => boolean
+  sendCode: (code: string) => boolean
 }) {
   const [code, setCode] = useState('')
   // A wrong code clears the box for the next try
   useEffect(() => {
-    if (unlock.left !== undefined) setCode('')
-  }, [unlock])
-  const used = unlock.left === 0
+    if (gate.left !== undefined) setCode('')
+  }, [gate])
+  const runOut = gate.left === 0 && !gate.spent
   const submit = () => {
-    if (/^\d{4}$/.test(code) && !used) onCode(code)
+    if (/^\d{4}$/.test(code) && !gate.spent) sendCode(code)
   }
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        submit()
-      }}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
-      className="absolute right-3 top-14 z-20 flex w-64 flex-col gap-2 rounded-xl border border-white/10 bg-black/80 p-3 text-xs text-white/90 shadow-lg backdrop-blur"
-    >
-      <label htmlFor="mirror-unlock-code" className="leading-snug">
-        Type the 4-digit code Hi-chat now shows on the shared computer.
-      </label>
-      {!used && (
-        <div className="flex gap-2">
-          <input
-            id="mirror-unlock-code"
-            autoFocus
-            value={code}
-            onChange={(e) =>
-              setCode(e.target.value.replace(/\D/g, '').slice(0, 4))
-            }
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={4}
-            aria-label="Code"
-            className="h-8 w-full rounded-md border border-white/20 bg-white/10 px-2 text-center text-base tracking-[0.4em] text-white outline-none focus-visible:border-white/50"
-          />
+    <div className="flex h-full flex-col items-center justify-center bg-main-view px-6 text-main-view-fg">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+        className="flex w-full max-w-xs flex-col gap-3 text-sm"
+      >
+        <h1 className="text-base font-semibold">Enter the code</h1>
+        <label
+          htmlFor="mirror-link-code"
+          className="leading-relaxed text-main-view-fg/60"
+        >
+          {gate.asked
+            ? 'Type the 4-digit code Hi-chat now shows on the other computer.'
+            : 'This mirror link needs a code from Hi-chat. Ask for one, then type the 4 digits Hi-chat shows.'}
+        </label>
+        {!gate.spent && gate.asked && (
+          <div className="flex gap-2">
+            <input
+              id="mirror-link-code"
+              autoFocus
+              value={code}
+              onChange={(e) =>
+                setCode(e.target.value.replace(/\D/g, '').slice(0, 4))
+              }
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={4}
+              aria-label="Code"
+              className="h-10 w-full rounded-md border border-main-view-fg/15 bg-main-view-fg/[0.04] px-2 text-center text-lg tracking-[0.4em] outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            />
+            <button
+              type="submit"
+              disabled={code.length !== 4}
+              className="h-10 rounded-md bg-main-view-fg px-4 font-medium text-main-view transition disabled:opacity-40"
+            >
+              Open
+            </button>
+          </div>
+        )}
+        {!gate.spent && (!gate.asked || runOut) && (
           <button
-            type="submit"
-            disabled={code.length !== 4}
-            className="h-8 rounded-md bg-white px-3 font-medium text-black transition disabled:opacity-40"
+            type="button"
+            onClick={askForCode}
+            disabled={hiChatOn === false}
+            className="h-10 rounded-md border border-main-view-fg/15 font-medium hover:bg-main-view-fg/[0.06] disabled:opacity-40"
           >
-            Unlock
+            {gate.asked ? 'Get a new code' : 'Get a code'}
           </button>
-        </div>
-      )}
-      {used ? (
-        <p role="alert" className="text-amber-300">
-          That code no longer works. Reload this page for a new code.
-        </p>
-      ) : unlock.left !== undefined ? (
-        <p role="alert" className="text-amber-300">
-          Wrong code. {unlock.left} {unlock.left === 1 ? 'try' : 'tries'} left.
-        </p>
-      ) : null}
-    </form>
+        )}
+        {gate.spent ? (
+          <p role="alert" className="text-destructive">
+            Too many wrong codes. Reload this page to try again.
+          </p>
+        ) : runOut ? (
+          <p role="alert" className="text-destructive">
+            That code has run out. Get a new code.
+          </p>
+        ) : gate.left !== undefined ? (
+          <p role="alert" className="text-destructive">
+            Wrong code. {gate.left} {gate.left === 1 ? 'try' : 'tries'} left.
+          </p>
+        ) : hiChatOn === false ? (
+          <p className="text-main-view-fg/50">
+            Hi-chat isn't open on the other computer, so it can't show a code.
+          </p>
+        ) : null}
+      </form>
+    </div>
   )
 }
 
@@ -1061,9 +1129,6 @@ function SharedScreen({
   stream,
   width,
   canEdit,
-  unlock,
-  askForCode,
-  sendCode,
   sendInput,
   onEditing,
   readStats,
@@ -1077,10 +1142,6 @@ function SharedScreen({
   onSlow: () => void
   /** The Hi-chat app sharing this screen can be controlled from here */
   canEdit: boolean
-  /** On a mirror link: control unlocks with a code Hi-chat shows */
-  unlock: UnlockState
-  askForCode: () => boolean
-  sendCode: (code: string) => boolean
   sendInput: (m: RemoteInput) => boolean
   /** Editing started or stopped (the picture goes quicker meanwhile) */
   onEditing: (on: boolean) => void
@@ -1090,20 +1151,6 @@ function SharedScreen({
   const [picture, setPicture] = useState(false)
   const [editing, setEditing] = useState(false)
   const edit = editing && canEdit
-  // The code box, open after asking Hi-chat for a code
-  const [asking, setAsking] = useState(false)
-  // Unlocked: straight into editing, and the code box goes
-  const wasEditable = useRef(canEdit)
-  useEffect(() => {
-    if (canEdit && !wasEditable.current && asking) {
-      setAsking(false)
-      setEditing(true)
-    }
-    wasEditable.current = canEdit
-  }, [canEdit, asking])
-  useEffect(() => {
-    if (!unlock.can) setAsking(false)
-  }, [unlock.can])
   // How quickly the picture arrives, read every 2 s while it shows
   const [stats, setStats] = useState<ScreenStats | null>(null)
   // Lightened for this laptop (it stays so while the page is open)
@@ -1226,28 +1273,6 @@ function SharedScreen({
           <IconPencil size={14} />
           {edit ? 'Editing · Shift+Esc to stop' : 'Edit'}
         </button>
-      )}
-      {!canEdit && unlock.can && (
-        <button
-          type="button"
-          aria-expanded={asking}
-          title="Unlock with a code Hi-chat shows on the shared computer"
-          onClick={() => {
-            if (asking) return setAsking(false)
-            if (askForCode()) setAsking(true)
-          }}
-          className="absolute right-14 top-3 inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 px-3 text-xs font-medium text-white/90 backdrop-blur transition outline-none hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white/50"
-        >
-          <IconLock size={14} />
-          Unlock to edit
-        </button>
-      )}
-      {!canEdit && unlock.can && asking && (
-        <UnlockCode
-          unlock={unlock}
-          onCode={sendCode}
-          onClose={() => setAsking(false)}
-        />
       )}
       <StatusPill
         tone="live"

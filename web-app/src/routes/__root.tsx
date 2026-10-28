@@ -46,7 +46,7 @@ const AppLayout = () => {
   } = useLeftPanel()
   const isSmallScreen = useSmallScreen()
 
-  // Show the open conversation on /mirror in another signed-in browser,
+  // Show the open conversation on this app's mirror link (/m/<link>),
   // only while the remote session is on (the button in the chat header)
   const remoteSession = useRemoteSession((s) => s.on)
   useEffect(
