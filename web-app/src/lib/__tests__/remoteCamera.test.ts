@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createSlowWatch,
   readScreenStats,
   screenStatsBetween,
   cameraSocketUrl,
@@ -244,5 +245,55 @@ describe('remote camera', () => {
     expect(readScreenStats(report as unknown as RTCStatsReport)!.relay).toBe(
       true
     )
+  })
+
+  it('lightens the picture only after 3 slow readings in a row', () => {
+    const watch = createSlowWatch()
+    const at = (decodeMs: number, bufferMs = 20, fps = 30) => ({
+      fps,
+      rttMs: 20,
+      bufferMs,
+      decodeMs,
+      relay: false,
+      estimateMs: 60,
+    })
+    expect(watch(at(35))).toBe(false)
+    expect(watch(at(35))).toBe(false)
+    // A good reading starts the count again
+    expect(watch(at(5))).toBe(false)
+    expect(watch(at(35))).toBe(false)
+    // A still screen (no frames) says nothing either way
+    expect(watch(at(0, 0, 0))).toBe(false)
+    expect(watch(null)).toBe(false)
+    expect(watch(at(35))).toBe(false)
+    // Frames waiting long count as slow too
+    expect(watch(at(5, 300))).toBe(true)
+  })
+
+  it('asks every Meet tab for a lighter screen, and new presenters too', async () => {
+    const stream = { getTracks: () => [] } as unknown as MediaStream
+    const cam = startCameraSender({
+      stream,
+      key: 'k',
+      location: { protocol: 'https:', host: 'hi.example' },
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
+    })
+    const ws = FakeSocket.last
+    ws.hear({ t: 'join', from: 'tab-1' })
+    await flush()
+    cam.setLightScreen(true)
+    expect(ws.sent.at(-1)).toEqual({ t: 'light', to: 'tab-1', on: true })
+    // Asking twice sends nothing more
+    const n = ws.sent.length
+    cam.setLightScreen(true)
+    expect(ws.sent.length).toBe(n)
+    // A tab that starts presenting later hears it as well
+    ws.hear({ t: 'join', from: 'tab-2' })
+    await flush()
+    ws.hear({ t: 'screen', on: true, from: 'tab-2' })
+    await flush()
+    expect(ws.sent).toContainEqual({ t: 'light', to: 'tab-2', on: true })
+    cam.stop()
   })
 })

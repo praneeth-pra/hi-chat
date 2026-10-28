@@ -46,7 +46,7 @@ import {
   wheelPixels,
 } from '@/lib/remoteInput'
 import { splitReasoning } from '@/lib/splitReasoning'
-import type { ScreenStats } from '@/lib/remoteCamera'
+import { createSlowWatch, type ScreenStats } from '@/lib/remoteCamera'
 import {
   RemoteCameraPanel,
   StatusPill,
@@ -682,6 +682,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             sendInput={sendInput}
             onEditing={cam.setFastScreen}
             readStats={cam.screenStats}
+            onSlow={() => cam.setLightScreen(true)}
           />
         )}
         {cam.screen && wide && bodyWidth > 0 && (
@@ -1065,11 +1066,14 @@ function SharedScreen({
   sendInput,
   onEditing,
   readStats,
+  onSlow,
 }: {
   stream: MediaStream
   width?: number
   /** How the picture is arriving, for the readout in its corner */
   readStats: () => Promise<ScreenStats | null>
+  /** This laptop can't decode the full picture in time */
+  onSlow: () => void
   /** The Hi-chat app sharing this screen can be controlled from here */
   canEdit: boolean
   /** On a mirror link: control unlocks with a code Hi-chat shows */
@@ -1101,12 +1105,27 @@ function SharedScreen({
   }, [unlock.can])
   // How quickly the picture arrives, read every 2 s while it shows
   const [stats, setStats] = useState<ScreenStats | null>(null)
+  // Lightened for this laptop (it stays so while the page is open)
+  const [light, setLight] = useState(false)
+  const lightRef = useRef(false)
+  const slow = useMemo(createSlowWatch, [])
+  const onSlowRef = useRef(onSlow)
+  onSlowRef.current = onSlow
   useEffect(() => {
     if (!picture) return
     let live = true
     const read = () =>
       readStats()
-        .then((s) => live && setStats(s))
+        .then((s) => {
+          if (!live) return
+          setStats(s)
+          // Too slow to decode it all: from now on it comes smaller
+          if (!lightRef.current && slow(s)) {
+            lightRef.current = true
+            setLight(true)
+            onSlowRef.current()
+          }
+        })
         .catch(() => {})
     read()
     const timer = setInterval(read, 2000)
@@ -1115,7 +1134,7 @@ function SharedScreen({
       clearInterval(timer)
       setStats(null)
     }
-  }, [picture, readStats])
+  }, [picture, readStats, slow])
   useRemoteControl({
     on: edit,
     video,
@@ -1183,6 +1202,7 @@ function SharedScreen({
           {stats.fps} fps
           {stats.estimateMs !== null && ` · ≈${stats.estimateMs} ms`}
           {stats.relay ? ' · relay' : ' · direct'}
+          {light && ' · 720p'}
         </span>
       )}
       {canEdit && (
