@@ -16,6 +16,7 @@ import {
   IconGripVertical,
   IconLayoutSidebarRightCollapse,
   IconLoader2,
+  IconLock,
   IconMaximize,
   IconMessageCircle,
   IconPencil,
@@ -35,6 +36,7 @@ import {
   createDirectViewer,
   createSeqFilter,
   type RemoteInput,
+  type UnlockState,
 } from '@/lib/mirrorDirect'
 import {
   createClickCounter,
@@ -91,6 +93,19 @@ function useMirror(link?: string) {
   const [controllable, setControllable] = useState(false)
   const sendInputRef = useRef<(m: RemoteInput) => boolean>(() => false)
   const sendInput = useCallback((m: RemoteInput) => sendInputRef.current(m), [])
+  // On a link: whether a code would unlock control, and how the last went
+  const [unlock, setUnlock] = useState<UnlockState>({ can: false })
+  const unlockRef = useRef<{
+    ask: () => boolean
+    code: (code: string) => boolean
+  }>({ ask: () => false, code: () => false })
+  const askForCode = useCallback(() => {
+    if (!unlockRef.current.ask()) return false
+    // The box starts fresh; Hi-chat says again if the code is used up
+    setUnlock((u) => ({ can: u.can }))
+    return true
+  }, [])
+  const sendCode = useCallback((c: string) => unlockRef.current.code(c), [])
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -133,8 +148,13 @@ function useMirror(link?: string) {
         if (!open) setDirectLag(null)
       },
       onControl: setControllable,
+      onUnlock: setUnlock,
     })
     sendInputRef.current = (m) => peer.sendInput(m)
+    unlockRef.current = {
+      ask: () => peer.askForCode(),
+      code: (c) => peer.sendCode(c),
+    }
     const ping = () => {
       const n = performance.now()
       peer.ping(n)
@@ -249,6 +269,9 @@ function useMirror(link?: string) {
     direct,
     controllable,
     sendInput,
+    unlock,
+    askForCode,
+    sendCode,
   }
 }
 
@@ -281,8 +304,18 @@ function useLook(look: MirrorState['look']) {
  * front showing), or through an app's own link at /m/<link> without login.
  */
 export function MirrorViewer({ link }: { link?: string } = {}) {
-  const { state, connected, ended, lag, direct, controllable, sendInput } =
-    useMirror(link)
+  const {
+    state,
+    connected,
+    ended,
+    lag,
+    direct,
+    controllable,
+    sendInput,
+    unlock,
+    askForCode,
+    sendCode,
+  } = useMirror(link)
   const cam = useCameraSender({ link })
   useLook(state.look)
   // Hi-chat's own column width, so lines break where they break there
@@ -643,6 +676,9 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
             stream={cam.screen}
             width={wide ? screenWidth : undefined}
             canEdit={controllable}
+            unlock={unlock}
+            askForCode={askForCode}
+            sendCode={sendCode}
             sendInput={sendInput}
             onEditing={cam.setFastScreen}
             readStats={cam.screenStats}
@@ -948,10 +984,84 @@ function screenStatsTitle(s: ScreenStats) {
   ].join(' ')
 }
 
+/**
+ * The code box on a mirror link: the 4 digits Hi-chat shows on the shared
+ * computer. Starts empty; says how many tries are left after a wrong code.
+ */
+function UnlockCode({
+  unlock,
+  onCode,
+  onClose,
+}: {
+  unlock: UnlockState
+  onCode: (code: string) => boolean
+  onClose: () => void
+}) {
+  const [code, setCode] = useState('')
+  // A wrong code clears the box for the next try
+  useEffect(() => {
+    if (unlock.left !== undefined) setCode('')
+  }, [unlock])
+  const used = unlock.left === 0
+  const submit = () => {
+    if (/^\d{4}$/.test(code) && !used) onCode(code)
+  }
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        submit()
+      }}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+      className="absolute right-3 top-14 z-20 flex w-64 flex-col gap-2 rounded-xl border border-white/10 bg-black/80 p-3 text-xs text-white/90 shadow-lg backdrop-blur"
+    >
+      <label htmlFor="mirror-unlock-code" className="leading-snug">
+        Type the 4-digit code Hi-chat now shows on the shared computer.
+      </label>
+      {!used && (
+        <div className="flex gap-2">
+          <input
+            id="mirror-unlock-code"
+            autoFocus
+            value={code}
+            onChange={(e) =>
+              setCode(e.target.value.replace(/\D/g, '').slice(0, 4))
+            }
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={4}
+            aria-label="Code"
+            className="h-8 w-full rounded-md border border-white/20 bg-white/10 px-2 text-center text-base tracking-[0.4em] text-white outline-none focus-visible:border-white/50"
+          />
+          <button
+            type="submit"
+            disabled={code.length !== 4}
+            className="h-8 rounded-md bg-white px-3 font-medium text-black transition disabled:opacity-40"
+          >
+            Unlock
+          </button>
+        </div>
+      )}
+      {used ? (
+        <p role="alert" className="text-amber-300">
+          That code no longer works. Reload this page for a new code.
+        </p>
+      ) : unlock.left !== undefined ? (
+        <p role="alert" className="text-amber-300">
+          Wrong code. {unlock.left} {unlock.left === 1 ? 'try' : 'tries'} left.
+        </p>
+      ) : null}
+    </form>
+  )
+}
+
 function SharedScreen({
   stream,
   width,
   canEdit,
+  unlock,
+  askForCode,
+  sendCode,
   sendInput,
   onEditing,
   readStats,
@@ -962,6 +1072,10 @@ function SharedScreen({
   readStats: () => Promise<ScreenStats | null>
   /** The Hi-chat app sharing this screen can be controlled from here */
   canEdit: boolean
+  /** On a mirror link: control unlocks with a code Hi-chat shows */
+  unlock: UnlockState
+  askForCode: () => boolean
+  sendCode: (code: string) => boolean
   sendInput: (m: RemoteInput) => boolean
   /** Editing started or stopped (the picture goes quicker meanwhile) */
   onEditing: (on: boolean) => void
@@ -971,6 +1085,20 @@ function SharedScreen({
   const [picture, setPicture] = useState(false)
   const [editing, setEditing] = useState(false)
   const edit = editing && canEdit
+  // The code box, open after asking Hi-chat for a code
+  const [asking, setAsking] = useState(false)
+  // Unlocked: straight into editing, and the code box goes
+  const wasEditable = useRef(canEdit)
+  useEffect(() => {
+    if (canEdit && !wasEditable.current && asking) {
+      setAsking(false)
+      setEditing(true)
+    }
+    wasEditable.current = canEdit
+  }, [canEdit, asking])
+  useEffect(() => {
+    if (!unlock.can) setAsking(false)
+  }, [unlock.can])
   // How quickly the picture arrives, read every 2 s while it shows
   const [stats, setStats] = useState<ScreenStats | null>(null)
   useEffect(() => {
@@ -1077,6 +1205,28 @@ function SharedScreen({
           <IconPencil size={14} />
           {edit ? 'Editing · Shift+Esc to stop' : 'Edit'}
         </button>
+      )}
+      {!canEdit && unlock.can && (
+        <button
+          type="button"
+          aria-expanded={asking}
+          title="Unlock with a code Hi-chat shows on the shared computer"
+          onClick={() => {
+            if (asking) return setAsking(false)
+            if (askForCode()) setAsking(true)
+          }}
+          className="absolute right-14 top-3 inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 px-3 text-xs font-medium text-white/90 backdrop-blur transition outline-none hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white/50"
+        >
+          <IconLock size={14} />
+          Unlock to edit
+        </button>
+      )}
+      {!canEdit && unlock.can && asking && (
+        <UnlockCode
+          unlock={unlock}
+          onCode={sendCode}
+          onClose={() => setAsking(false)}
+        />
       )}
       <StatusPill
         tone="live"
