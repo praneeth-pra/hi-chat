@@ -149,6 +149,8 @@ export function createCameraHub({
     if (m.t === 'screen') return { t: 'screen', on: m.on === true }
     // /mirror asking for a quicker screen while someone controls the computer
     if (m.t === 'fast') return { t: 'fast', on: m.on === true }
+    // /mirror on a slow laptop asking for a lighter screen (fewer pixels)
+    if (m.t === 'light') return { t: 'light', on: m.on === true }
     return null
   }
 

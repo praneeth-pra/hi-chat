@@ -67,6 +67,14 @@ test('the hub passes connection setup between the camera and each Meet tab', () 
     from: join.from,
   })
 
+  // /mirror asking for a lighter screen reaches the Meet tab, as a bare on/off
+  camera.onmessage(
+    JSON.stringify({ t: 'light', to: join.from, on: true, sdp: 'x' })
+  )
+  assert.deepEqual(viewer.got.at(-1), { t: 'light', on: true })
+  camera.onmessage(JSON.stringify({ t: 'light', to: join.from, on: 1 }))
+  assert.deepEqual(viewer.got.at(-1), { t: 'light', on: false })
+
   // Unknown messages and pings go nowhere
   const seen = camera.got.length
   viewer.onmessage(JSON.stringify({ t: 'ping' }))
@@ -260,4 +268,32 @@ test('a Meet tab reconnecting with its id stays the same viewer', () => {
   const odd = fakeSocket()
   hub.join(odd, 'view', { vid: 'x"y' })
   assert.match(camera.got.at(-1).from, /^[0-9a-f]{16}$/)
+})
+
+test("a link's remote camera is cut off when the link ends", async () => {
+  const server = createRelay({ env: {} })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const base = `ws://127.0.0.1:${server.address().port}`
+  const link = 'L'.repeat(24)
+  const opened = (url) =>
+    new Promise((resolve, reject) => {
+      const ws = new WebSocket(url)
+      ws.onopen = () => resolve(ws)
+      ws.onerror = () => reject(new Error('refused'))
+    })
+  try {
+    const app = await opened(
+      `${base}/api/mirror?role=send&link=${link}&born=${Date.now()}`
+    )
+    const cam = await opened(`${base}/api/camera?role=send&link=${link}`)
+    const closed = new Promise((r) => (cam.onclose = (e) => r(e.code)))
+    app.send(JSON.stringify({ t: 'revoke', link }))
+    assert.equal(await closed, 4001)
+    // and the link no longer lets a camera in
+    await assert.rejects(opened(`${base}/api/camera?role=send&link=${link}`))
+    app.close()
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise((r) => server.close(r))
+  }
 })

@@ -600,7 +600,19 @@ export function createRelay(options = {}) {
   // STUN (and TURN, when set up) for direct connections: the camera's, and
   // the mirror's between Hi-chat and /mirror
   const ice = createIceSource({ env: options.env ?? process.env })
-  const mirror = createMirrorHub({ ice })
+  // The remote cameras sending through a link, ended with it
+  const linkCameras = new Map() // secret -> Set of sockets
+  const mirror = createMirrorHub({
+    ice,
+    onLinkEnded: (secret) => {
+      for (const c of linkCameras.get(secret) ?? []) c.close(LINK_ENDED)
+      linkCameras.delete(secret)
+    },
+  })
+  // A link ends at 90 minutes even with nobody connecting
+  const sweep = setInterval(() => mirror.sweep(), 10_000)
+  sweep.unref?.()
+  server.on('close', () => clearInterval(sweep))
   // Remote camera (camera.mjs): reached from Meet tabs, so the camera key
   // stands in for the login cookie
   const camera = createCameraHub({ env: options.env ?? process.env, ice })
@@ -610,15 +622,29 @@ export function createRelay(options = {}) {
       const role = url.searchParams.get('role') === 'send' ? 'send' : 'view'
       // The camera key, or for sending from a mirror link (no login there),
       // the link itself while its app keeps it
-      const allowed =
-        cameraKeyOk(url.searchParams.get('key'), options.env ?? process.env) ||
-        (role === 'send' && mirror.isLink(url.searchParams.get('link')))
-      if (!allowed) return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      const keyed = cameraKeyOk(
+        url.searchParams.get('key'),
+        options.env ?? process.env
+      )
+      const link = url.searchParams.get('link')
+      const viaLink = !keyed && role === 'send' && mirror.isLink(link)
+      if (!keyed && !viaLink)
+        return socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client)
-        camera.join(client, role, {
-          vid: url.searchParams.get('vid') ?? undefined,
+      if (!client) return
+      if (viaLink) {
+        const set = linkCameras.get(link) ?? new Set()
+        set.add(client)
+        linkCameras.set(link, set)
+        socket.once('close', () => {
+          set.delete(client)
+          if (!set.size && linkCameras.get(link) === set)
+            linkCameras.delete(link)
         })
+      }
+      camera.join(client, role, {
+        vid: url.searchParams.get('vid') ?? undefined,
+      })
       return
     }
     // A mirror link, opened without login: it watches one app only, and only
@@ -629,9 +655,9 @@ export function createRelay(options = {}) {
       const link = url.searchParams.get('link')
       const client = acceptWebSocket(req, socket, head)
       if (!client) return
-      // An ended link (replaced, or its app gone 12 h) is told so with 4001,
-      // the code a replaced link's viewers get, so the page clears and stops
-      // trying rather than keep showing the old conversation
+      // An ended link (replaced, 90 minutes old, or its app gone 12 h) is told
+      // so with 4001, the code a replaced link's viewers get, so the page
+      // clears and stops trying rather than keep showing the old conversation
       if (!mirror.isLink(link)) return client.close(LINK_ENDED)
       mirror.join(client, 'view', { link })
       return
@@ -646,7 +672,10 @@ export function createRelay(options = {}) {
           url.searchParams.get('role') === 'send' ? 'send' : 'view',
           // A sender may name its app's link, for that link's viewers
           url.searchParams.get('role') === 'send'
-            ? { link: url.searchParams.get('link') ?? undefined }
+            ? {
+                link: url.searchParams.get('link') ?? undefined,
+                born: url.searchParams.get('born') ?? undefined,
+              }
             : {}
         )
       return

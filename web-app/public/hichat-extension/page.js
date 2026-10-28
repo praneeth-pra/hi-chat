@@ -113,10 +113,19 @@
   // sharpness instead, with more bitrate so text stays readable as it moves
   const EDIT_BITRATE = 5_000_000
   let fastScreen = false
+  // /mirror's laptop is too slow to decode 1080p in time: 720p instead, at
+  // a bitrate to match
+  let lightScreen = false
+  const LIGHT_SCALE = 1.5
+  const LIGHT_BITRATE = 2_000_000
   const screenParams = (lane) => {
     const params = lane.getParameters()
     params.encodings = params.encodings?.length ? params.encodings : [{}]
-    params.encodings[0].maxBitrate = fastScreen ? EDIT_BITRATE : SCREEN_BITRATE
+    const bitrate = fastScreen ? EDIT_BITRATE : SCREEN_BITRATE
+    params.encodings[0].maxBitrate = lightScreen
+      ? Math.min(bitrate, LIGHT_BITRATE)
+      : bitrate
+    params.encodings[0].scaleResolutionDownBy = lightScreen ? LIGHT_SCALE : 1
     params.encodings[0].maxFramerate = SCREEN_FPS
     params.degradationPreference = fastScreen
       ? 'maintain-framerate'
@@ -238,6 +247,9 @@
     else if (m.t === 'fast') {
       fastScreen = m.on === true
       tuneScreen()
+    } else if (m.t === 'light') {
+      lightScreen = m.on === true
+      tuneScreen()
     }
     // The camera page lost Hi-chat's server: a connection that is up keeps
     // going (the media doesn't pass through the server), and ends on its own
@@ -246,6 +258,8 @@
       if (pc?.connectionState !== 'connected') closePeer()
     } else if (m.t === 'offer') {
       closePeer()
+      // A new /mirror page: it says again if its laptop needs it lighter
+      lightScreen = false
       const peer = new RealPeerConnection({ iceServers: ice })
       pc = peer
       peer.onconnectionstatechange = () => {
@@ -382,11 +396,10 @@
     const video = asksFor(constraints.video, CAM)
     const audio = asksFor(constraints.audio, MIC)
     // What the call asked for, to see in DevTools why a device wasn't used
-    console.info(
-      '[Hi-chat camera] getUserMedia',
-      JSON.stringify(constraints),
-      { remoteCamera: video, remoteMic: audio }
-    )
+    console.info('[Hi-chat camera] getUserMedia', JSON.stringify(constraints), {
+      remoteCamera: video,
+      remoteMic: audio,
+    })
     if (!video && !audio) return realGetUserMedia(constraints)
     start()
     const tracks = []

@@ -117,6 +117,28 @@ export function screenStatsBetween(
   }
 }
 
+/** Decoding a frame slower than this means the laptop can't keep up. */
+export const SLOW_DECODE_MS = 20
+/** Frames waiting this long to play mean the same. */
+export const SLOW_BUFFER_MS = 150
+/** Reads in a row (2 s apart) that must be slow before the picture lightens. */
+export const SLOW_READS = 3
+
+/**
+ * Watches the shared screen's readings; true once this laptop has been too
+ * slow to decode it for SLOW_READS readings in a row. Frame rate alone says
+ * nothing (a still screen sends few frames), so it goes by decode and buffer.
+ */
+export function createSlowWatch() {
+  let slow = 0
+  return (s: ScreenStats | null) => {
+    if (!s || s.fps <= 0) return false
+    slow =
+      s.decodeMs > SLOW_DECODE_MS || s.bufferMs > SLOW_BUFFER_MS ? slow + 1 : 0
+    return slow >= SLOW_READS
+  }
+}
+
 export function cameraSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
   key: string,
@@ -171,11 +193,15 @@ export function startCameraSender({
   // Someone controls the shared computer from here: its picture keeps its
   // frame rate over sharpness, with more bitrate (extension, 'fast')
   let fast = false
+  // This laptop can't decode the full picture in time: the Meet tab sends
+  // it smaller (extension, 'light')
+  let light = false
   // A shared screen plays each frame the moment it arrives: no buffer to
   // smooth it, which only adds delay to a screen (it has no sound to sync)
   const tuneScreen = (id: string) => {
     const r = screenReceivers.get(id) as unknown as
-      Record<string, unknown> | undefined
+      | Record<string, unknown>
+      | undefined
     if (!r) return
     if ('jitterBufferTarget' in r) r.jitterBufferTarget = 0
     // Older Chrome: the same, in seconds
@@ -305,6 +331,7 @@ export function startCameraSender({
         presenting.push(from)
         // A presentation starting while someone controls: quick at once
         if (fast) send({ t: 'fast', to: from, on: true })
+        if (light) send({ t: 'light', to: from, on: true })
       }
       showScreen()
     } else if (m.t === 'answer' && m.from && m.sdp)
@@ -388,6 +415,12 @@ export function startCameraSender({
         send({ t: 'fast', to: id, on })
         tuneScreen(id)
       }
+    },
+    /** The shared screen sent smaller, for a laptop slow to decode it. */
+    setLightScreen(on: boolean) {
+      if (light === on) return
+      light = on
+      for (const id of peers.keys()) send({ t: 'light', to: id, on })
     },
     /** Swaps in another camera or microphone without reconnecting. */
     replace(next: MediaStream) {
