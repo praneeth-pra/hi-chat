@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanSnapshot, createMirrorHub } from './mirror.mjs'
+import { cleanSnapshot, createMirrorHub, LINK_TTL_MS } from './mirror.mjs'
 import { createRelay } from './server.mjs'
 
 // The last message of type `t` a socket got (others, like 'peer', may follow)
@@ -292,16 +292,100 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
   assert.equal(hub.isLink(link), false, 'gone after the grace period')
 
   // "New link": the old one stops at once and its viewers are closed
-  hub.join(appB, 'send', { link: other })
-  const viaOther = fakeSocket()
-  viaOther.close = (code) => {
-    viaOther.closed = code
-    viaOther.onclose()
+  const fresh = 'P'.repeat(22)
+  const appC = fakeSocket()
+  hub.join(appC, 'send', { link: fresh })
+  const viaFresh = closable()
+  hub.join(viaFresh, 'view', { link: fresh })
+  appC.onmessage(JSON.stringify({ t: 'revoke', link: fresh }))
+  assert.equal(hub.isLink(fresh), false)
+  assert.equal(viaFresh.closed, 4001)
+  // and an app still holding it can't open it again
+  hub.join(fakeSocket(), 'send', { link: fresh })
+  assert.equal(hub.isLink(fresh), false)
+})
+
+const closable = () => {
+  const ws = fakeSocket()
+  ws.closed = null
+  ws.close = (code) => {
+    ws.closed = code
+    ws.onclose()
   }
-  hub.join(viaOther, 'view', { link: other })
-  appB.onmessage(JSON.stringify({ t: 'revoke', link: other }))
-  assert.equal(hub.isLink(other), false)
-  assert.equal(viaOther.closed, 4001)
+  return ws
+}
+
+test('a link ends for good 90 minutes after its app made it', () => {
+  let t = 10_000_000
+  const ended = []
+  const hub = createMirrorHub({
+    now: () => t,
+    onLinkEnded: (s) => ended.push(s),
+  })
+  const link = 'L'.repeat(24)
+  const app = fakeSocket()
+  hub.join(app, 'send', { link, born: String(t) })
+  const viewer = closable()
+  hub.join(viewer, 'view', { link })
+  app.onmessage(snap([{ id: 'a', role: 'user', text: 'secret' }]))
+
+  t += LINK_TTL_MS - 1
+  hub.sweep()
+  assert.equal(hub.isLink(link), true, 'still good just before')
+  assert.equal(viewer.closed, null)
+
+  t += 1
+  hub.sweep()
+  assert.equal(viewer.closed, 4001, 'its viewer is closed at 90 minutes')
+  assert.equal(hub.isLink(link), false)
+  assert.deepEqual(ended, [link])
+  // The app reconnecting with it (or another window) doesn't revive it
+  app.onclose()
+  const again = fakeSocket()
+  hub.join(again, 'send', { link, born: String(t) })
+  assert.equal(hub.isLink(link), false)
+  // and the app goes on sending to the signed-in /mirror
+  const signedIn = fakeSocket()
+  hub.join(signedIn, 'view')
+  again.onmessage(snap([{ id: 'b', role: 'user', text: 'still here' }]))
+  assert.equal(lastOf(signedIn, 'snap').msgs[0].text, 'still here')
+})
+
+test("a link's 90 minutes count from when the app made it, not a restart", () => {
+  let t = 10_000_000
+  const hub = createMirrorHub({ now: () => t })
+  const link = 'L'.repeat(24)
+  // This server just started, but the app made its link 89 minutes ago
+  const app = fakeSocket()
+  hub.join(app, 'send', { link, born: String(t - 89 * 60_000) })
+  assert.equal(hub.isLink(link), true)
+  t += 60_000
+  assert.equal(hub.isLink(link), false)
+
+  // Made over 90 minutes ago: never opens at all
+  const old = 'O'.repeat(24)
+  hub.join(fakeSocket(), 'send', { link: old, born: String(t - LINK_TTL_MS) })
+  assert.equal(hub.isLink(old), false)
+
+  // A time in the future counts as now; nonsense counts as now
+  const ahead = 'A'.repeat(24)
+  hub.join(fakeSocket(), 'send', { link: ahead, born: String(t + 1e9) })
+  const junk = 'J'.repeat(24)
+  hub.join(fakeSocket(), 'send', { link: junk, born: 'soon' })
+  t += LINK_TTL_MS - 1
+  assert.equal(hub.isLink(ahead), true)
+  assert.equal(hub.isLink(junk), true)
+  t += 1
+  assert.equal(hub.isLink(ahead), false)
+  assert.equal(hub.isLink(junk), false)
+
+  // A second window can't stretch it with a later time
+  const shared = 'S'.repeat(24)
+  hub.join(fakeSocket(), 'send', { link: shared, born: String(t) })
+  t += 60 * 60_000
+  hub.join(fakeSocket(), 'send', { link: shared, born: String(t) })
+  t += 30 * 60_000
+  assert.equal(hub.isLink(shared), false)
 })
 
 test('links must look like secrets', () => {

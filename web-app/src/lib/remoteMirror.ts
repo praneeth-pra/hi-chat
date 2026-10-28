@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 import { CODE_TTL_MS, createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
 import {
   linkFromPath,
+  mirrorLinkBorn,
   mirrorLinkSecret,
   onMirrorLinkRenewed,
 } from '@/lib/mirrorLink'
@@ -30,6 +31,8 @@ const NOT_SENDING = [MIRROR_PATH]
 const notSending = (pathname: string) =>
   NOT_SENDING.includes(pathname) || linkFromPath(pathname) !== null
 const PING_MS = 30_000
+// How often to check whether this app's link ran out
+const LINK_CHECK_MS = 15_000
 const MAX_MESSAGES = 200
 // Screenshots go to the mirror at most this big (a ~3000px Mac screenshot
 // would be several MB): sharp enough to read, quick to send
@@ -286,14 +289,17 @@ export function streamUpdate(
 export function mirrorSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
   role: 'send' | 'view',
-  link?: string
+  link?: string,
+  born?: number
 ) {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const base = `${scheme}//${location.host}`
   const secret = link ? encodeURIComponent(link) : ''
   // A link's viewer has no login: it watches through the link's own socket
   if (role === 'view' && link) return `${base}/api/mirror-link?link=${secret}`
-  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}`
+  // The app says when it made its link, so the server ends it on time
+  const since = link && born !== undefined ? `&born=${Math.floor(born)}` : ''
+  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}${since}`
 }
 
 /** The Mac app's bridge to its page, when this page is in the Mac app. */
@@ -342,6 +348,8 @@ export function startRemoteMirror({
   let ws: WebSocket | null = null
   let stopped = false
   let viewers = 0
+  // The link this app last connected with
+  let sentLink: string | null = null
   let retryMs = 1000
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let queued = false
@@ -610,8 +618,9 @@ export function startRemoteMirror({
   function connect() {
     if (stopped) return
     // Signed in, so it also sends to this app's own link
+    sentLink = mirrorLinkSecret()
     const socket = new WebSocketImpl(
-      mirrorSocketUrl(location, 'send', mirrorLinkSecret())
+      mirrorSocketUrl(location, 'send', sentLink, mirrorLinkBorn())
     )
     ws = socket
     socket.onopen = () => {
@@ -707,6 +716,14 @@ export function startRemoteMirror({
     })
   )
   const ping = setInterval(() => send({ t: 'ping' }), PING_MS)
+  // The link ran out (90 minutes), or another window replaced it: end the
+  // old one and send on the new
+  const linkCheck = setInterval(() => {
+    const was = sentLink
+    if (!was || mirrorLinkSecret() === was) return
+    send({ t: 'revoke', link: was })
+    reconnect()
+  }, LINK_CHECK_MS)
   connect()
 
   return () => {
@@ -716,6 +733,7 @@ export function startRemoteMirror({
     stayAwake(false)
     unsubscribe.forEach((u) => u())
     clearInterval(ping)
+    clearInterval(linkCheck)
     clearTimeout(retryTimer)
     direct?.closeAll()
     ws?.close()

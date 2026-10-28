@@ -82,7 +82,8 @@ const LINK_ENDED = 4001
 function useMirror(link?: string) {
   const [state, setState] = useState<MirrorState>(emptyMirror)
   const [connected, setConnected] = useState(false)
-  // A link that has ended ("New link" in Hi-chat, or its app gone 12 h)
+  // A link that has ended (revoked in Hi-chat, 90 minutes old, or its app
+  // gone 12 h)
   const [ended, setEnded] = useState(false)
   // Round trip to Hi-chat's server, in ms, from the pings below
   const [lag, setLag] = useState<number | null>(null)
@@ -494,8 +495,8 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       >
         <h1 className="text-base font-semibold">This mirror link has ended</h1>
         <p className="max-w-sm text-sm text-main-view-fg/60">
-          Hi-chat made a new link. Open the new one from Hi-chat to keep
-          watching.
+          Links last 90 minutes, and Hi-chat can revoke one sooner. Copy a new
+          link from Hi-chat to keep watching.
         </p>
       </div>
     )

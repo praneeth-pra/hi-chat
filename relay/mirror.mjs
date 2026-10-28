@@ -200,6 +200,11 @@ export const LINK_ENDED = 4001
 // A link keeps working this long after its app closes, so a restart (or the
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
+/** A link works for 90 minutes from when its app made it, then ends for good. */
+export const LINK_TTL_MS = 90 * 60 * 1000
+// An ended link's secret is kept this long, so an app still holding it
+// (another window, an old tab) can't open it again
+const LINK_DEAD_MS = 24 * 60 * 60 * 1000
 
 const ID_RE = /^[0-9a-f]{16}$/
 const SESSION_RE = /^[\w-]{1,40}$/
@@ -240,6 +245,7 @@ function seqTag(m) {
 export function createMirrorHub({
   now = Date.now,
   ice = { ready: () => null },
+  onLinkEnded = () => {},
 } = {}) {
   // TURN credentials when ready (fetched in the background), else STUN
   const iceList = () => {
@@ -265,7 +271,8 @@ export function createMirrorHub({
   // '' is the signed-in /mirror, where every app sends; a link's secret
   // names its own channel, where only that app sends
   const channels = new Map()
-  const links = new Map() // secret -> { live, until }
+  const links = new Map() // secret -> { live, until, born }
+  const dead = new Map() // ended secret -> when to forget it
   const senderChannels = new Map() // sender socket -> its channels
 
   const channel = (name) => {
@@ -320,21 +327,49 @@ export function createMirrorHub({
     s.send(JSON.stringify({ t: 'viewers', n }))
   }
 
-  /** Whether `secret` is a link an app has opened (and not replaced). */
+  const expired = (l) => now() - l.born >= LINK_TTL_MS
+
+  /**
+   * Whether `secret` is a link an app has opened, not replaced, and not yet
+   * 90 minutes old.
+   */
   function isLink(secret) {
     const l = typeof secret === 'string' && links.get(secret)
     if (!l) return false
+    if (expired(l)) {
+      end(secret)
+      return false
+    }
     if (l.live > 0 || l.until > now()) return true
     links.delete(secret)
     return false
   }
 
-  function revoke(secret) {
+  // A link ends for good: replaced ("New link", "Revoke") or out of time.
+  // Its viewers are closed, and the secret never opens again
+  function end(secret) {
     if (!LINK_RE.test(secret ?? '')) return
     links.delete(secret)
+    dead.set(secret, now() + LINK_DEAD_MS)
     const ch = channels.get(secret)
-    if (!ch) return
-    for (const v of [...ch.viewers]) v.close(LINK_ENDED)
+    if (ch) {
+      for (const v of [...ch.viewers]) v.close(LINK_ENDED)
+      // Its app stops sending there (the signed-in /mirror goes on)
+      for (const s of ch.senders)
+        senderChannels.set(
+          s,
+          (senderChannels.get(s) ?? []).filter((n) => n !== secret)
+        )
+      ch.senders.clear()
+      tidy(secret)
+    }
+    onLinkEnded(secret)
+  }
+
+  /** Ends the links that are out of time (run every few seconds). */
+  function sweep() {
+    for (const [secret, l] of links) if (expired(l)) end(secret)
+    for (const [secret, until] of dead) if (until <= now()) dead.delete(secret)
   }
 
   // A finished reply arrives as a message, so the stream ends with it. It is
@@ -477,7 +512,7 @@ export function createMirrorHub({
       return
     }
     // "New link": the app's old link stops working now
-    if (m?.t === 'revoke') return revoke(m.link)
+    if (m?.t === 'revoke') return end(m.link)
     // Setting up a direct connection with one of its viewers
     if (m?.t === 'rtc') return rtcToViewer(ws, m)
     const handle = Object.hasOwn(HANDLERS, m?.t) ? HANDLERS[m.t] : null
@@ -522,13 +557,28 @@ export function createMirrorHub({
       to.ws.send(JSON.stringify({ t: 'rtc', from: ids.get(ws), ...clean }))
   }
 
-  function joinSender(ws, link) {
-    const names = [''].concat(LINK_RE.test(link ?? '') ? [link] : [])
+  // When the app says it made `link` (it keeps the time, so a restart of
+  // this server doesn't give an old link a fresh 90 minutes); never later
+  // than now, nor later than the server first heard of it
+  const bornAt = (link, born) => {
+    const said = Number(born)
+    const t = Number.isFinite(said) && said > 0 ? Math.min(said, now()) : now()
+    return Math.min(t, links.get(link)?.born ?? Infinity)
+  }
+
+  function joinSender(ws, link, born) {
+    const names = ['']
+    if (LINK_RE.test(link ?? '') && !dead.has(link)) {
+      const at = bornAt(link, born)
+      if (now() - at < LINK_TTL_MS) names.push(link)
+      else end(link)
+    }
     senderChannels.set(ws, names)
     for (const name of names) channel(name).senders.add(ws)
     if (names[1]) {
-      const l = links.get(link) ?? { live: 0, until: 0 }
+      const l = links.get(link) ?? { live: 0, until: 0, born: 0 }
       l.live += 1
+      l.born = bornAt(link, born)
       links.set(link, l)
     }
     newId(ws, 'send', names)
@@ -588,13 +638,14 @@ export function createMirrorHub({
      * Adds a socket from acceptWebSocket. A sender (signed in) sends to the
      * signed-in /mirror and, with `link`, to that link's viewers too. A viewer
      * watches the signed-in /mirror, or with `link` (checked with isLink
-     * first) only that app.
+     * first) only that app. `born` is when the app made its link.
      */
-    join(ws, role, { link } = {}) {
-      if (role === 'send') joinSender(ws, link)
+    join(ws, role, { link, born } = {}) {
+      if (role === 'send') joinSender(ws, link, born)
       else joinViewer(ws, link)
     },
     isLink,
+    sweep,
     get counts() {
       const ch = channels.get('')
       const senders = ch?.senders.size ?? 0

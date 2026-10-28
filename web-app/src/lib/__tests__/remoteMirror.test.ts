@@ -173,6 +173,15 @@ describe('remote mirror', () => {
     expect(
       mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'view', link)
     ).toBe(`wss://hi.example/api/mirror-link?link=${link}`)
+    // with when it made its link, so the server ends it on time
+    expect(
+      mirrorSocketUrl(
+        { protocol: 'https:', host: 'hi.example' },
+        'send',
+        link,
+        1234.5
+      )
+    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}&born=1234`)
   })
 
   it('viewer state follows snapshots and streams', () => {
@@ -228,11 +237,27 @@ describe('remote mirror', () => {
       return ws
     }
 
+    it('ends its link at 90 minutes and goes on with a new one', async () => {
+      const ws = start()
+      const link = new URL(ws.url.replace('wss:', 'https:')).searchParams.get(
+        'link'
+      )
+      vi.advanceTimersByTime(90 * 60_000 + 15_000)
+      expect(ws.sent).toContainEqual({ t: 'revoke', link })
+      const next = FakeSocket.last
+      expect(next).not.toBe(ws)
+      const nextLink = new URL(
+        next.url.replace('wss:', 'https:')
+      ).searchParams.get('link')
+      expect(nextLink).toMatch(/^[A-Za-z0-9_-]{24}$/)
+      expect(nextLink).not.toBe(link)
+    })
+
     it('sends nothing until someone is watching', async () => {
       const ws = start()
       // Signed in, it also sends to this app's own mirror link
       expect(ws.url).toMatch(
-        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}$/
+        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}&born=\d+$/
       )
       useMessages.setState({
         messages: { t1: [msg('u', 'user', 'Hi again')] },

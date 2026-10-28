@@ -269,3 +269,31 @@ test('a Meet tab reconnecting with its id stays the same viewer', () => {
   hub.join(odd, 'view', { vid: 'x"y' })
   assert.match(camera.got.at(-1).from, /^[0-9a-f]{16}$/)
 })
+
+test("a link's remote camera is cut off when the link ends", async () => {
+  const server = createRelay({ env: {} })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const base = `ws://127.0.0.1:${server.address().port}`
+  const link = 'L'.repeat(24)
+  const opened = (url) =>
+    new Promise((resolve, reject) => {
+      const ws = new WebSocket(url)
+      ws.onopen = () => resolve(ws)
+      ws.onerror = () => reject(new Error('refused'))
+    })
+  try {
+    const app = await opened(
+      `${base}/api/mirror?role=send&link=${link}&born=${Date.now()}`
+    )
+    const cam = await opened(`${base}/api/camera?role=send&link=${link}`)
+    const closed = new Promise((r) => (cam.onclose = (e) => r(e.code)))
+    app.send(JSON.stringify({ t: 'revoke', link }))
+    assert.equal(await closed, 4001)
+    // and the link no longer lets a camera in
+    await assert.rejects(opened(`${base}/api/camera?role=send&link=${link}`))
+    app.close()
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise((r) => server.close(r))
+  }
+})
