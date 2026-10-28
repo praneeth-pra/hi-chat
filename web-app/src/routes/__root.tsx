@@ -8,7 +8,6 @@ import { InterfaceProvider } from '@/providers/InterfaceProvider'
 import { ThemeProvider } from '@/providers/ThemeProvider'
 import { KeyboardShortcutsProvider } from '@/providers/KeyboardShortcuts'
 import { DataProvider } from '@/providers/DataProvider'
-import { route } from '@/constants/routes'
 import { ExtensionProvider } from '@/providers/ExtensionProvider'
 import { ToasterProvider } from '@/providers/ToasterProvider'
 import { useLeftPanel } from '@/hooks/useLeftPanel'
@@ -194,11 +193,8 @@ const BareLayout = () => {
 function RootLayout() {
   const getInitialLayoutType = () => {
     const pathname = window.location.pathname
-    return (
-      pathname === route.mirror ||
-      // An app's own mirror link (lib/mirrorLink.ts)
-      pathname.startsWith('/m/')
-    )
+    // An app's own mirror link (lib/mirrorLink.ts)
+    return pathname.startsWith('/m/')
   }
 
   const isBarePage = getInitialLayoutType()

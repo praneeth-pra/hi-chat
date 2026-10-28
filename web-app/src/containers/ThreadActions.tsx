@@ -7,14 +7,23 @@ import { MirrorLinkButton } from './MirrorLinkButton'
 import { RemoteSessionButton } from './RemoteSessionButton'
 import { DictationToggleButton } from './DictationToggleButton'
 
+/** Dictation, the mirror and its link: on the home screen and in a chat. */
+export function AppActions() {
+  return (
+    <>
+      <DictationToggleButton />
+      <RemoteSessionButton />
+      <MirrorLinkButton />
+    </>
+  )
+}
+
 export function ThreadActions({ thread }: { thread: Thread }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const deleteThread = useThreads((state) => state.deleteThread)
   return (
     <div className="relative z-20 flex shrink-0 items-center gap-1 text-main-view-fg/40">
-      <DictationToggleButton />
-      <RemoteSessionButton />
-      <MirrorLinkButton />
+      <AppActions />
       <ChatQuestionsDialog key={thread.id} thread={thread} />
       <button
         type="button"

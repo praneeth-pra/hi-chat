@@ -456,7 +456,7 @@ export const EXTENSION_FILES = [
 ]
 
 export const extensionConfig = (site: string, key: string) =>
-  `// Filled in by Hi-chat's /mirror page. Keep this folder private: the key\n` +
+  `// Filled in by Hi-chat. Keep this folder private: the key\n` +
   `// lets Meet tabs on this computer receive the remote camera.\n` +
   `self.HICHAT_CAMERA = ${JSON.stringify({ site, key })}\n`
 
@@ -525,4 +525,28 @@ export function zipFiles(
     at += p.length
   }
   return out
+}
+
+/** The camera key, which only a signed-in page can get. */
+export async function fetchCameraKey(): Promise<string> {
+  const res = await fetch('/api/camera-key', { method: 'POST' })
+  if (!res.ok) throw new Error(`Couldn't get the camera key (${res.status})`)
+  return (await res.json()).key
+}
+
+/** Saves the extension as hichat-camera.zip, with this site's camera key. */
+export async function downloadCameraExtension(key?: string) {
+  const k = key || (await fetchCameraKey())
+  const files: Record<string, string> = {}
+  for (const name of EXTENSION_FILES)
+    files[`hichat-camera/${name}`] =
+      name === 'config.js'
+        ? extensionConfig(window.location.origin, k)
+        : await (await fetch(`/hichat-extension/${name}`)).text()
+  const blob = new Blob([zipFiles(files)], { type: 'application/zip' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'hichat-camera.zip'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
 }

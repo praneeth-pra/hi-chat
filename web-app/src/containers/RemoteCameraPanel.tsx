@@ -229,8 +229,8 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           {cam.link ? (
             // The extension holds the camera key, which needs a login
             <p className="rounded-md bg-main-view-fg/[0.04] px-3 py-2 text-xs">
-              The extension's download needs a login: get it from the signed-in{' '}
-              <code>/mirror</code> page.
+              The extension's download needs a login: in Hi-chat, click the link
+              button at the top and choose <b>Download the camera extension</b>.
             </p>
           ) : (
             <Button
