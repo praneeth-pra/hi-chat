@@ -534,10 +534,10 @@ describe('dictation', () => {
 
   it('Auto races the engines chosen in Settings, in tie-break order', () => {
     expect(getAutoEngines()).toEqual(['cartesia', 'soniox', 'elevenlabs'])
-    setAutoEngines(['azure', 'cartesia'])
-    expect(getAutoEngines()).toEqual(['cartesia', 'azure'])
-    // Removed engines saved earlier are dropped
-    setAutoEngines(['grok', 'muse', 'soniox'] as never)
+    setAutoEngines(['elevenlabs', 'cartesia'])
+    expect(getAutoEngines()).toEqual(['cartesia', 'elevenlabs'])
+    // Removed engines saved earlier are dropped (Azure since 28 Oct)
+    setAutoEngines(['grok', 'muse', 'azure', 'soniox'] as never)
     expect(getAutoEngines()).toEqual(['soniox'])
     // None chosen falls back to the default three
     setAutoEngines([])
