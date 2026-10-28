@@ -114,57 +114,28 @@ type RtcMessage = {
 /** A mouse or key action from /mirror, for the Mac app to replay. */
 export type RemoteInput = Record<string, unknown> & { k: string }
 
-/** Wrong codes a link's viewer may try before its code stops working. */
-export const CODE_TRIES = 5
-/** How long a code to unlock control stays good, in ms. */
-export const CODE_TTL_MS = 2 * 60_000
-
-/** A random 4-digit code, as a string ("0042"). */
-export function newCode(): string {
-  const n = new Uint32Array(1)
-  globalThis.crypto.getRandomValues(n)
-  return String(n[0] % 10_000).padStart(4, '0')
-}
-
 /**
  * Hi-chat's side: a data channel to each viewer the server introduces.
  * `signal` sends setup through the server; `onOpen` is told when a channel
  * opens. With `canControl` (the Mac app), signed-in viewers may also send
  * mouse and key actions (`onInput`) on a second channel of their own, so
- * they never wait behind a long update. A link's viewer (no login) may
- * control too once it unlocks: it asks for a code, Hi-chat shows a 4-digit
- * code here (`onCode`, null when it's no longer good) and the viewer types
- * it in. One code per connection: after CODE_TRIES wrong tries, or
- * CODE_TTL_MS, it is gone, and only a new connection brings a new code.
+ * they never wait behind a long update. A link's viewer only reaches here
+ * once it typed the code Hi-chat showed (lib/mirrorGate.ts), so it may
+ * control too.
  */
 export function createDirectSender({
   signal,
   onOpen,
   canControl = false,
   onInput,
-  onCode = () => {},
-  makeCode = newCode,
-  now = Date.now,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
   onOpen?: () => void
   canControl?: boolean
   onInput?: (m: RemoteInput) => void
-  /** The code a link's viewer must type to control, or null to hide it */
-  onCode?: (code: string | null) => void
-  makeCode?: () => string
-  now?: () => number
   PeerConnection?: typeof RTCPeerConnection
 }) {
-  // The code on show and the viewer it is for: one at a time
-  let shown: { id: string; code: string; at: number; tries: number } | null =
-    null
-  const hideCode = (id?: string) => {
-    if (!shown || (id !== undefined && shown.id !== id)) return
-    shown = null
-    onCode(null)
-  }
   const peers = new Map<
     string,
     {
@@ -180,14 +151,13 @@ export function createDirectSender({
     const p = peers.get(id)
     if (!p) return
     peers.delete(id)
-    hideCode(id)
     p.dc.close()
     p.input.close()
     p.moves.close()
     p.pc.close()
   }
 
-  async function start(id: string, ice: RTCIceServer[], link: boolean) {
+  async function start(id: string, ice: RTCIceServer[]) {
     close(id)
     const pc = new PeerConnection({ iceServers: ice.length ? ice : STUN })
     // In order and reliable, as updates build on each other
@@ -201,11 +171,7 @@ export function createDirectSender({
       maxRetransmits: 0,
     })
     peers.set(id, { pc, dc, input, moves })
-    // A link's viewer (no login) only once it has typed the code
-    let control = canControl && !link
-    const lockable = canControl && link
-    // One code per connection: a new one only comes with a new connection
-    let issued = false
+    const control = canControl
     const mine = () => peers.get(id)?.pc === pc
     pc.onicecandidate = (e) =>
       mine() &&
@@ -218,40 +184,9 @@ export function createDirectSender({
     }
     dc.onopen = () => {
       if (!mine()) return
-      // Whether this viewer may control the computer, or may unlock it
-      send(JSON.stringify({ t: 'hello', control, unlock: lockable }))
+      // Whether this viewer may control the computer
+      send(JSON.stringify({ t: 'hello', control }))
       onOpen?.()
-    }
-    // A link's viewer asking for a code, or typing it in
-    const unlock = (m: { t?: unknown; code?: unknown }) => {
-      if (!lockable || control) return
-      if (m.t === 'unlock') {
-        // Asked again while its code is good: the same code again
-        if (shown?.id === id && now() - shown.at <= CODE_TTL_MS)
-          return onCode(shown.code)
-        if (issued)
-          return send(
-            JSON.stringify({ t: 'code', ok: false, left: 0, spent: true })
-          )
-        issued = true
-        hideCode()
-        shown = { id, code: makeCode(), at: now(), tries: 0 }
-        onCode(shown.code)
-        return
-      }
-      if (m.t !== 'code' || typeof m.code !== 'string') return
-      if (shown?.id !== id || now() - shown.at > CODE_TTL_MS) {
-        hideCode(id)
-        return send(JSON.stringify({ t: 'code', ok: false, left: 0 }))
-      }
-      if (m.code === shown.code) {
-        hideCode(id)
-        control = true
-        return send(JSON.stringify({ t: 'hello', control, unlock: false }))
-      }
-      const left = CODE_TRIES - ++shown.tries
-      if (left <= 0) hideCode(id)
-      send(JSON.stringify({ t: 'code', ok: false, left }))
     }
     const take = (data: string) => {
       if (!control || !mine() || data.length > 2000) return null
@@ -284,7 +219,6 @@ export function createDirectSender({
         const m = JSON.parse(data)
         if (m?.t === 'ping' && typeof m.n === 'number')
           send(JSON.stringify({ t: 'pong', n: m.n }))
-        else if (mine() && m && typeof m === 'object') unlock(m)
       } catch {
         // not a ping
       }
@@ -296,12 +230,7 @@ export function createDirectSender({
 
   async function handle(m: RtcMessage & { id?: string; on?: boolean }) {
     if (m.t === 'peer' && typeof m.id === 'string') {
-      if (m.on === true)
-        await start(
-          m.id,
-          Array.isArray(m.ice) ? m.ice : [],
-          (m as { link?: unknown }).link === true
-        )
+      if (m.on === true) await start(m.id, Array.isArray(m.ice) ? m.ice : [])
       else close(m.id)
       return
     }
@@ -353,18 +282,6 @@ type ViewerPeer = {
   moves: RTCDataChannel | null
   /** The sender lets this page control its computer */
   control: boolean
-  /** The sender lets this page control it once a code is typed in */
-  unlock: boolean
-}
-
-/** A link's viewer unlocking control: how its last code went. */
-export type UnlockState = {
-  /** Hi-chat (the Mac app) can be unlocked from here */
-  can: boolean
-  /** Wrong-code tries left, after a wrong code (0: ask for a new one) */
-  left?: number
-  /** This connection's one code is used up: a new one needs a reload */
-  spent?: boolean
 }
 
 export function createDirectViewer({
@@ -373,7 +290,6 @@ export function createDirectViewer({
   onPong,
   onChange,
   onControl = () => {},
-  onUnlock = () => {},
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
@@ -382,8 +298,6 @@ export function createDirectViewer({
   onChange: (open: number) => void
   /** Whether a connected Hi-chat can be controlled from here */
   onControl?: (can: boolean) => void
-  /** Whether it can be unlocked with a code, and how the last code went */
-  onUnlock?: (s: UnlockState) => void
   PeerConnection?: typeof RTCPeerConnection
 }) {
   const peers = new Map<string, ViewerPeer>()
@@ -394,20 +308,11 @@ export function createDirectViewer({
     return null
   }
   const controlChannel = () => controlPeer()?.input ?? null
-  // The Hi-chat a code would unlock, if any
-  const lockedPeer = () => {
-    for (const p of peers.values())
-      if (p.unlock && !p.control && p.dc?.readyState === 'open') return p
-    return null
-  }
   let moveCount = 0
   let couldControl = false
-  let couldUnlock = false
   const noteControl = () => {
     const can = controlChannel() !== null
     if (can !== couldControl) onControl((couldControl = can))
-    const unlock = !can && lockedPeer() !== null
-    if (unlock !== couldUnlock) onUnlock({ can: (couldUnlock = unlock) })
   }
   let queue = Promise.resolve()
   const openCount = () => {
@@ -437,7 +342,6 @@ export function createDirectViewer({
       input: null,
       moves: null,
       control: false,
-      unlock: false,
     }
     peers.set(from, entry)
     const mine = () => peers.get(from) === entry
@@ -474,15 +378,7 @@ export function createDirectViewer({
           if (typeof m.n === 'number') onPong(m.n)
         } else if (m.t === 'hello') {
           entry.control = m.control === true
-          entry.unlock = m.unlock === true
           noteControl()
-        } else if (m.t === 'code') {
-          if (m.ok === false && typeof m.left === 'number')
-            onUnlock({
-              can: couldUnlock,
-              left: Math.max(0, m.left),
-              ...(m.spent === true ? { spent: true } : {}),
-            })
         } else onMessage(m)
       })
       dc.onmessage = (ev) => mine() && take(String(ev.data))
@@ -526,20 +422,6 @@ export function createDirectViewer({
     },
     get open() {
       return openCount()
-    },
-    /** Asks the Hi-chat a code would unlock to show one; false if none. */
-    askForCode() {
-      const p = lockedPeer()
-      if (!p?.dc) return false
-      p.dc.send(JSON.stringify({ t: 'unlock' }))
-      return true
-    },
-    /** Sends a typed code to that Hi-chat; false if none. */
-    sendCode(code: string) {
-      const p = lockedPeer()
-      if (!p?.dc) return false
-      p.dc.send(JSON.stringify({ t: 'code', code: code.slice(0, 8) }))
-      return true
     },
     /** Sends a mouse or key action to the Hi-chat that allows control. */
     sendInput(m: RemoteInput) {

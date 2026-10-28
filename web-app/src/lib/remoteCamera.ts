@@ -142,13 +142,15 @@ export function createSlowWatch() {
 export function cameraSocketUrl(
   location: Pick<Location, 'protocol' | 'host'>,
   key: string,
-  link?: string
+  link?: string,
+  ticket?: string
 ) {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const base = `${scheme}//${location.host}/api/camera?role=send`
-  // On a mirror link (no login, so no camera key) the link stands in
+  // On a mirror link (no login, so no camera key) the link and the ticket
+  // from typing its code stand in
   return link
-    ? `${base}&link=${encodeURIComponent(link)}`
+    ? `${base}&link=${encodeURIComponent(link)}&ticket=${encodeURIComponent(ticket ?? '')}`
     : `${base}&key=${encodeURIComponent(key)}`
 }
 
@@ -157,6 +159,7 @@ export function startCameraSender({
   stream,
   key,
   link,
+  ticket,
   location = globalThis.location,
   onStatus = () => {},
   onScreen = () => {},
@@ -168,6 +171,8 @@ export function startCameraSender({
   key: string
   /** A mirror link to send through instead of the camera key */
   link?: string
+  /** With `link`: the ticket its viewer got for typing the code */
+  ticket?: string
   location?: Pick<Location, 'protocol' | 'host'>
   onStatus?: (s: CameraStatus) => void
   /** The screen a Meet tab is presenting, or null when none is. */
@@ -347,7 +352,9 @@ export function startCameraSender({
 
   function connect() {
     if (stopped) return
-    const socket = new WebSocketImpl(cameraSocketUrl(location, key, link))
+    const socket = new WebSocketImpl(
+      cameraSocketUrl(location, key, link, ticket)
+    )
     ws = socket
     socket.onopen = () => {
       retryMs = 1000
