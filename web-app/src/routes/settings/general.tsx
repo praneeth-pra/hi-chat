@@ -254,7 +254,7 @@ function General() {
               {dictationEngine === 'auto' && (
                 <CardItem
                   title="Auto engines"
-                  description="Race live; sent as soon as two agree. Azure MAI-Transcribe-2 (Microsoft's newest model) counts like the others when ticked. It needs AZURE_SPEECH_KEY and AZURE_SPEECH_REGION in Railway, from a Speech resource in Southeast Asia, Central US or Sweden Central."
+                  description="Race live; sent as soon as two agree."
                   actions={
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
