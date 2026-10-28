@@ -1,12 +1,18 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import AddEditAssistant from '../dialogs/AddEditAssistant'
 
 const setupAssistant = vi.fn()
-vi.mock('@/lib/assistantSetup', () => ({
-  OTHER_CONTEXT_NAME: 'Other context',
+vi.mock('@/lib/assistantSetup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/assistantSetup')>()),
   setupAssistant: (...args: unknown[]) => setupAssistant(...args),
+}))
+
+vi.mock('@/hooks/useModelProvider', () => ({
+  useModelProvider: {
+    getState: () => ({ getProviderByName: () => undefined }),
+  },
 }))
 
 vi.mock('@/i18n/react-i18next-compat', () => ({
@@ -70,5 +76,64 @@ describe('AddEditAssistant name', () => {
       />
     )
     expect(screen.getByLabelText('Assistant name')).toHaveValue('')
+  })
+})
+
+describe('AddEditAssistant resume is optional', () => {
+  it('creates an assistant from other context alone', async () => {
+    setupAssistant.mockReset()
+    setupAssistant.mockResolvedValue({ ...saved, name: 'Made' })
+    const onSave = vi.fn()
+    render(
+      <AddEditAssistant
+        open
+        onOpenChange={vi.fn()}
+        editingKey={null}
+        onSave={onSave}
+      />
+    )
+    const create = screen.getByText('Create assistant')
+    expect(create).toBeDisabled()
+    expect(screen.getByLabelText('Upload Resume')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Other context'), {
+      target: { value: 'Backend engineer, 5 years of Go' },
+    })
+    expect(create).not.toBeDisabled()
+    fireEvent.click(create)
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(setupAssistant.mock.calls[0][0]).toBeUndefined()
+    expect(setupAssistant.mock.calls[0][5]).toBe(
+      'Backend engineer, 5 years of Go'
+    )
+  })
+
+  it('lets a saved resume be removed', async () => {
+    setupAssistant.mockReset()
+    setupAssistant.mockResolvedValue(saved)
+    const withJd = {
+      ...saved,
+      documents: [
+        { name: 'resume.pdf', text: 'resume', kind: 'resume' },
+        { name: 'jd.pdf', text: 'jd', kind: 'job' },
+      ],
+    } as unknown as Assistant
+    render(
+      <AddEditAssistant
+        open
+        onOpenChange={vi.fn()}
+        editingKey="a1"
+        initialData={withJd}
+        onSave={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByLabelText('Remove Resume'))
+    expect(screen.getAllByText('Not uploaded')).toHaveLength(1)
+    fireEvent.click(screen.getByText('assistants:save'))
+    await waitFor(() => expect(setupAssistant).toHaveBeenCalled())
+    expect(setupAssistant.mock.calls[0][0]).toBeUndefined()
+    expect(setupAssistant.mock.calls[0][1]).toEqual({
+      name: 'jd.pdf',
+      text: 'jd',
+    })
   })
 })

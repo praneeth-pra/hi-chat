@@ -13,7 +13,7 @@ import { IconFileText, IconUpload, IconX } from '@tabler/icons-react'
 import { useModelProvider } from '@/hooks/useModelProvider'
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import {
-  OTHER_CONTEXT_NAME,
+  savedSetupFiles,
   setupAssistant,
   type SetupFile,
 } from '@/lib/assistantSetup'
@@ -31,8 +31,8 @@ interface AddEditAssistantProps {
 }
 
 /**
- * An assistant is just a resume, an optional job description and optional
- * notes the resume doesn't cover. The instructions, documents and key terms
+ * An assistant is just a resume, a job description and notes the resume
+ * doesn't cover, all optional but at least one needed. The instructions, documents and key terms
  * are worked out from them when the user saves (lib/assistantSetup.ts). The
  * name is too unless the user types one.
  */
@@ -45,15 +45,15 @@ export default function AddEditAssistant({
 }: AddEditAssistantProps) {
   const { t } = useTranslation()
   const editing = !!(editingKey && initialData)
-  // When editing, the first document is the resume; after it come the JD
-  // and the other-context notes, told apart by name
-  const savedResume = editing ? initialData?.documents?.[0] : undefined
-  const savedRest = editing ? (initialData?.documents?.slice(1) ?? []) : []
-  const savedJd = savedRest.find((d) => d.name !== OTHER_CONTEXT_NAME)
-  const savedContext =
-    savedRest.find((d) => d.name === OTHER_CONTEXT_NAME)?.text ?? ''
+  const saved = editing
+    ? savedSetupFiles(initialData?.documents)
+    : { resume: undefined, jd: undefined, notes: '' }
+  const savedResume = saved.resume
+  const savedJd = saved.jd
+  const savedContext = saved.notes
 
   const [resumeFile, setResumeFile] = useState<File | null>(null)
+  const [resumeRemoved, setResumeRemoved] = useState(false)
   const [jdFile, setJdFile] = useState<File | null>(null)
   const [jdRemoved, setJdRemoved] = useState(false)
   const [contextText, setContextText] = useState('')
@@ -66,6 +66,7 @@ export default function AddEditAssistant({
   useEffect(() => {
     if (!open) return
     setResumeFile(null)
+    setResumeRemoved(false)
     setJdFile(null)
     setJdRemoved(false)
     setContextText(savedContext)
@@ -75,18 +76,21 @@ export default function AddEditAssistant({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingKey])
 
-  const resumeName = resumeFile?.name ?? savedResume?.name
+  const resumeName =
+    resumeFile?.name ?? (resumeRemoved ? undefined : savedResume?.name)
   const jdName = jdFile?.name ?? (jdRemoved ? undefined : savedJd?.name)
   const savedName = editing ? (initialData?.name ?? '') : ''
   const nameChanged = name.trim() !== savedName.trim()
   // Anything but the name means working the assistant out again
   const filesChanged =
     !!resumeFile ||
+    (resumeRemoved && !!savedResume) ||
     !!jdFile ||
     (jdRemoved && !!savedJd) ||
     contextText.trim() !== savedContext.trim()
   const changed = filesChanged || nameChanged
-  const canSave = !busy && !!resumeName && (!editing || changed)
+  const hasSource = !!resumeName || !!jdName || !!contextText.trim()
+  const canSave = !busy && hasSource && (!editing || changed)
 
   const readFile = async (file: File): Promise<SetupFile> => {
     const text = await extractDocumentText(file)
@@ -106,8 +110,11 @@ export default function AddEditAssistant({
     setBusy(true)
     try {
       setStatus('Reading the files…')
-      const resume = resumeFile ? await readFile(resumeFile) : savedResume
-      if (!resume) throw new Error('Upload a resume first')
+      const resume = resumeFile
+        ? await readFile(resumeFile)
+        : resumeRemoved
+          ? undefined
+          : savedResume
       const jd = jdFile
         ? await readFile(jdFile)
         : jdRemoved
@@ -145,10 +152,16 @@ export default function AddEditAssistant({
     onPick: () => void,
     onRemove?: () => void
   ) => (
-    <div className="flex items-center gap-2 rounded-lg border border-main-view-fg/10 px-3 py-2">
-      <IconFileText size={18} className="shrink-0 text-main-view-fg/50" />
+    <div className="flex items-center gap-2 rounded-lg border border-main-view-fg/10 px-2.5 py-2 sm:px-3">
+      <IconFileText
+        size={18}
+        className="hidden shrink-0 text-main-view-fg/50 min-[400px]:block"
+      />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{label}</div>
+        <div className="truncate text-sm font-medium">
+          {label}{' '}
+          <span className="font-normal text-main-view-fg/50">(optional)</span>
+        </div>
         <div className="truncate text-xs text-main-view-fg/60" title={name}>
           {name ?? 'Not uploaded'}
         </div>
@@ -157,23 +170,32 @@ export default function AddEditAssistant({
         <button
           type="button"
           aria-label={`Remove ${label}`}
-          className="size-7 flex items-center justify-center rounded hover:bg-main-view-fg/10"
+          className="size-7 shrink-0 flex items-center justify-center rounded hover:bg-main-view-fg/10"
           onClick={onRemove}
           disabled={busy}
         >
           <IconX size={14} className="text-main-view-fg/50" />
         </button>
       )}
-      <Button variant="outline" size="sm" onClick={onPick} disabled={busy}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+        onClick={onPick}
+        disabled={busy}
+        aria-label={`${name ? 'Replace' : 'Upload'} ${label}`}
+      >
         <IconUpload size={14} />
-        {name ? 'Replace' : 'Upload'}
+        <span className="hidden min-[400px]:inline">
+          {name ? 'Replace' : 'Upload'}
+        </span>
       </Button>
     </div>
   )
 
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <DialogContent>
+      <DialogContent className="gap-3 p-4 sm:gap-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {editingKey
@@ -181,25 +203,38 @@ export default function AddEditAssistant({
               : t('assistants:addAssistant')}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <div className="space-y-1">
-            <div className="text-sm font-medium">Name</div>
+            <div className="text-sm font-medium">
+              Name{' '}
+              <span className="font-normal text-main-view-fg/50">
+                (optional)
+              </span>
+            </div>
             <Input
               value={name}
               onChange={(e) => {
                 setName(e.target.value)
                 setStatus(null)
               }}
-              placeholder="Made from your resume and job description"
+              placeholder="Made for you if left blank"
               aria-label="Assistant name"
               maxLength={60}
               className="text-sm"
               disabled={busy}
             />
           </div>
-          {fileRow('Resume', resumeName, () => resumeInputRef.current?.click())}
           {fileRow(
-            'Job description (optional)',
+            'Resume',
+            resumeName,
+            () => resumeInputRef.current?.click(),
+            () => {
+              setResumeFile(null)
+              setResumeRemoved(true)
+            }
+          )}
+          {fileRow(
+            'Job description',
             jdName,
             () => jdInputRef.current?.click(),
             () => {
@@ -208,7 +243,12 @@ export default function AddEditAssistant({
             }
           )}
           <div className="space-y-1 pt-1">
-            <div className="text-sm font-medium">Other context (optional)</div>
+            <div className="text-sm font-medium">
+              Other context{' '}
+              <span className="font-normal text-main-view-fg/50">
+                (optional)
+              </span>
+            </div>
             <Textarea
               value={contextText}
               onChange={(e) => {
@@ -228,7 +268,9 @@ export default function AddEditAssistant({
             className="hidden"
             aria-label="Resume file"
             onChange={(e) => {
-              setResumeFile(e.target.files?.[0] ?? null)
+              const file = e.target.files?.[0] ?? null
+              setResumeFile(file)
+              if (file) setResumeRemoved(false)
               setStatus(null)
               e.target.value = ''
             }}
@@ -247,14 +289,18 @@ export default function AddEditAssistant({
               e.target.value = ''
             }}
           />
-          {status && (
+          {(status || !hasSource) && (
             <div className="text-xs text-main-view-fg/60" role="status">
-              {status}
+              {status ?? 'Add a resume, a job description or some context.'}
             </div>
           )}
         </div>
         <DialogFooter>
-          <Button onClick={handleSave} disabled={!canSave}>
+          <Button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="w-full sm:w-auto"
+          >
             {busy
               ? 'Setting up…'
               : editing
