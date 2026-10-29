@@ -18,6 +18,19 @@ describe('describeTiming', () => {
     ).toBe('Cerebras gpt-oss-120b')
   })
 
+  it('counts thinking from the first thinking word, not the first byte', () => {
+    // Groq: first byte at once, 3 s reading a long question, 0.2 s thinking
+    const t = describeTiming(
+      0,
+      3600,
+      { firstChunkAt: 230, firstThoughtAt: 3250, firstAnswerAt: 3450 },
+      { messages: 1, chars: 1, tools: 0 }
+    )
+    expect(t.thinking_s).toBe(0.2)
+    expect(t.reading_s).toBe(3.02)
+    expect(speedLogLine(t)).toContain('first_words=3450ms')
+  })
+
   it('splits a reply into waiting, thinking and answering', () => {
     const t = describeTiming(
       1000,

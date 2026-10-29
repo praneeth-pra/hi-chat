@@ -40,7 +40,11 @@ import { questionEffort } from '@/lib/questionEffort'
 import { useLastReply } from '@/lib/lastReply'
 import { takeDictationStop } from '@/lib/dictationDelivery'
 import { createStreamFlushScheduler } from '@/lib/streamFlushScheduler'
-import { withDocuments, withoutDocuments } from '@/lib/assistantDocuments'
+import {
+  relevantDocuments,
+  withDocuments,
+  withoutDocuments,
+} from '@/lib/assistantDocuments'
 import {
   ChatCompletionMessageToolCall,
   CompletionUsage,
@@ -103,6 +107,11 @@ const createThreadContent = (
   }
   return content
 }
+
+/** The last question asked in this chat before the new one. */
+const previousQuestion = (messages: ThreadMessage[]) =>
+  [...messages].reverse().find((m) => m.role === 'user')?.content?.[0]?.text
+    ?.value ?? ''
 
 const ATTACHMENT_AUTO_INLINE_FALLBACK_BYTES = 512 * 1024
 
@@ -257,6 +266,7 @@ const processStreamingCompletion = async (
       }
       const deltaReasoning = reasoningProcessor.processReasoningChunk(part)
       if (deltaReasoning) {
+        if (timing) timing.firstThoughtAt ??= Date.now()
         accumulatedTextRef.value += deltaReasoning
         tapMirror()
         pendingDeltaCount += 1
@@ -776,7 +786,12 @@ export const useChat = () => {
               currentAssistant
                 ? withDocuments(
                     renderInstructions(currentAssistant.instructions),
-                    currentAssistant.documents
+                    // Large documents: only the passages that match this
+                    // question and the one before (for "tell me more")
+                    relevantDocuments(
+                      currentAssistant.documents,
+                      `${message} ${previousQuestion(contextMessages)}`
+                    )
                   )
                 : undefined
             )
@@ -1063,6 +1078,15 @@ export const useChat = () => {
                           entry.provider === tries[index].provider.provider &&
                           entry.event === 'first-chunk'
                       )
+                      const thought = events.find(
+                        (entry) =>
+                          entry.model === tries[index].model &&
+                          entry.provider === tries[index].provider.provider &&
+                          entry.event === 'first-thought'
+                      )
+                      if (thought)
+                        streamTiming.firstThoughtAt =
+                          requestStart + thought.atMs
                       const ready = events.find(
                         (entry) =>
                           entry.model === tries[index].model &&
@@ -1127,6 +1151,7 @@ export const useChat = () => {
             // Draft readiness is not the time the verified answer becomes visible.
             if (accuracyReview) {
               streamTiming.firstChunkAt = undefined
+              streamTiming.firstThoughtAt = undefined
               streamTiming.firstAnswerAt = undefined
               streamTiming.hiddenAtFirstChunk = undefined
             }
@@ -1291,7 +1316,9 @@ export const useChat = () => {
               network,
               thinking,
               firstWord:
-                network !== undefined ? network + (thinking ?? 0) : undefined,
+                network !== undefined
+                  ? network + (timings.reading_s ?? 0) + (thinking ?? 0)
+                  : undefined,
               fromStop:
                 streamTiming.dictationStoppedAt && streamTiming.firstAnswerAt
                   ? (streamTiming.firstAnswerAt -
