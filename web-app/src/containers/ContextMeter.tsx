@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { ThreadMessage } from '@janhq/core'
 import { useAssistant } from '@/hooks/useAssistant'
 import { withAnswerDetail } from '@/lib/answerDetail'
-import { withDocuments } from '@/lib/assistantDocuments'
+import { relevantDocuments, withDocuments } from '@/lib/assistantDocuments'
 import { contextSize, formatBytes, formatTokens } from '@/lib/contextSize'
 import { chatDelay } from '@/lib/replySpeed'
 import { formatSeconds, networkLevel, useLastReply } from '@/lib/lastReply'
@@ -40,7 +40,11 @@ export function ContextMeter({
         messages,
         withAnswerDetail(
           assistant
-            ? withDocuments(assistant.instructions, assistant.documents)
+            ? withDocuments(
+                assistant.instructions,
+                // Large documents send only what matches the question
+                relevantDocuments(assistant.documents, draft)
+              )
             : undefined
         ),
         draft,

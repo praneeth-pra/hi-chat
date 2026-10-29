@@ -77,6 +77,120 @@ export async function extractDocumentText(file: File): Promise<string> {
   return tidy(await file.text())
 }
 
+/**
+ * Documents up to this size go with every question in full. Larger ones send
+ * only the passages that match the question: providers read about 20,000
+ * tokens a second, so 65,000 tokens of documents held every answer back by
+ * over 3 s, while this budget costs about a quarter of a second.
+ */
+export const DOCUMENTS_BUDGET_TOKENS = 5_000
+const PASSAGE_CHARS = 1_200
+
+const STOP_WORDS = new Set(
+  'a an and are as at be but by can could did do does for from had has have how i if in into is it its me my no not of on or our so that the their them then there these they this to was we were what when where which who why will with would you your about tell explain give some any more please'.split(
+    ' '
+  )
+)
+
+/** Lowercase words worth matching (no stop words), with a light plural trim. */
+function terms(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z0-9][a-z0-9+#.-]*/g) ?? [])
+    .map((w) => w.replace(/[.-]+$/, ''))
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w))
+    .map((w) => (w.length > 4 && w.endsWith('s') ? w.slice(0, -1) : w))
+}
+
+/** Cuts a document into passages of about PASSAGE_CHARS, on line breaks. */
+function passages(text: string): string[] {
+  const out: string[] = []
+  let current = ''
+  for (const line of text.split('\n')) {
+    if (current && current.length + line.length > PASSAGE_CHARS) {
+      out.push(current)
+      current = ''
+    }
+    // A very long line (a PDF page with no breaks) is cut in pieces
+    for (let i = 0; i < line.length; i += PASSAGE_CHARS * 2) {
+      const piece = line.slice(i, i + PASSAGE_CHARS * 2)
+      if (piece.length > PASSAGE_CHARS && current) {
+        out.push(current)
+        current = ''
+      }
+      current = current ? `${current}\n${piece}` : piece
+    }
+    if (!line) current += '\n'
+  }
+  out.push(current)
+  return out.map((p) => p.trim()).filter(Boolean)
+}
+
+/**
+ * The parts of the documents that go with this question. Small documents go
+ * whole. Larger ones are cut into passages, ranked by how well they match the
+ * question (BM25, the classic search ranking, in a few milliseconds), and the
+ * best are kept up to the budget, in their original order. With no match (a
+ * greeting, say) none are sent.
+ */
+export function relevantDocuments(
+  documents: AssistantDocument[] | undefined,
+  question: string,
+  budgetTokens = DOCUMENTS_BUDGET_TOKENS
+): AssistantDocument[] | undefined {
+  const docs = (documents ?? []).filter((d) => d.text.trim())
+  const total = docs.reduce((sum, d) => sum + estimateTokens(d.text), 0)
+  if (total <= budgetTokens) return documents
+  const wanted = [...new Set(terms(question))]
+  if (!wanted.length) return []
+  const all = docs.flatMap((d, doc) =>
+    passages(d.text).map((text, index) => ({
+      doc,
+      index,
+      text,
+      words: terms(text),
+    }))
+  )
+  const avg = all.reduce((sum, p) => sum + p.words.length, 0) / all.length || 1
+  const df = new Map<string, number>()
+  for (const p of all)
+    for (const w of new Set(p.words)) df.set(w, (df.get(w) ?? 0) + 1)
+  const k1 = 1.2
+  const b = 0.75
+  const scored = all.map((p) => {
+    const tf = new Map<string, number>()
+    for (const w of p.words) tf.set(w, (tf.get(w) ?? 0) + 1)
+    let score = 0
+    for (const w of wanted) {
+      const f = tf.get(w)
+      if (!f) continue
+      const n = df.get(w) ?? 0
+      const idf = Math.log(1 + (all.length - n + 0.5) / (n + 0.5))
+      score +=
+        (idf * f * (k1 + 1)) / (f + k1 * (1 - b + (b * p.words.length) / avg))
+    }
+    return { ...p, score }
+  })
+  const picked: typeof scored = []
+  let used = 0
+  for (const p of scored
+    .filter((p) => p.score > 0)
+    .sort((x, y) => y.score - x.score)) {
+    const cost = estimateTokens(p.text)
+    if (used + cost > budgetTokens) continue
+    picked.push(p)
+    used += cost
+  }
+  return docs
+    .map((d, doc) => ({
+      name: d.name,
+      text: picked
+        .filter((p) => p.doc === doc)
+        .sort((x, y) => x.index - y.index)
+        .map((p) => p.text)
+        .join('\n\n…\n\n'),
+    }))
+    .filter((d) => d.text)
+}
+
 /** The assistant's instructions with its documents appended. */
 export function withDocuments(
   instructions: string | undefined,

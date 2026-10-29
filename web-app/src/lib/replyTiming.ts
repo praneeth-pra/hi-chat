@@ -4,6 +4,8 @@ import { CHAT_MODELS } from '@/lib/chatModels'
 /** When each stage of one streamed reply happened, for the message's info dialog. */
 export type StreamTiming = {
   firstChunkAt?: number
+  /** The model's first thinking word; before it, the provider was reading the question. */
+  firstThoughtAt?: number
   firstAnswerAt?: number
   usage?: Record<string, unknown>
   /** The provider's `created` stamp (Unix seconds) on the first chunk. */
@@ -94,7 +96,15 @@ export function describeTiming(
   timing: StreamTiming,
   request: { messages: number; chars: number; tools: number; model?: string }
 ) {
-  const { firstChunkAt, firstAnswerAt, usage, providerCreated } = timing
+  const { firstChunkAt, firstThoughtAt, firstAnswerAt, usage, providerCreated } =
+    timing
+  // Thinking starts at the first thinking word: Groq sends its first byte
+  // before reading the question, and a long question (large assistant
+  // documents) took seconds to read that showed as "Thought for 3s"
+  const thinkingFrom =
+    firstThoughtAt && firstAnswerAt && firstThoughtAt <= firstAnswerAt
+      ? firstThoughtAt
+      : firstChunkAt
   const u = usage ?? {}
   const details = u.completion_tokens_details as
     | { reasoning_tokens?: number }
@@ -106,7 +116,11 @@ export function describeTiming(
     total_s: seconds(end - start),
     wait_for_first_byte_s: seconds(firstChunkAt && firstChunkAt - start),
     thinking_s: seconds(
-      firstChunkAt && firstAnswerAt && firstAnswerAt - firstChunkAt
+      thinkingFrom && firstAnswerAt && firstAnswerAt - thinkingFrom
+    ),
+    // First byte → first thinking word: the provider reading the question
+    reading_s: seconds(
+      firstChunkAt && thinkingFrom && thinkingFrom - firstChunkAt
     ),
     answer_s: seconds(firstAnswerAt && end - firstAnswerAt),
     // When the provider started the reply, counted from the send. Whole
@@ -165,7 +179,10 @@ export function speedLogLine(
     typeof s === 'number' && Number.isFinite(s)
       ? `${Math.max(0, Math.round(s * 1000))}ms`
       : 'none'
-  const first = (timings.wait_for_first_byte_s ?? 0) + (timings.thinking_s ?? 0)
+  const first =
+    (timings.wait_for_first_byte_s ?? 0) +
+    (timings.reading_s ?? 0) +
+    (timings.thinking_s ?? 0)
   const route =
     [...(timings.requests ?? [])].reverse().find((attempt) => attempt.route)
       ?.route ?? 'none'

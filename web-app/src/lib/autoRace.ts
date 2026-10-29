@@ -64,6 +64,19 @@ export function usefulAnswerChunk(chunk: unknown): boolean {
   )
 }
 
+/** A chunk carrying the model's thinking (Groq and Cerebras call it reasoning). */
+function reasoningChunk(chunk: unknown): boolean {
+  const delta = (
+    chunk as {
+      choices?: {
+        delta?: { reasoning?: unknown; reasoning_content?: unknown }
+      }[]
+    } | null
+  )?.choices?.[0]?.delta
+  const text = delta?.reasoning ?? delta?.reasoning_content
+  return typeof text === 'string' && text.trim().length > 0
+}
+
 /** ES2020-compatible first-success race; a failed provider cannot win. */
 function firstSuccessful<T>(promises: Promise<T>[]): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -89,6 +102,7 @@ export async function raceAutoAnswers<T>(
     event:
       | 'started'
       | 'first-chunk'
+      | 'first-thought'
       | 'answer-ready'
       | 'tool-ready'
       | 'failed'
@@ -139,6 +153,7 @@ export async function raceAutoAnswers<T>(
       const stream = await attempts[index].run(controller)
       run.iterator = stream[Symbol.asyncIterator]()
       const buffered: T[] = []
+      let thought = false
       while (!controller.signal.aborted) {
         const next = await run.iterator.next()
         if (next.done)
@@ -150,6 +165,10 @@ export async function raceAutoAnswers<T>(
           onEvent?.(index, 'first-chunk')
         }
         buffered.push(next.value)
+        if (!thought && reasoningChunk(next.value)) {
+          thought = true
+          onEvent?.(index, 'first-thought')
+        }
         if (usefulAnswerChunk(next.value)) {
           const choices = (
             next.value as {
