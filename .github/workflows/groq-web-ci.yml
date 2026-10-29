@@ -79,10 +79,12 @@ jobs:
           # Search stays behind login, and an unset Exa key is explicitly reported.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/search)" = 401
           curl -sf -b "$C" -H 'Content-Type: application/json' --data '{"query":"What is AWS ECS?"}' http://localhost:8081/api/search | grep -q '"status":"unconfigured"'
-          # The remote mirror's WebSocket stays behind login and upgrades once signed in
+          # Hi-chat's mirror socket stays behind login and upgrades once signed in
           WS='-H Connection:Upgrade -H Upgrade:websocket -H Sec-WebSocket-Version:13 -H Sec-WebSocket-Key:dGhlIHNhbXBsZSBub25jZQ=='
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS 'http://localhost:8081/api/mirror?role=view')" = 401
-          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -b "$C" $WS 'http://localhost:8081/api/mirror?role=view' || true)" = 101
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 -b "$C" $WS 'http://localhost:8081/api/mirror?role=send' || true)" = 101
+          # Only Hi-chat sends; watching is by mirror link alone
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b "$C" $WS 'http://localhost:8081/api/mirror?role=view')" = 404
           # The remote camera's socket needs the camera key; its key needs login
           test "$(curl -s -o /dev/null -w '%{http_code}' $WS 'http://localhost:8081/api/camera?role=view&key=wrong')" = 401
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/camera-key)" = 401
@@ -103,7 +105,8 @@ jobs:
           (curl -s -o /dev/null --max-time 8 -b "$C" $WS "http://localhost:8081/api/mirror?role=send&link=$L" || true) &
           sleep 2
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/mirror-link?link=$L" || true)" = 101
-          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 $WS "http://localhost:8081/api/camera?role=send&link=$L" || true)" = 101
+          # The camera also needs the ticket the code unlocks, so not without it
+          test "$(curl -s -o /dev/null -w '%{http_code}' $WS "http://localhost:8081/api/camera?role=send&link=$L")" = 401
           # One upload reaches the relay, which tries ElevenLabs
           # (fake keys are rejected upstream, so every engine reports an error)
           head -c 2000 /dev/urandom > clip.flac
