@@ -522,6 +522,12 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
           // A frame caught mid-resize is scaled to fit, not cut off or
           // pushed into a corner
           config.scalesToFit = true
+          // Only Hi-chat's window itself. By default its child windows count
+          // too: the small ones macOS opens by the text box as you type and
+          // send (text suggestions, the input menu) sit outside the window,
+          // so the frame grew to hold them and Hi-chat was drawn smaller,
+          // pushed to the top right, with blank space left and below.
+          if #available(macOS 14.2, *) { config.includeChildWindows = false }
           config.showsCursor = false
           janSize = window.frame.size
           view.picture.contentsGravity = .resizeAspect
