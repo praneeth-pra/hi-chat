@@ -155,6 +155,10 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
   var streamDisplay: CGDirectDisplayID?
   var area: NSRect?
   var janWindow: CGWindowID = 0
+  /// Hi-chat's size when its stream started; a new size restarts it
+  var janSize = CGSize.zero
+  var sizeTicks = 0
+  var resizing = CGSize.zero
   var generation = 0
   // The pointer view follows the mouse, or the text cursor while you type
   let textCursor = TextCursor()
@@ -244,7 +248,10 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
       }
     }
     Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { _ in
-      MainActor.assumeIsolated { self.followPointer() }
+      MainActor.assumeIsolated {
+        self.followPointer()
+        self.followJanSize()
+      }
     }
     // Its place on a monitor and on the laptop's screen (see screensChanged)
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
@@ -512,7 +519,11 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
           let scale = CGFloat(filter.pointPixelScale)
           config.width = Int(window.frame.width * scale)
           config.height = Int(window.frame.height * scale)
+          // A frame caught mid-resize is scaled to fit, not cut off or
+          // pushed into a corner
+          config.scalesToFit = true
           config.showsCursor = false
+          janSize = window.frame.size
           view.picture.contentsGravity = .resizeAspect
           view.picture.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
         } else {
@@ -545,6 +556,21 @@ final class Mirror: NSObject, SCStreamOutput, SCStreamDelegate {
         say("could not start: \(error.localizedDescription) (allow Screen Recording for Hi-chat)")
       }
     }
+  }
+
+  /// Hi-chat resized (or moved between the monitor and the laptop): the
+  /// stream keeps the size it started with, which leaves the picture off
+  /// centre with uneven margins, so it starts again at the new size.
+  func followJanSize() {
+    sizeTicks += 1
+    guard sizeTicks % 30 == 0, mode == .jan, panel.isVisible, stream != nil,
+          let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, janWindow) as? [[String: Any]],
+          let bounds = info.first?[kCGWindowBounds as String] as? NSDictionary,
+          let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    else { return }
+    // Waits for the size to hold still, so a drag restarts it once, at the end
+    defer { resizing = rect.size }
+    if rect.size != janSize, rect.size == resizing { restart() }
   }
 
   /// Pointer view: show the part of the screen around the pointer (or the
