@@ -205,6 +205,13 @@ export const LINK_TTL_MS = 90 * 60 * 1000
 // An ended link's secret is kept this long, so an app still holding it
 // (another window, an old tab) can't open it again
 const LINK_DEAD_MS = 24 * 60 * 60 * 1000
+/**
+ * Wrong codes a link takes in all, from every viewer together. Hi-chat
+ * counts tries per viewer, and a new connection is a new viewer, so without
+ * this a script could reconnect and guess the 4 digits until one came up.
+ * After this many the door stays shut; a new link in Hi-chat opens a new one.
+ */
+export const LINK_WRONG_CODES = 10
 
 const ID_RE = /^[0-9a-f]{16}$/
 const SESSION_RE = /^[\w-]{1,40}$/
@@ -305,9 +312,9 @@ export function createMirrorHub({
     const out = tag && data[0] === '{' ? '{' + tag + data.slice(1) : data
     for (const v of ch.viewers) v.send(out)
   }
-  // A sender hears of each viewer (in any of its channels) it may connect to
-  // A link's viewer (no login) is marked, so Hi-chat never lets it control
-  // the computer (see the remote control on /mirror)
+  // A sender hears of each viewer (in any of its channels) it may connect to.
+  // A link's viewer (no login) is marked as one; it was let in with the code
+  // Hi-chat showed, and on the Mac may control the computer
   const peerNote = (id, on, name = '') =>
     JSON.stringify(
       on
@@ -589,6 +596,7 @@ export function createMirrorHub({
         until: 0,
         born: 0,
         tickets: new Set(),
+        wrong: 0, // codes typed and not (yet) let in, see LINK_WRONG_CODES
       }
       l.live += 1
       l.born = bornAt(link, born)
@@ -660,10 +668,29 @@ export function createMirrorHub({
       }
       const to = doorman(ch)
       if (!to || ++knocks > 40) return
+      const l = links.get(name)
+      if (!l) return
+      // Too many wrong codes on this link: no more codes, from anyone
+      if (l.wrong >= LINK_WRONG_CODES) {
+        if (m?.t === 'unlock' || m?.t === 'code')
+          ws.send(
+            JSON.stringify({
+              t: 'code',
+              ok: false,
+              left: 0,
+              spent: true,
+              locked: true,
+            })
+          )
+        return
+      }
       if (m?.t === 'unlock')
         to.send(JSON.stringify({ t: 'knock', from: id, ask: true }))
-      else if (m?.t === 'code' && /^\d{4}$/.test(m.code ?? ''))
+      else if (m?.t === 'code' && /^\d{4}$/.test(m.code ?? '')) {
+        // Counted as wrong until Hi-chat lets it in
+        l.wrong += 1
         to.send(JSON.stringify({ t: 'knock', from: id, code: m.code }))
+      }
     }
     // Viewers mostly listen; a ping gets a pong (echoing its `n`, so the page
     // can time the round trip), which also keeps an idle socket open: nginx
@@ -717,6 +744,9 @@ export function createMirrorHub({
       name,
       admit() {
         if (!waiting) return
+        // The right code: it wasn't a wrong one after all
+        const l = links.get(name)
+        if (l) l.wrong = Math.max(0, l.wrong - 1)
         waiting = false
         doors.delete(id)
         ch.waiting.delete(ws)

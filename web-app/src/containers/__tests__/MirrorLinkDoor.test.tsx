@@ -134,6 +134,16 @@ describe('/m/ link: a code before anything shows', () => {
     expect(screen.queryByRole('button', { name: /code/ })).toBeNull()
   })
 
+  it('a link locked by too many wrong codes says to make a new link', async () => {
+    await asked()
+    hear({ t: 'code', ok: false, left: 0, spent: true, locked: true })
+    expect(screen.getByRole('alert').textContent).toMatch(
+      /Copy a new link from Hi-chat/
+    )
+    expect(screen.queryByRole('textbox', { name: 'Code' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /code/ })).toBeNull()
+  })
+
   it('says when Hi-chat is not open to show a code', async () => {
     atDoor()
     hear({ t: 'sender', on: false })

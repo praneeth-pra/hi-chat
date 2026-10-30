@@ -1,6 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanSnapshot, createMirrorHub, LINK_TTL_MS } from './mirror.mjs'
+import {
+  cleanSnapshot,
+  createMirrorHub,
+  LINK_TTL_MS,
+  LINK_WRONG_CODES,
+} from './mirror.mjs'
 import { createRelay } from './server.mjs'
 
 // The last message of type `t` a socket got (others, like 'peer', may follow)
@@ -792,7 +797,74 @@ test("a link's door takes only so many knocks", () => {
   hub.join(app, 'send', { link })
   const viewer = fakeSocket()
   hub.join(viewer, 'view', { link })
+  // (asking for a code; typed codes stop sooner, see LINK_WRONG_CODES)
   for (let i = 0; i < 100; i++)
-    viewer.onmessage(JSON.stringify({ t: 'code', code: '0000' }))
+    viewer.onmessage(JSON.stringify({ t: 'unlock' }))
   assert.equal(app.got.filter((m) => m.t === 'knock').length, 40)
+})
+
+test("a link takes only so many wrong codes, from all its viewers together", () => {
+  const hub = createMirrorHub()
+  const link = 'W'.repeat(24)
+  const app = fakeSocket()
+  hub.join(app, 'send', { link })
+  const guess = () => {
+    // A new connection each time: Hi-chat would give each 5 fresh tries
+    const v = fakeSocket()
+    hub.join(v, 'view', { link })
+    v.onmessage(JSON.stringify({ t: 'code', code: '0000' }))
+    const k = lastOf(app, 'knock')
+    if (k?.code === '0000' && !k.seen) {
+      k.seen = true
+      app.onmessage(JSON.stringify({ t: 'gate', to: k.from, left: 4 }))
+    }
+    v.onclose()
+    return v
+  }
+  for (let i = 0; i < LINK_WRONG_CODES; i++) guess()
+  const knocks = app.got.filter((m) => m.t === 'knock' && m.code).length
+  assert.equal(knocks, LINK_WRONG_CODES)
+
+  // The next one never reaches Hi-chat, and is told the link is locked
+  const late = guess()
+  assert.equal(
+    app.got.filter((m) => m.t === 'knock' && m.code).length,
+    LINK_WRONG_CODES
+  )
+  assert.deepEqual(lastOf(late, 'code'), {
+    t: 'code',
+    ok: false,
+    left: 0,
+    spent: true,
+    locked: true,
+  })
+  // Asking for a code is refused too (no code shown in Hi-chat)
+  const asker = fakeSocket()
+  hub.join(asker, 'view', { link })
+  const before = app.got.length
+  asker.onmessage(JSON.stringify({ t: 'unlock' }))
+  assert.equal(app.got.length, before)
+  assert.equal(lastOf(asker, 'code').locked, true)
+
+  // A new link opens a new door
+  const fresh = 'N'.repeat(24)
+  const app2 = fakeSocket()
+  hub.join(app2, 'send', { link: fresh })
+  const v = fakeSocket()
+  hub.join(v, 'view', { link: fresh })
+  letIn(app2, v)
+  assert.ok(lastOf(v, 'admitted'))
+})
+
+test('the right code does not count against the link', () => {
+  const hub = createMirrorHub()
+  const link = 'R'.repeat(24)
+  const app = fakeSocket()
+  hub.join(app, 'send', { link })
+  for (let i = 0; i < LINK_WRONG_CODES + 5; i++) {
+    const v = fakeSocket()
+    hub.join(v, 'view', { link })
+    letIn(app, v)
+    assert.ok(lastOf(v, 'admitted'), `viewer ${i} let in`)
+  }
 })
