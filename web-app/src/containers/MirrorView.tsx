@@ -428,14 +428,15 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   useLayoutEffect(follow, [state.msgs, state.stream, state.scroll, follow])
   // An answer keeps growing between updates (it is revealed a little each
   // frame), so follow its height too, not only the updates
-  const content = useRef<HTMLDivElement>(null)
+  // (watched from when it appears: on a link it is behind the code door first)
+  const [contentEl, content] = useState<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
-    const el = content.current
+    const el = contentEl
     if (!el || typeof ResizeObserver === 'undefined') return
     const watch = new ResizeObserver(() => follow())
     watch.observe(el)
     return () => watch.disconnect()
-  }, [follow])
+  }, [follow, contentEl])
 
   const jumpToLatest = () => {
     const el = scroller.current
@@ -471,17 +472,26 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
 
   // On a laptop the shared screen sits left of the text, sized by a divider
   // you can drag; the text stays centred unless the screen would cover it
-  const body = useRef<HTMLDivElement>(null)
+  // A link opens on the code door, so the body only appears once let in:
+  // watch it from when it appears, not from the first render (watching from
+  // the first render left its width at 0, which hid the divider and put the
+  // text under the shared screen)
+  const body = useRef<HTMLDivElement | null>(null)
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null)
+  const bodyRef = useCallback((el: HTMLDivElement | null) => {
+    body.current = el
+    setBodyEl(el)
+  }, [])
   const wide = useWide()
   const [bodyWidth, setBodyWidth] = useState(0)
   useLayoutEffect(() => {
-    const el = body.current
+    const el = bodyEl
     if (!el) return
     const watch = new ResizeObserver(() => setBodyWidth(el.clientWidth))
     watch.observe(el)
     setBodyWidth(el.clientWidth)
     return () => watch.disconnect()
-  }, [])
+  }, [bodyEl])
   const [split, setSplit] = useState<number | null>(() => {
     const saved = Number(stored(SPLIT))
     return saved > 0 && saved < 1 ? saved : null
@@ -627,7 +637,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       {/* On a laptop: the shared screen on the left (with its divider), the
           text centred, the camera panel on the right. The conversation scrolls
           across the whole width beneath them; on a phone they stack */}
-      <div ref={body} className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-col">
         <div className="relative flex min-h-0 flex-1 flex-col">
           {/* On a phone the header has no room for the mirror's status */}
           <div className="flex justify-center border-b border-main-view-fg/5 py-1.5 sm:hidden">
