@@ -199,12 +199,13 @@ function useMirror(link?: string) {
           return setGate({ shut: false })
         }
         if (m.t === 'code') {
-          const c = m as { left?: unknown; spent?: unknown }
+          const c = m as { left?: unknown; spent?: unknown; locked?: unknown }
           return setGate({
             shut: true,
             asked: true,
             left: typeof c.left === 'number' ? Math.max(0, c.left) : 0,
             ...(c.spent === true ? { spent: true } : {}),
+            ...(c.locked === true ? { locked: true } : {}),
           })
         }
         for (const x of seq.take(m, 'relay')) queue(x)
@@ -1033,6 +1034,8 @@ export type Gate = {
   left?: number
   /** Too many wrong codes: only a reload brings a new one */
   spent?: boolean
+  /** Too many wrong codes on this link, from anyone: only a new link opens */
+  locked?: boolean
 }
 
 /**
@@ -1113,7 +1116,11 @@ function LinkDoor({
             {gate.asked ? 'Get a new code' : 'Get a code'}
           </button>
         )}
-        {gate.spent ? (
+        {gate.locked ? (
+          <p role="alert" className="text-destructive">
+            Too many wrong codes on this link. Copy a new link from Hi-chat.
+          </p>
+        ) : gate.spent ? (
           <p role="alert" className="text-destructive">
             Too many wrong codes. Reload this page to try again.
           </p>
