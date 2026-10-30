@@ -38,7 +38,7 @@ export function createGate({
   reply: (
     m: { t: 'admit' | 'gate'; to: string } & Record<string, unknown>
   ) => void
-  onCode: (code: string | null) => void
+  onCode: (code: string | null, expiresAt?: number) => void
   makeCode?: () => string
   now?: () => number
 }) {
@@ -73,7 +73,7 @@ export function createGate({
         const c = good(id) ?? { code: makeCode(), at: now() }
         codes.set(id, c)
         shownFor = id
-        onCode(c.code)
+        onCode(c.code, c.at + CODE_TTL_MS)
         return
       }
       if (typeof m.code !== 'string') return

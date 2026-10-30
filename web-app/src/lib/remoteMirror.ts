@@ -16,9 +16,9 @@ import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
-import { toast } from 'sonner'
+import { showMirrorCode } from '@/containers/MirrorCodeToast'
 import { createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
-import { CODE_TTL_MS, createGate, type Knock } from '@/lib/mirrorGate'
+import { createGate, type Knock } from '@/lib/mirrorGate'
 import {
   linkFromPath,
   mirrorLinkBorn,
@@ -313,19 +313,6 @@ function nativeBridge(): { postMessage(m: unknown): void } | null {
   return w.webkit?.messageHandlers?.hiChat ?? null
 }
 
-const CODE_TOAST = 'mirror-link-code'
-
-/** Shows the code a mirror link's viewer types to get in. */
-function showLinkCode(code: string | null) {
-  if (!code) return toast.dismiss(CODE_TOAST)
-  toast(`Mirror link code: ${code}`, {
-    id: CODE_TOAST,
-    description:
-      'Someone opened your mirror link and asked for a code. Give it only if it is you: it shows this conversation, the shared screen and (on the Mac) lets them control it.',
-    duration: CODE_TTL_MS,
-  })
-}
-
 /** Starts sending; returns a function that stops it. */
 export function startRemoteMirror({
   WebSocketImpl = globalThis.WebSocket,
@@ -414,7 +401,7 @@ export function startRemoteMirror({
     reply: (m) => {
       if (open()) ws!.send(JSON.stringify(m))
     },
-    onCode: showLinkCode,
+    onCode: showMirrorCode,
   })
   const send = (data: { t: string } & Record<string, unknown>) => {
     if (!open()) return
