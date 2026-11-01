@@ -205,6 +205,22 @@ test('HTTP: engines field limits which engines run', async () => {
   }
 })
 
+test('HTTP: /healthz answers 200 ok without login', async () => {
+  const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    const res = await fetch(`${base}/healthz`)
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type'), /^text\/plain/)
+    assert.equal(await res.text(), 'ok\n')
+    assert.equal((await fetch(`${base}/healthz`, { method: 'HEAD' })).status, 200)
+    assert.equal((await fetch(`${base}/healthz`, { method: 'POST' })).status, 405)
+  } finally {
+    server.close()
+  }
+})
+
 test('HTTP: 503 when no engine has a key', async () => {
   const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))

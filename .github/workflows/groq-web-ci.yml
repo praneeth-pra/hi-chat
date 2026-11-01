@@ -36,6 +36,8 @@ jobs:
           # Without LOGIN_EMAIL nobody can sign in: pages go to /login, files and APIs are refused
           docker run -d --name jan-web -e PORT=8080 -p 8080:8080 jan-web
           for i in $(seq 1 30); do curl -sf http://localhost:8080/login > /dev/null && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz)" = 200
+          curl -sf http://localhost:8080/healthz | grep -qx 'ok'
           curl -s -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost:8080/ | grep -q '^302 .*/login$'
           curl -sf http://localhost:8080/login | grep -q 'Sign in to Hi-chat'
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/groq/openai/v1/models)" = 401

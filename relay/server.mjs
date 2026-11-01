@@ -424,6 +424,20 @@ function send(res, status, body) {
 
 export function createRelay(options = {}) {
   const server = createServer(async (req, res) => {
+    // Health check for the host (Railway, DigitalOcean), through nginx's
+    // /healthz: no login, no work, nothing about the setup. If the relay is
+    // down nginx answers 502, so the host restarts the container.
+    if (req.url?.split('?')[0] === '/healthz') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { Allow: 'GET, HEAD' })
+        return res.end()
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-store',
+      })
+      return res.end(req.method === 'HEAD' ? undefined : 'ok\n')
+    }
     // The site login (/login, /auth/*), see auth.mjs
     if (await handleAuth(req, res, options.env, options.fetchImpl)) return
     if (
