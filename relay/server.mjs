@@ -9,6 +9,7 @@
 // ENGINES order. In a race (`need`), it returns as soon as that many answered.
 
 import { createServer } from 'node:http'
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { acceptWebSocket } from './wsProxy.mjs'
@@ -22,6 +23,7 @@ import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
 import { createMirrorHub, LINK_ENDED } from './mirror.mjs'
 import { createCameraHub, createIceSource } from './camera.mjs'
+import { log } from './log.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -419,6 +421,42 @@ function readBody(req, maxBytes = MAX_BODY_BYTES) {
   })
 }
 
+/**
+ * The request's id: nginx's $request_id (X-Request-Id), so a relay log line
+ * and nginx's access log line for one request share it; one is made up when
+ * the relay is reached directly or the header looks wrong.
+ */
+export function requestId(req) {
+  const given = req.headers['x-request-id']
+  return typeof given === 'string' && /^[\w.-]{1,128}$/.test(given)
+    ? given
+    : randomBytes(16).toString('hex')
+}
+
+// Routes counted in /api/metrics; anything else counts as 'other', so a
+// scan of made-up paths can't grow the counters
+const ROUTES = new Set([
+  '/healthz',
+  '/login',
+  '/auth/check',
+  '/auth/code',
+  '/auth/logout',
+  '/auth/verify',
+  '/api/transcribe',
+  '/api/live-token',
+  '/api/search',
+  '/api/speech-log',
+  '/api/camera-key',
+  '/api/metrics',
+  '/api/mirror',
+  '/api/mirror-link',
+  '/api/camera',
+])
+const routeOf = (url) => {
+  const path = (url ?? '').split('?')[0]
+  return ROUTES.has(path) ? path : 'other'
+}
+
 function send(res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -428,7 +466,21 @@ function send(res, status, body) {
 }
 
 export function createRelay(options = {}) {
+  const logger = options.logger ?? log
+  // Counters for /api/metrics. In memory, so they start again at zero when
+  // the relay restarts (startedAt says when that was).
+  const startedAt = new Date().toISOString()
+  const requests = {}
+  const transcribe = { clips: 0, failed: 0, engineErrors: {} }
+  const count = (url) => {
+    const route = routeOf(url)
+    requests[route] = (requests[route] ?? 0) + 1
+  }
   const server = createServer(async (req, res) => {
+    count(req.url)
+    const rid = requestId(req)
+    const rlog = logger.child({ rid })
+    res.setHeader('X-Request-Id', rid)
     // Health check for the host (Railway, DigitalOcean), through nginx's
     // /healthz: no login, no work, nothing about the setup. If the relay is
     // down nginx answers 502, so the host restarts the container.
@@ -444,7 +496,33 @@ export function createRelay(options = {}) {
       return res.end(req.method === 'HEAD' ? undefined : 'ok\n')
     }
     // The site login (/login, /auth/*), see auth.mjs
-    if (await handleAuth(req, res, options.env, options.fetchImpl)) return
+    if (await handleAuth(req, res, options.env, options.fetchImpl, rlog))
+      return
+    // Counters and live socket counts, for the signed-in (nginx checks the
+    // login before this). Cheap: nothing here walks more than the channels.
+    if (req.url?.split('?')[0] === '/api/metrics') {
+      if (req.method !== 'GET')
+        return send(res, 405, { error: 'GET only' })
+      const mem = process.memoryUsage()
+      let linkCameraCount = 0
+      for (const set of linkCameras.values()) linkCameraCount += set.size
+      const cam = camera.counts
+      return send(res, 200, {
+        uptime: Math.round(process.uptime()),
+        startedAt,
+        memory: { rss: mem.rss, heapUsed: mem.heapUsed },
+        websockets: {
+          mirror: mirror.stats,
+          camera: {
+            senders: cam.sender ? 1 : 0,
+            viewers: cam.viewers,
+            viaLink: linkCameraCount,
+          },
+        },
+        requests,
+        transcribe,
+      })
+    }
     if (
       req.url !== '/api/transcribe' &&
       req.url !== '/api/live-token' &&
@@ -499,7 +577,7 @@ export function createRelay(options = {}) {
           (options.env ?? process.env).SPEECH_LOG_TEXT === '1'
         )
         if (!line) return send(res, 400, { error: 'No line' })
-        console.log(line)
+        rlog.info(line)
         res.writeHead(204).end()
       } catch (err) {
         send(res, err.status ?? 400, { error: err.message })
@@ -512,13 +590,18 @@ export function createRelay(options = {}) {
       try {
         engine = liveTokenEngine(await readBody(req))
         const token = await liveToken({ ...options, engine })
-        console.log(`live token ${engine} ${Date.now() - started} ms`)
+        rlog.info('live token', { engine, ms: Date.now() - started, ok: true })
         // Soniox and Cartesia are sent the dictionary as key terms
         if (engine === 'soniox' || engine === 'cartesia')
           return send(res, 200, { token, terms: dictionaryTerms() })
         return send(res, 200, { token })
       } catch (err) {
-        console.log(`live token ${engine} failed: ${err.message}`)
+        rlog.warn('live token failed', {
+          engine,
+          ms: Date.now() - started,
+          ok: false,
+          error: err.message,
+        })
         return send(res, err.status ?? 502, { error: err.message })
       }
     }
@@ -563,14 +646,30 @@ export function createRelay(options = {}) {
       })
       res.removeListener('close', onClose)
       if (disconnected.signal.aborted) return
-      // One line per clip, so slow or failing engines show in Railway's logs
-      console.log(
+      // One line per clip, so slow or failing engines show in Railway's logs,
+      // and one per engine with its timing, to filter on
+      rlog.info(
         clipLogLine(
           file.size,
           results,
           (options.env ?? process.env).SPEECH_LOG_TEXT === '1'
-        )
+        ),
+        { bytes: file.size }
       )
+      transcribe.clips++
+      if (!results.some((r) => r.ok)) transcribe.failed++
+      for (const r of results) {
+        if (r.off) continue
+        rlog.info('transcribe engine', {
+          engine: r.name,
+          ms: r.ms,
+          ok: r.ok,
+          ...(r.ok ? {} : { error: r.error }),
+        })
+        if (!r.ok)
+          transcribe.engineErrors[r.name] =
+            (transcribe.engineErrors[r.name] ?? 0) + 1
+      }
       const status = results.some((r) => r.ok)
         ? 200
         : results.every((r) => r.off)
@@ -578,6 +677,7 @@ export function createRelay(options = {}) {
           : 502
       send(res, status, { results })
     } catch (err) {
+      rlog.warn('transcribe request failed', { error: err.message })
       send(res, err.status ?? 400, { error: err.message })
     }
   })
@@ -602,6 +702,7 @@ export function createRelay(options = {}) {
   // stands in for the login cookie
   const camera = createCameraHub({ env: options.env ?? process.env, ice })
   server.on('upgrade', (req, socket, head) => {
+    count(req.url)
     const url = new URL(req.url ?? '/', 'http://relay')
     if (url.pathname === '/api/camera') {
       const role = url.searchParams.get('role') === 'send' ? 'send' : 'view'
@@ -679,6 +780,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(process.env.RELAY_PORT ?? 3001)
   warnAuthSetup()
   createRelay().listen(port, '127.0.0.1', () =>
-    console.log(`transcription relay on 127.0.0.1:${port}`)
+    log.info(`transcription relay on 127.0.0.1:${port}`, { port })
   )
 }

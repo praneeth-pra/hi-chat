@@ -291,7 +291,16 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
     viaLink.onclose()
   }
   hub.join(viaLink, 'view', { link })
+  assert.deepEqual(hub.stats, {
+    senders: 2,
+    viewers: 0,
+    waiting: 1,
+    channels: 3,
+    links: 2,
+  })
   letIn(appA, viaLink)
+  assert.equal(hub.stats.viewers, 1)
+  assert.equal(hub.stats.waiting, 0)
   hub.join(signedIn, 'view')
   assert.deepEqual(viaLink.got.at(-1), { t: 'sender', on: true })
 

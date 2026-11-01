@@ -840,5 +840,21 @@ export function createMirrorHub({
       for (const c of channels.values()) viewers += c.viewers.size
       return { senders, viewers }
     },
+    /** For /api/metrics: sockets by kind, channels and kept links. */
+    get stats() {
+      let viewers = 0
+      let waiting = 0
+      for (const c of channels.values()) {
+        viewers += c.viewers.size
+        waiting += c.waiting.size
+      }
+      return {
+        senders: senderChannels.size,
+        viewers,
+        waiting,
+        channels: channels.size,
+        links: links.size,
+      }
+    },
   }
 }

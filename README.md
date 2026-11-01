@@ -198,6 +198,17 @@ relay. A crashing relay is restarted with backoff (1s doubling to 30s) and
 each restart is logged as `supervise: relay exited ... restart #N`; stopping
 the container sends SIGTERM to both.
 
+The relay logs one JSON object per line (`{"ts","level","msg",...}`,
+`relay/log.mjs`); secrets, login codes, cookies, tokens and transcripts are
+never logged. nginx passes its `$request_id` to the relay as `X-Request-Id`,
+so a request's relay lines (`rid`) match its nginx access line (`rid=`), and
+the relay sends the id back in an `X-Request-Id` header. Each clip logs one
+`transcribe engine` line per engine with `engine`, `ms` and `ok`.
+`GET /api/metrics` (signed in) returns the relay's uptime, memory, open
+mirror and camera sockets, mirror channels and links, requests by route and
+transcription errors; the counters start again at zero when the relay
+restarts (`startedAt`).
+
 The whole site sits behind a login: a 6-digit code is emailed to
 `LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
 can sign in. `AUTH_SECRET` signs the login cookie: at least 32 characters

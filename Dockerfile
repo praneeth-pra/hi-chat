@@ -62,7 +62,7 @@ ENV SESSION_DAYS="30"
 # The relay runs in production mode: no fallback cookie key.
 ENV NODE_ENV=production
 
-COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
+COPY relay/server.mjs relay/log.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
 
 # docker/supervise.sh runs the relay (restarting it with backoff) and nginx
 # (through the image's /docker-entrypoint.sh, which renders the templates).

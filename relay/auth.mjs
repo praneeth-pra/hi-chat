@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { sameOriginRequest } from './requestSafety.mjs'
+import { log } from './log.mjs'
 import {
   createHmac,
   createHash,
@@ -70,7 +71,7 @@ export function warnAuthSetup(env = process.env) {
   const error = authSetupError(env)
   if (error && !warnedSetup) {
     warnedSetup = true
-    console.error(`login: ${error} Sign-in is refused until it is set.`)
+    log.error(`login: ${error} Sign-in is refused until it is set.`)
   }
   return error
 }
@@ -264,7 +265,9 @@ export async function handleAuth(
   req,
   res,
   env = process.env,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  // The request's logger (with its rid); never given the code or cookie
+  logger = log
 ) {
   const path = (req.url ?? '').split('?')[0]
   if (
@@ -313,10 +316,10 @@ export async function handleAuth(
       )
     try {
       await emailCode(env, code, fetchImpl)
-      console.log('login: code sent')
+      logger.info('login: code sent')
       return (json(res, 200, { ok: true, minutes: CODE_MINUTES }), true)
     } catch (err) {
-      console.log(`login: code email failed: ${err.message}`)
+      logger.warn('login: code email failed', { error: err.message })
       return (
         json(res, 502, {
           error: "Couldn't send the email. Try again in a minute.",
@@ -331,7 +334,7 @@ export async function handleAuth(
     const body = await readJson(req)
     const r = checkCode(String(body?.code ?? '').replace(/\D/g, ''))
     if (r !== 'ok') {
-      console.log(`login: ${r} code`)
+      logger.info(`login: ${r} code`)
       return (
         json(res, 401, {
           error:
@@ -340,7 +343,7 @@ export async function handleAuth(
         true
       )
     }
-    console.log('login: signed in')
+    logger.info('login: signed in')
     return (
       json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(env) }),
       true
