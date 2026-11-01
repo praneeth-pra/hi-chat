@@ -10,6 +10,7 @@
 // screen a Meet tab presents back to /mirror; the hub passes its on/off.
 
 import { randomBytes } from 'node:crypto'
+import { log as logger } from './log.mjs'
 
 const MAX_SIGNAL = 64 * 1024
 const VIEWER_ID = /^[\w-]{16,64}$/
@@ -45,7 +46,7 @@ export function createIceSource({
   env = process.env,
   fetchImpl = globalThis.fetch,
   now = Date.now,
-  log = console.log,
+  log = (msg) => logger.info(msg),
 } = {}) {
   const id = env.CLOUDFLARE_TURN_KEY_ID
   const token = env.CLOUDFLARE_TURN_KEY_TOKEN
@@ -115,7 +116,7 @@ export function createIceSource({
 
 export function createCameraHub({
   env = process.env,
-  log = console.log,
+  log = (msg) => logger.info(msg),
   ice = createIceSource({ env, log }),
 } = {}) {
   let sender = null

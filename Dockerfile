@@ -34,7 +34,8 @@ RUN yarn install --immutable && yarn build:core && make build-web-app
 FROM nginx:alpine
 
 # Node runs the transcription relay (relay/server.mjs) next to nginx
-RUN apk add --no-cache nodejs ca-certificates
+# tini is PID 1: it reaps zombies and passes stop signals to docker/supervise.sh
+RUN apk add --no-cache nodejs ca-certificates tini
 
 # Copy static files from build stage
 COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
@@ -52,12 +53,28 @@ ENV EXA_API_KEY=""
 # Without LOGIN_EMAIL nobody can sign in.
 ENV LOGIN_EMAIL=""
 ENV RESEND_API_KEY=""
+# Signs the login cookie and the camera key; required (at least 32 random
+# characters, e.g. `openssl rand -hex 32`) once LOGIN_EMAIL is set, or sign-in
+# is refused. Changing it signs every browser out.
+ENV AUTH_SECRET=""
+# A session lasts this many days since the browser was last seen.
+ENV SESSION_DAYS="30"
+# The relay runs in production mode: no fallback cookie key.
+ENV NODE_ENV=production
+# Where the relay keeps its state across restarts and deploys (relay/persist.mjs):
+# mirror links and their tickets, and the login code limits. Mount a Railway
+# volume there (e.g. /data/relay) and set STATE_DIR to it. Empty: in memory only.
+ENV STATE_DIR=""
 
-# The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
-COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
-COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
+COPY relay/server.mjs relay/log.mjs relay/protocol.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/persist.mjs relay/logo.png relay/dictionary.txt /relay/
+
+# docker/supervise.sh runs the relay (restarting it with backoff) and nginx
+# (through the image's /docker-entrypoint.sh, which renders the templates).
+COPY docker/supervise.sh /usr/local/bin/supervise.sh
 
 EXPOSE 80
 
-# Start nginx
+# The nginx base image stops with SIGQUIT; the supervisor expects SIGTERM.
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/sbin/tini", "--", "/bin/sh", "/usr/local/bin/supervise.sh"]
 CMD ["nginx", "-g", "daemon off;"]

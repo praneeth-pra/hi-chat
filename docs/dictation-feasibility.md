@@ -7,8 +7,9 @@ race. The remaining improvements below are proposals.
 
 ## Current wiring
 
-1. The mic button or remote key starts `lib/dictation.ts`. A warm microphone and
-   roughly 130 ms of preroll reduce startup delay and missed initial words.
+1. The mic button or remote key starts `lib/dictation.ts` (a barrel over
+   `lib/dictation/`). A warm microphone and roughly 130 ms of preroll reduce
+   startup delay and missed initial words.
 2. An AudioWorklet transfers 2048-sample blocks (about 43 ms at 48 kHz). Each block
    is downsampled to 16 kHz, saved for retry, and streamed while recording.
 3. Auto runs Cartesia, Soniox and ElevenLabs concurrently. When recording stops,
@@ -76,8 +77,10 @@ answer. These are proposed targets, not achieved results. Instrument first, then
 ship delivery safety and critical-word checks, followed by deadline-based fallback
 behind a setting. Compare accuracy and latency before changing Auto's defaults.
 
-Relevant code: `web-app/src/lib/dictation.ts`, `dictationJudge.ts`,
-`dictationFixes.ts`, `dictationDelivery.ts`, `speechLive.ts`,
+Relevant code: `web-app/src/lib/dictation.ts` (re-exports `lib/dictation/`:
+`session.ts` for the mic and recording lifecycle, `state.ts`, `settings.ts`,
+`auto.ts` for the Auto race, and one adapter per engine in `engines/`),
+`dictationJudge.ts`, `dictationFixes.ts`, `dictationDelivery.ts`, `speechLive.ts`,
 `web-app/src/containers/ChatInput.tsx`, `DictationIndicator.tsx`, and
 `relay/server.mjs`. Existing dictation tests cover recording, consensus, judge
 fallback, retries and prompt delivery; they do not benchmark real device latency

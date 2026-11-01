@@ -39,7 +39,7 @@ import { useModelProvider } from '@/hooks/useModelProvider'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { splitReasoning } from '@/lib/splitReasoning'
 import { useSmoothText } from '@/lib/useSmoothText'
-import { mirrorShownTap } from '@/lib/remoteMirror'
+import { mirrorShownTap } from '@/features/hichat/mirror/lib/remoteMirror'
 import { createImageAttachment } from '@/types/attachment'
 import {
   Dialog,
@@ -164,7 +164,7 @@ export const ThreadContent = memo(
       textSegment.replace('</think>', ''),
       !!item.streamingThread && item.role !== 'user'
     )
-    // The mirror shows exactly as much as this, in step (lib/remoteMirror.ts)
+    // The mirror shows exactly as much as this, in step (features/hichat/mirror/lib/remoteMirror.ts)
     const answerLength = answerText.length
     useLayoutEffect(() => {
       if (item.role !== 'user')

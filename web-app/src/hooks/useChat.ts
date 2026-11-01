@@ -1,4 +1,4 @@
-import { mirrorStreamTap } from '@/lib/remoteMirror'
+import { mirrorStreamTap } from '@/features/hichat/mirror/lib/remoteMirror'
 import { raceAutoAnswers } from '@/lib/autoRace'
 import {
   getWebEvidence,

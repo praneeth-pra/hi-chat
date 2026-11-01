@@ -7,7 +7,10 @@ The continuous Speaker listener has been removed.
 
 ## Layout
 
-- `web-app/` - the React app (built with `vite.config.web.ts`)
+- `web-app/` - the React app (built with `vite.config.web.ts`). Hi-chat's own
+  features live under `web-app/src/features/hichat/` (so far `mirror/` and
+  `camera/`); see [docs/upstream.md](docs/upstream.md) for the upstream Jan
+  repo, the fork point and which code is Hi-chat's
 - `core/` - `@janhq/core`, shared types and extension base classes
 - `extensions-web/` - browser storage for threads and messages
 - `relay/` - small Node server that keeps the speech API keys on the server:
@@ -138,10 +141,17 @@ These are the defaults. Each can be changed, turned off or reset in Hi-chat's **
 Open `/mirror` on this site from any other computer (sign in with the
 emailed code) to follow the conversation open in Hi-chat, live: replies show
 as they stream, a fraction of a second behind. Hi-chat sends the text, not
-video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/lib/remoteMirror.ts`),
+video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/features/hichat/mirror/lib/remoteMirror.ts`),
 and only while a viewer is open. With Hi-chat open in several windows, the
 one in front is shown. The same page has the remote camera (below): the
 **Camera** button in its header opens the panel.
+
+The mirror's messages are defined once, with types and a protocol version, in
+`core/src/types/mirror/` (`@janhq/core`); the relay keeps the version, kinds
+and close codes in `relay/protocol.mjs`, and `relay/protocol.test.mjs` fails
+if the two drift. Pages send `v=<version>` in the socket URL; the relay takes
+sockets without it (older apps) and closes ones with a newer version than it
+knows with code 4002.
 
 ## Remote camera
 
@@ -173,13 +183,14 @@ The video and sound go directly between the two browsers (WebRTC). The relay
 derived from the login secret, because Meet's pages can't send Hi-chat's
 login cookie. Networks that block direct connections need a TURN server, set
 as `CAMERA_ICE_SERVERS` (a JSON list of RTCIceServer objects). The extension
-lives in `web-app/public/hichat-extension/`.
+lives in `web-app/public/hichat-extension/`; the page side is in
+`web-app/src/features/hichat/camera/`.
 
 ## Test and build
 
 ```bash
 yarn workspace @janhq/web-app test
-node --test relay/server.test.mjs
+node --test relay/*.test.mjs
 yarn build:web-app      # output in web-app/dist-web
 ```
 
@@ -188,14 +199,51 @@ yarn build:web-app      # output in web-app/dist-web
 ```bash
 docker build -t hi-chat .
 docker run -p 8080:8080 -e PORT=8080 \
-  -e LOGIN_EMAIL=... -e RESEND_API_KEY=... \
+  -e LOGIN_EMAIL=... -e RESEND_API_KEY=... -e AUTH_SECRET=... \
   -e ELEVENLABS_API_KEY=... \
   -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... hi-chat
 ```
 
+In the image, tini is PID 1 and `docker/supervise.sh` runs nginx and the
+relay. A crashing relay is restarted with backoff (1s doubling to 30s) and
+each restart is logged as `supervise: relay exited ... restart #N`; stopping
+the container sends SIGTERM to both.
+
+The relay logs one JSON object per line (`{"ts","level","msg",...}`,
+`relay/log.mjs`); secrets, login codes, cookies, tokens and transcripts are
+never logged. nginx passes its `$request_id` to the relay as `X-Request-Id`,
+so a request's relay lines (`rid`) match its nginx access line (`rid=`), and
+the relay sends the id back in an `X-Request-Id` header. Each clip logs one
+`transcribe engine` line per engine with `engine`, `ms` and `ok`.
+`GET /api/metrics` (signed in) returns the relay's uptime, memory, open
+mirror and camera sockets, mirror channels and links, requests by route and
+transcription errors; the counters start again at zero when the relay
+restarts (`startedAt`).
+
+By default the relay keeps its state in memory, so a restart or deploy ends
+the open mirror links and resets the login code limits. Set `STATE_DIR` to a
+directory to keep them (`relay/persist.mjs`): mirror links with their tickets
+and expiry times, ended link secrets, the code request limits and the pending
+code's hash, expiry and tries (never the code itself or any conversation).
+They are saved as JSON files (mode 0600) at most every 500 ms and on
+SIGTERM/SIGINT, and expired entries are dropped on load; a missing or corrupt
+file is skipped with a warning. On Railway, add a volume to the service
+mounted at e.g. `/data/relay` and set `STATE_DIR=/data/relay`. After a
+restart a link's viewers reconnect with their tickets and the app's next
+update rebuilds the conversation.
+
 The whole site sits behind a login: a 6-digit code is emailed to
 `LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
-can sign in.
+can sign in. `AUTH_SECRET` signs the login cookie: at least 32 characters
+(e.g. `openssl rand -hex 32`), kept stable, since changing it signs every
+browser out and revokes the camera key. The image runs the relay with `NODE_ENV=production`, where a
+missing or short `AUTH_SECRET` refuses sign-in (the code endpoints answer 503
+and the error is logged at startup); outside production the relay falls back
+to a key derived from `RESEND_API_KEY`, so local runs need no setup.
+
+Sessions roll: a browser stays signed in for `SESSION_DAYS` (default 30)
+since it was last seen. Once less than half of that is left, `/auth/check`
+re-issues the cookie and nginx passes it on with the response.
 
 Dictation's Auto mode streams to Cartesia, Soniox and ElevenLabs, so it
 needs all three keys. Keys for the Groq and Cerebras chat models are

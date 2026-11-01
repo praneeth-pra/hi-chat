@@ -7,6 +7,10 @@ import {
   LINK_WRONG_CODES,
 } from './mirror.mjs'
 import { createRelay } from './server.mjs'
+import {
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  MIRROR_PROTOCOL_VERSION,
+} from './protocol.mjs'
 
 // The last message of type `t` a socket got (others, like 'peer', may follow)
 const lastOf = (ws, t) => ws.got.filter((m) => m.t === t).at(-1)
@@ -19,6 +23,10 @@ function fakeSocket() {
     },
     onmessage: () => {},
     onclose: () => {},
+    closed: undefined,
+    close(code) {
+      ws.closed = code
+    },
   }
   return ws
 }
@@ -291,7 +299,16 @@ test('a link shows only its own app, and stops when the app replaces it', () => 
     viaLink.onclose()
   }
   hub.join(viaLink, 'view', { link })
+  assert.deepEqual(hub.stats, {
+    senders: 2,
+    viewers: 0,
+    waiting: 1,
+    channels: 3,
+    links: 2,
+  })
   letIn(appA, viaLink)
+  assert.equal(hub.stats.viewers, 1)
+  assert.equal(hub.stats.waiting, 0)
   hub.join(signedIn, 'view')
   assert.deepEqual(viaLink.got.at(-1), { t: 'sender', on: true })
 
@@ -867,4 +884,92 @@ test('the right code does not count against the link', () => {
     letIn(app, v)
     assert.ok(lastOf(v, 'admitted'), `viewer ${i} let in`)
   }
+})
+
+test('a viewer that is behind skips stream, scroll and typing, then catches up', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const slow = fakeSocket()
+  const fast = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(slow, 'view')
+  hub.join(fast, 'view')
+  const send = (m) => app.onmessage(JSON.stringify({ s: 'tab-1', ...m }))
+  send({ t: 'stream', id: 'r1', text: 'Hel', q: 1 })
+  const seen = slow.got.length
+
+  slow.backpressured = true
+  send({ t: 'stream', id: 'r1', add: 'lo', q: 2 })
+  send({ t: 'stream', id: 'r1', add: ' there', q: 3 })
+  send({ t: 'scroll', bottom: true, q: 4 })
+  send({ t: 'typing', text: 'ok', q: 5 })
+  send({ t: 'shown', id: 'r1', n: 4, q: 6 })
+  // Skipped, not queued; the other viewer gets each
+  assert.equal(slow.got.length, seen)
+  assert.equal(fast.got.filter((m) => m.t === 'stream').length, 3)
+
+  // Caught up (its socket drained): the latest of each, with its own tag
+  slow.backpressured = false
+  slow.ondrain()
+  assert.deepEqual(slow.got.slice(seen), [
+    { t: 'stream', s: 'tab-1', q: 3, id: 'r1', text: 'Hello there' },
+    { t: 'scroll', s: 'tab-1', q: 4, bottom: true },
+    { t: 'typing', s: 'tab-1', q: 5, text: 'ok' },
+  ])
+  slow.ondrain()
+  assert.equal(slow.got.length, seen + 3)
+
+  // Behind again: the next update, even one it can't skip, catches it up first
+  slow.backpressured = true
+  send({ t: 'stream', id: 'r1', add: '!', q: 7 })
+  send({ t: 'phase', phase: 'drafting', q: 8 })
+  assert.deepEqual(slow.got.slice(seen + 3), [
+    { t: 'stream', s: 'tab-1', q: 7, id: 'r1', text: 'Hello there!' },
+    { t: 'phase', s: 'tab-1', q: 8, phase: 'drafting' },
+  ])
+  // A skipped delta comes back whole in place of the next one
+  send({ t: 'stream', id: 'r1', add: '?', q: 9 })
+  slow.backpressured = false
+  send({ t: 'stream', id: 'r1', add: '.', q: 10 })
+  assert.deepEqual(slow.got.at(-1), {
+    t: 'stream',
+    s: 'tab-1',
+    q: 10,
+    id: 'r1',
+    text: 'Hello there!?.',
+  })
+  // A skipped 'shown' (not kept) doesn't hold back the next one
+  slow.backpressured = true
+  send({ t: 'shown', id: 'r1', n: 5, q: 11 })
+  slow.backpressured = false
+  send({ t: 'shown', id: 'r1', n: 9, q: 12 })
+  assert.deepEqual(slow.got.at(-1), {
+    t: 'shown',
+    s: 'tab-1',
+    q: 12,
+    id: 'r1',
+    n: 9,
+  })
+})
+
+test('protocol version: messages without v or with v 1 are taken, newer v closes (4002)', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(snap([{ id: 'a', role: 'user', text: 'hi' }]))
+  sender.onmessage(
+    JSON.stringify({ t: 'typing', text: 'one', v: MIRROR_PROTOCOL_VERSION })
+  )
+  assert.equal(lastOf(viewer, 'snap').msgs[0].text, 'hi')
+  assert.equal(lastOf(viewer, 'typing').text, 'one')
+  assert.equal(sender.closed, undefined)
+  sender.onmessage(JSON.stringify({ t: 'typing', text: 'two', v: 2 }))
+  assert.equal(sender.closed, MIRROR_CLOSE_VERSION_UNSUPPORTED)
+  assert.equal(lastOf(viewer, 'typing').text, 'one')
+  viewer.onmessage(JSON.stringify({ t: 'rtc', to: 'x', v: 1 }))
+  assert.equal(viewer.closed, undefined)
+  viewer.onmessage(JSON.stringify({ t: 'rtc', to: 'x', v: 2 }))
+  assert.equal(viewer.closed, MIRROR_CLOSE_VERSION_UNSUPPORTED)
 })

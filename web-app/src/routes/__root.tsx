@@ -29,8 +29,8 @@ import { GlobalEventHandler } from '@/providers/GlobalEventHandler'
 import { RemoteKeysProvider } from '@/containers/RemoteKeysProvider'
 import ErrorDialog from '@/containers/dialogs/ErrorDialog'
 import { ServiceHubProvider } from '@/providers/ServiceHubProvider'
-import { startRemoteMirror } from '@/lib/remoteMirror'
-import { useRemoteSession } from '@/hooks/useRemoteSession'
+import { startRemoteMirror } from '@/features/hichat/mirror/lib/remoteMirror'
+import { useRemoteSession } from '@/features/hichat/mirror/useRemoteSession'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -193,7 +193,7 @@ const BareLayout = () => {
 function RootLayout() {
   const getInitialLayoutType = () => {
     const pathname = window.location.pathname
-    // An app's own mirror link (lib/mirrorLink.ts)
+    // An app's own mirror link (features/hichat/mirror/lib/mirrorLink.ts)
     return pathname.startsWith('/m/')
   }
 

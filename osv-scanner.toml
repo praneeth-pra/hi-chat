@@ -1,0 +1,13 @@
+# osv-scanner config (picked up automatically for ./yarn.lock; used by the
+# dependency-audit job in .github/workflows/groq-web-ci.yml).
+
+# Our own workspace package, not a dependency from npm. yarn.lock lists it as
+# 0.0.0-use.local, which osv-scanner reads as below 0.1.11 and so matches the
+# published @janhq/core advisories (Jan desktop API server path traversal,
+# GHSA-5jqc-qj57-4hrc, GHSA-878h-rqcq-mv3x, GHSA-qfjh-mvq6-c5p8). That server
+# is not part of this web build.
+[[PackageOverrides]]
+name = "@janhq/core"
+ecosystem = "npm"
+vulnerability.ignore = true
+reason = "Local workspace package (0.0.0-use.local), not the published npm release"

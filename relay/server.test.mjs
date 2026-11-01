@@ -8,6 +8,7 @@ import {
   clipLogLine,
   dictionaryTerms,
 } from './server.mjs'
+import { createLogger } from './log.mjs'
 
 const file = new Blob([new Uint8Array(8)], { type: 'audio/flac' })
 const env = { OTHER_KEY: 'x', ELEVENLABS_API_KEY: 'e' }
@@ -200,6 +201,22 @@ test('HTTP: engines field limits which engines run', async () => {
     )
     assert.equal(calls.length, 1)
     assert.ok(calls[0].includes('elevenlabs'))
+  } finally {
+    server.close()
+  }
+})
+
+test('HTTP: /healthz answers 200 ok without login', async () => {
+  const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    const res = await fetch(`${base}/healthz`)
+    assert.equal(res.status, 200)
+    assert.match(res.headers.get('content-type'), /^text\/plain/)
+    assert.equal(await res.text(), 'ok\n')
+    assert.equal((await fetch(`${base}/healthz`, { method: 'HEAD' })).status, 200)
+    assert.equal((await fetch(`${base}/healthz`, { method: 'POST' })).status, 405)
   } finally {
     server.close()
   }
@@ -562,7 +579,8 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   )
 })
 
-test('mirror link: an unknown or ended link is told so (4001), not refused', async () => {
+// The close code a mirror socket at `path` gets right after the upgrade
+async function mirrorCloseCode(path) {
   const { request } = await import('node:http')
   const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
@@ -571,7 +589,7 @@ test('mirror link: an unknown or ended link is told so (4001), not refused', asy
       const req = request({
         host: '127.0.0.1',
         port: server.address().port,
-        path: `/api/mirror-link?link=${'A'.repeat(24)}`,
+        path,
         headers: {
           'connection': 'Upgrade',
           'upgrade': 'websocket',
@@ -590,9 +608,132 @@ test('mirror link: an unknown or ended link is told so (4001), not refused', asy
       req.on('error', reject)
       req.end()
     })
-    // A close frame (opcode 8) carrying code 4001
+    // A close frame (opcode 8) and its code
     assert.equal(frame[0] & 0x0f, 8)
-    assert.equal(frame.readUInt16BE(2), 4001)
+    return frame.readUInt16BE(2)
+  } finally {
+    server.close()
+  }
+}
+
+test('mirror link: an unknown or ended link is told so (4001), not refused', async () => {
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}`),
+    4001
+  )
+  // Saying the version it speaks changes nothing
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}&v=1`),
+    4001
+  )
+})
+
+test('mirror: a newer protocol version than the relay speaks is closed with 4002', async () => {
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}&v=2`),
+    4002
+  )
+  assert.equal(await mirrorCloseCode('/api/mirror?role=send&v=2'), 4002)
+})
+
+const captureLogger = () => {
+  const lines = []
+  return {
+    lines,
+    logger: createLogger({ write: (l) => lines.push(JSON.parse(l)) }),
+  }
+}
+
+test('HTTP: echoes nginx X-Request-Id, makes one up otherwise, and logs it as rid', async () => {
+  const { lines, logger } = captureLogger()
+  const server = createRelay({
+    env,
+    logger,
+    waitMs: 1,
+    engines: [
+      engine('elevenlabs', 'ELEVENLABS_API_KEY', 5, 'hello'),
+      engine('other', 'OTHER_KEY', 0, new Error('down')),
+    ],
+  }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    const made = await fetch(`${base}/healthz`)
+    assert.match(made.headers.get('x-request-id'), /^[0-9a-f]{32}$/)
+    const bad = await fetch(`${base}/healthz`, {
+      headers: { 'X-Request-Id': 'not oké' },
+    })
+    assert.notEqual(bad.headers.get('x-request-id'), 'not oké')
+
+    const form = new FormData()
+    form.append('file', file, 'dictation.wav')
+    const res = await fetch(`${base}/api/transcribe`, {
+      method: 'POST',
+      body: form,
+      headers: { 'X-Request-Id': 'a1b2c3' },
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('x-request-id'), 'a1b2c3')
+    const engines = lines.filter((l) => l.msg === 'transcribe engine')
+    assert.deepEqual(
+      engines.map((l) => [l.rid, l.engine, l.ok, typeof l.ms]),
+      [
+        ['a1b2c3', 'elevenlabs', true, 'number'],
+        ['a1b2c3', 'other', false, 'number'],
+      ]
+    )
+    // The transcript itself never reaches the log by default
+    assert.ok(!JSON.stringify(lines).includes('hello'))
+  } finally {
+    server.close()
+  }
+})
+
+test('HTTP: /api/metrics reports uptime, memory, sockets and counters', async () => {
+  const { logger } = captureLogger()
+  const server = createRelay({
+    env,
+    logger,
+    waitMs: 1,
+    engines: [engine('other', 'OTHER_KEY', 0, new Error('down'))],
+  }).listen(0, '127.0.0.1')
+  await new Promise((r) => server.once('listening', r))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    await fetch(`${base}/healthz`)
+    await fetch(`${base}/made-up-${Math.random()}`)
+    const form = new FormData()
+    form.append('file', file, 'dictation.wav')
+    assert.equal(
+      (await fetch(`${base}/api/transcribe`, { method: 'POST', body: form }))
+        .status,
+      502
+    )
+    const res = await fetch(`${base}/api/metrics`)
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('cache-control'), 'no-store')
+    const m = await res.json()
+    assert.equal(typeof m.uptime, 'number')
+    assert.ok(m.memory.rss > 0 && m.memory.heapUsed > 0)
+    assert.deepEqual(m.websockets, {
+      mirror: { senders: 0, viewers: 0, waiting: 0, channels: 0, links: 0 },
+      camera: { senders: 0, viewers: 0, viaLink: 0 },
+    })
+    assert.deepEqual(m.requests, {
+      '/healthz': 1,
+      'other': 1,
+      '/api/transcribe': 1,
+      '/api/metrics': 1,
+    })
+    assert.deepEqual(m.transcribe, {
+      clips: 1,
+      failed: 1,
+      engineErrors: { other: 1 },
+    })
+    assert.equal(
+      (await fetch(`${base}/api/metrics`, { method: 'POST' })).status,
+      405
+    )
   } finally {
     server.close()
   }

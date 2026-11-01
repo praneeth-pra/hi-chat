@@ -16,9 +16,10 @@ vi.mock('ulidx', () => ({
 
 // Mock fzf
 vi.mock('fzf', () => ({
-  Fzf: vi.fn(() => ({
-    find: vi.fn(() => []),
-  })),
+  // A function, not an arrow: vitest 4 mocks called with `new` must be constructible
+  Fzf: vi.fn(function () {
+    return { find: vi.fn(() => []) }
+  }),
 }))
 global.__TAURI_INTERNALS__ = {
   plugins: {

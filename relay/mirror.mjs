@@ -1,4 +1,10 @@
 import { randomBytes } from 'node:crypto'
+import { createStore } from './persist.mjs'
+import {
+  MIRROR_CLOSE_LINK_ENDED,
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  versionOk,
+} from './protocol.mjs'
 
 // Remote mirror: Hi-chat (the sender) sends the open conversation over
 // /api/mirror?role=send, and any signed-in browser that opens /mirror (a
@@ -18,6 +24,12 @@ import { randomBytes } from 'node:crypto'
 //          dark or light, and the chat column's width, so /mirror matches it
 //   typing what is in Hi-chat's message box
 //
+// The full protocol (every message, both ways, with types) is defined once in
+// core/src/types/mirror/index.ts; protocol.mjs keeps the relay's copy of its
+// version, kinds and close codes, checked against core by protocol.test.mjs.
+// A socket or message with a newer `v` than protocol.mjs's is closed with
+// MIRROR_CLOSE_VERSION_UNSUPPORTED; one without `v` (older apps) is fine.
+//
 // The hub keeps the latest of each in memory, so a viewer that joins late
 // starts from it. Senders hear how many viewers there are and send nothing
 // while there are none.
@@ -27,6 +39,10 @@ import { randomBytes } from 'node:crypto'
 // other and skip this server. A sender sends every update both ways, tagged
 // with its session `s` and a sequence number `q`, which the hub passes on;
 // the viewer applies each `q` once, from whichever route brings it first.
+//
+// A viewer whose socket is behind (a slow link) skips stream, scroll, typing
+// and 'shown' updates instead of queueing them, and gets their latest state
+// once it catches up (see toViewers).
 
 // Under wsProxy's 1 MB message cap, which would close the socket
 const MAX_TEXT = 900_000
@@ -196,7 +212,7 @@ function pong(ws, raw) {
 /** A mirror link's secret: random, URL-safe, long enough not to guess. */
 export const LINK_RE = /^[A-Za-z0-9_-]{22,64}$/
 /** Close code for a link's viewer when the link has ended. */
-export const LINK_ENDED = 4001
+export const LINK_ENDED = MIRROR_CLOSE_LINK_ENDED
 // A link keeps working this long after its app closes, so a restart (or the
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
@@ -253,6 +269,10 @@ export function createMirrorHub({
   now = Date.now,
   ice = { ready: () => null },
   onLinkEnded = () => {},
+  // With a directory, links and ended secrets are kept in mirror.json there
+  // (persist.mjs), so a restart doesn't end them
+  stateDir = '',
+  logger,
 } = {}) {
   // TURN credentials when ready (fetched in the background), else STUN
   const iceList = () => {
@@ -284,6 +304,51 @@ export function createMirrorHub({
   const dead = new Map() // ended secret -> when to forget it
   const senderChannels = new Map() // sender socket -> its channels
 
+  // Saved: each link's times, tickets and wrong codes, and the ended
+  // secrets. Not the conversation, images or sockets: after a restart the
+  // links' viewers reconnect with their tickets and the app's next snap
+  // rebuilds the channel. A link open at the time is saved as closed just
+  // now, so it gets the usual grace to come back
+  const store = createStore({
+    dir: stateDir,
+    file: 'mirror.json',
+    ...(logger ? { logger } : {}),
+    snapshot: () => ({
+      links: [...links].map(([secret, l]) => [
+        secret,
+        {
+          until: l.live > 0 ? now() + LINK_GRACE_MS : l.until,
+          born: l.born,
+          tickets: [...l.tickets],
+          wrong: l.wrong,
+        },
+      ]),
+      dead: [...dead],
+    }),
+  })
+  const saved = store.load()
+  const num = (v) => (Number.isFinite(v) ? v : 0)
+  for (const [secret, l] of Array.isArray(saved?.links) ? saved.links : []) {
+    if (!LINK_RE.test(secret ?? '') || !l || typeof l !== 'object') continue
+    const until = num(l.until)
+    const born = num(l.born)
+    if (until <= now() || born <= 0 || now() - born >= LINK_TTL_MS) continue
+    links.set(secret, {
+      live: 0,
+      until,
+      born,
+      tickets: new Set(
+        (Array.isArray(l.tickets) ? l.tickets : []).filter(
+          (t) => typeof t === 'string'
+        )
+      ),
+      wrong: Math.max(0, Math.trunc(num(l.wrong))),
+    })
+  }
+  for (const [secret, until] of Array.isArray(saved?.dead) ? saved.dead : [])
+    if (LINK_RE.test(secret ?? '') && num(until) > now())
+      dead.set(secret, until)
+
   const channel = (name) => {
     let ch = channels.get(name)
     if (!ch) {
@@ -296,6 +361,7 @@ export function createMirrorHub({
         phase: null,
         look: null,
         typing: null,
+        tags: {}, // a skippable kind -> the tag of its latest update
         images: new Map(), // key -> JSON of its 'img' message
         waiting: new Set(), // a link's viewers not yet let in with a code
       }
@@ -308,9 +374,55 @@ export function createMirrorHub({
     if (name && ch && !ch.senders.size && !ch.viewers.size && !ch.waiting.size)
       channels.delete(name)
   }
-  const toViewers = (ch, data) => {
-    const out = tag && data[0] === '{' ? '{' + tag + data.slice(1) : data
-    for (const v of ch.viewers) v.send(out)
+  const tagged = (data, t = tag) =>
+    t && data[0] === '{' ? '{' + t + data.slice(1) : data
+  // A viewer too far behind (wsProxy's `backpressured`) skips updates a newer
+  // one replaces, rather than queue them. What it skipped it gets as the
+  // latest whole state once it catches up: before its next update, or when
+  // its socket drains.
+  const missed = new WeakMap() // viewer -> Set of skipped kinds
+  // The latest whole state of a skippable kind, as JSON, or null
+  const stateOf = (ch, kind) =>
+    kind === 'stream'
+      ? JSON.stringify(
+          ch.stream ? { t: 'stream', ...ch.stream } : { t: 'stream', id: null }
+        )
+      : kind === 'scroll'
+        ? ch.scroll
+        : kind === 'typing'
+          ? (ch.typing ?? JSON.stringify({ t: 'typing', text: '' }))
+          : null // 'shown' isn't kept; the stream's whole text stands in
+  // Sends a viewer what it skipped, each with the tag of its latest update,
+  // so a direct route's copies of the skipped updates don't apply on top. The
+  // state of `kind` (the update being sent) stands in for that update;
+  // returns whether it did
+  const catchUp = (ch, v, kind) => {
+    const kinds = missed.get(v)
+    if (!kinds) return false
+    missed.delete(v)
+    let replaced = false
+    for (const k of kinds) {
+      const state = stateOf(ch, k)
+      if (!state) continue
+      v.send(tagged(state, ch.tags[k] ?? ''))
+      if (k === kind) replaced = true
+    }
+    return replaced
+  }
+  // `kind` marks an update a viewer that is behind may skip
+  const toViewers = (ch, data, kind) => {
+    const out = tagged(data)
+    if (kind) ch.tags[kind] = tag
+    for (const v of ch.viewers) {
+      if (kind && v.backpressured) {
+        const kinds = missed.get(v) ?? new Set()
+        kinds.add(kind)
+        missed.set(v, kinds)
+        continue
+      }
+      if (catchUp(ch, v, kind)) continue
+      v.send(out)
+    }
   }
   // A sender hears of each viewer (in any of its channels) it may connect to.
   // A link's viewer (no login) is marked as one; it was let in with the code
@@ -354,6 +466,7 @@ export function createMirrorHub({
     }
     if (l.live > 0 || l.until > now()) return true
     links.delete(secret)
+    store.changed()
     return false
   }
 
@@ -363,6 +476,7 @@ export function createMirrorHub({
     if (!LINK_RE.test(secret ?? '')) return
     links.delete(secret)
     dead.set(secret, now() + LINK_DEAD_MS)
+    store.changed()
     const ch = channels.get(secret)
     if (ch) {
       for (const v of [...ch.viewers, ...ch.waiting]) v.close(LINK_ENDED)
@@ -381,7 +495,11 @@ export function createMirrorHub({
   /** Ends the links that are out of time (run every few seconds). */
   function sweep() {
     for (const [secret, l] of links) if (expired(l)) end(secret)
-    for (const [secret, until] of dead) if (until <= now()) dead.delete(secret)
+    for (const [secret, until] of dead)
+      if (until <= now()) {
+        dead.delete(secret)
+        store.changed()
+      }
   }
 
   // A finished reply arrives as a message, so the stream ends with it. It is
@@ -455,18 +573,18 @@ export function createMirrorHub({
           : null
     if (!clean) return
     ch.scroll = JSON.stringify(clean)
-    toViewers(ch, ch.scroll)
+    toViewers(ch, ch.scroll, 'scroll')
   }
 
   function onStream(ch, m) {
     if (m.id === null) {
       ch.stream = null
-      toViewers(ch, JSON.stringify({ t: 'stream', id: null }))
+      toViewers(ch, JSON.stringify({ t: 'stream', id: null }), 'stream')
     } else if (typeof m.id !== 'string') {
       return
     } else if (typeof m.text === 'string') {
       ch.stream = { id: m.id.slice(0, 100), text: m.text.slice(0, MAX_TEXT) }
-      toViewers(ch, JSON.stringify({ t: 'stream', ...ch.stream }))
+      toViewers(ch, JSON.stringify({ t: 'stream', ...ch.stream }), 'stream')
     } else if (
       typeof m.add === 'string' &&
       ch.stream?.id === m.id &&
@@ -475,7 +593,8 @@ export function createMirrorHub({
       ch.stream.text += m.add
       toViewers(
         ch,
-        JSON.stringify({ t: 'stream', id: ch.stream.id, add: m.add })
+        JSON.stringify({ t: 'stream', id: ch.stream.id, add: m.add }),
+        'stream'
       )
     }
   }
@@ -486,7 +605,11 @@ export function createMirrorHub({
   function onShown(ch, m) {
     if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return
     const n = Math.min(MAX_TEXT, Math.max(0, m.n))
-    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
+    toViewers(
+      ch,
+      JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }),
+      'shown'
+    )
   }
 
   function onLook(ch, m) {
@@ -499,7 +622,7 @@ export function createMirrorHub({
   function onTyping(ch, m) {
     const text = str(m.text, MAX_TYPING)
     ch.typing = text ? JSON.stringify({ t: 'typing', text }) : null
-    toViewers(ch, JSON.stringify({ t: 'typing', text }))
+    toViewers(ch, JSON.stringify({ t: 'typing', text }), 'typing')
   }
 
   const HANDLERS = {
@@ -523,6 +646,7 @@ export function createMirrorHub({
     } catch {
       return
     }
+    if (!versionOk(m?.v)) return ws.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
     // "New link": the app's old link stops working now
     if (m?.t === 'revoke') return end(m.link)
     // Letting a link's viewer in (the right code), or telling it the code
@@ -557,13 +681,7 @@ export function createMirrorHub({
     )
   }
 
-  function rtcToSender(ws, name, raw) {
-    let m
-    try {
-      m = JSON.parse(raw)
-    } catch {
-      return
-    }
+  function rtcToSender(ws, name, m) {
     if (m?.t !== 'rtc') return
     const to = typeof m.to === 'string' && ID_RE.test(m.to) && byId.get(m.to)
     if (!to || to.role !== 'send' || !to.names.includes(name)) return
@@ -601,6 +719,7 @@ export function createMirrorHub({
       l.live += 1
       l.born = bornAt(link, born)
       links.set(link, l)
+      store.changed()
     }
     newId(ws, 'send', names)
     ws.onmessage = (data) => fromSender(ws, data)
@@ -612,6 +731,7 @@ export function createMirrorHub({
       if (l) {
         l.live -= 1
         if (l.live <= 0) l.until = now() + LINK_GRACE_MS
+        store.changed()
       }
       status(names)
       names.forEach(tidy)
@@ -659,13 +779,7 @@ export function createMirrorHub({
     const id = newId(ws, 'view', [name])
     let waiting = !!name && !ticketOk(name, ticket)
     let knocks = 0
-    const knock = (raw) => {
-      let m
-      try {
-        m = JSON.parse(raw)
-      } catch {
-        return
-      }
+    const knock = (m) => {
       const to = doorman(ch)
       if (!to || ++knocks > 40) return
       const l = links.get(name)
@@ -689,18 +803,27 @@ export function createMirrorHub({
       else if (m?.t === 'code' && /^\d{4}$/.test(m.code ?? '')) {
         // Counted as wrong until Hi-chat lets it in
         l.wrong += 1
+        store.changed()
         to.send(JSON.stringify({ t: 'knock', from: id, code: m.code }))
       }
     }
     // Viewers mostly listen; a ping gets a pong (echoing its `n`, so the page
     // can time the round trip), which also keeps an idle socket open: nginx
-    // closes one that hears nothing for 120 s. They also answer a sender's
+    // closes one that hears nothing for 120 s (wsProxy's own pings do too, for
+    // pages that don't ping). They also answer a sender's
     // offer of a direct connection
     ws.onmessage = (raw) => {
       if (typeof raw !== 'string' || raw.length > MAX_SDP + 4096) return
       if (pong(ws, raw)) return
-      if (waiting) knock(raw)
-      else rtcToSender(ws, name, raw)
+      let m
+      try {
+        m = JSON.parse(raw)
+      } catch {
+        return
+      }
+      if (!versionOk(m?.v)) return ws.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
+      if (waiting) knock(m)
+      else rtcToSender(ws, name, m)
     }
     ws.onclose = () => {
       forget(ws)
@@ -723,10 +846,15 @@ export function createMirrorHub({
         if (!ticketOk(name, ticket)) {
           ticket = randomBytes(18).toString('base64url')
           l.tickets.add(ticket)
+          store.changed()
         }
         ws.send(JSON.stringify({ t: 'admitted', ticket }))
       }
       ch.viewers.add(ws)
+      // Caught up after skipping updates (see toViewers)
+      ws.ondrain = () => {
+        if (ch.viewers.has(ws)) catchUp(ch, ws)
+      }
       for (const img of ch.images.values()) ws.send(img)
       if (ch.snap) ws.send(JSON.stringify(ch.snap))
       if (ch.stream) ws.send(JSON.stringify({ t: 'stream', ...ch.stream }))
@@ -746,7 +874,10 @@ export function createMirrorHub({
         if (!waiting) return
         // The right code: it wasn't a wrong one after all
         const l = links.get(name)
-        if (l) l.wrong = Math.max(0, l.wrong - 1)
+        if (l) {
+          l.wrong = Math.max(0, l.wrong - 1)
+          store.changed()
+        }
         waiting = false
         doors.delete(id)
         ch.waiting.delete(ws)
@@ -772,12 +903,32 @@ export function createMirrorHub({
     isLink,
     ticketOk,
     sweep,
+    /** Writes the saved state now (on shutdown); nothing without stateDir. */
+    flush: () => store.flush(),
+    /** Flushes and stops saving (the server closed). */
+    close: () => store.close(),
     get counts() {
       const ch = channels.get('')
       const senders = ch?.senders.size ?? 0
       let viewers = 0
       for (const c of channels.values()) viewers += c.viewers.size
       return { senders, viewers }
+    },
+    /** For /api/metrics: sockets by kind, channels and kept links. */
+    get stats() {
+      let viewers = 0
+      let waiting = 0
+      for (const c of channels.values()) {
+        viewers += c.viewers.size
+        waiting += c.waiting.size
+      }
+      return {
+        senders: senderChannels.size,
+        viewers,
+        waiting,
+        channels: channels.size,
+        links: links.size,
+      }
     },
   }
 }

@@ -4,11 +4,29 @@
 // Node has a WebSocket client but no server, so this is a minimal RFC 6455
 // server: unfragmented-or-continued frames, masked from the client, never
 // masked to it.
+//
+// Backpressure: a viewer on a slow link must not make Node buffer without
+// limit, so each socket has an outbound cap (bytes Node holds, not yet taken
+// by the kernel). Past it the client is closed with 1013 ("try again later").
+// Below it, `backpressured` says the client is behind, so callers can skip
+// updates a newer one replaces (mirror.mjs does), and `ondrain` says it has
+// caught up.
+//
+// Keepalive: the server pings (opcode 9) every 25 s, which browsers answer
+// on their own, and drops a socket it hasn't heard anything from (a pong or
+// any other frame) for 60 s. The apps' JSON pings still get their JSON pongs
+// from mirror.mjs and camera.mjs.
 
 import { createHash } from 'node:crypto'
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const MAX_MESSAGE_BYTES = 1024 * 1024
+/** Bytes Node may hold for one client before it is closed with 1013. */
+export const MAX_BUFFERED_BYTES = 4 * 1024 * 1024
+/** Bytes held past which a client counts as backpressured. */
+export const BACKPRESSURE_BYTES = 1024 * 1024
+export const PING_MS = 25_000
+export const IDLE_MS = 60_000
 
 /** One WebSocket frame to the browser (server frames are never masked). */
 export function encodeFrame(opcode, payload) {
@@ -75,9 +93,25 @@ export function decodeFrames(buf) {
 
 /**
  * Completes the upgrade and returns a small socket wrapper:
- * { send(text|Buffer), close(), onmessage(data, isBinary), onclose() }.
+ * { send(text|Buffer), close(), onmessage(data, isBinary), onclose(),
+ *   ondrain(), bufferedAmount, backpressured }.
+ * `options` are for tests and tuning: maxBuffered, backpressureBytes,
+ * pingMs, idleMs, and the clock (now, setInterval, clearInterval).
  */
-export function acceptWebSocket(req, socket, head) {
+export function acceptWebSocket(
+  req,
+  socket,
+  head,
+  {
+    maxBuffered = MAX_BUFFERED_BYTES,
+    backpressureBytes = BACKPRESSURE_BYTES,
+    pingMs = PING_MS,
+    idleMs = IDLE_MS,
+    now = Date.now,
+    setInterval: every = setInterval,
+    clearInterval: stopEvery = clearInterval,
+  } = {}
+) {
   const key = req.headers['sec-websocket-key']
   if (
     !/^[A-Za-z0-9+/]{22}==$/.test(key ?? '') ||
@@ -108,27 +142,55 @@ export function acceptWebSocket(req, socket, head) {
   let parts = []
   let partsOpcode = 0
   let partsBytes = 0
+  let heard = now()
+  let timer = null
+  const closeFrame = (code) => {
+    const body = Buffer.alloc(2)
+    body.writeUInt16BE(code)
+    return encodeFrame(8, body)
+  }
+  const finish = () => {
+    closed = true
+    if (timer) stopEvery(timer)
+    timer = null
+    ws.onclose()
+  }
+  // Too far behind, or gone quiet: no closing handshake to wait for
+  const drop = (code) => {
+    if (closed) return
+    if (code) socket.end(closeFrame(code))
+    socket.destroy()
+    finish()
+  }
   const ws = {
     onmessage: () => {},
     onclose: () => {},
+    ondrain: () => {},
+    /** Bytes sent but not yet taken by the network. */
+    get bufferedAmount() {
+      return socket.writableLength ?? 0
+    },
+    /** Behind enough that updates a newer one replaces are best skipped. */
+    get backpressured() {
+      return ws.bufferedAmount > backpressureBytes
+    },
     send(data) {
       if (closed) return
-      if (Buffer.byteLength(data) + socket.writableLength > MAX_MESSAGE_BYTES)
-        return ws.close(1009)
+      const bytes = Buffer.byteLength(data)
+      if (bytes > MAX_MESSAGE_BYTES) return ws.close(1009)
+      if (bytes + ws.bufferedAmount > maxBuffered) return drop(1013)
       socket.write(
         typeof data === 'string' ? encodeFrame(1, data) : encodeFrame(2, data)
       )
     },
     close(code = 1000) {
       if (closed) return
-      closed = true
-      const body = Buffer.alloc(2)
-      body.writeUInt16BE(code)
-      socket.end(encodeFrame(8, body))
-      ws.onclose()
+      socket.end(closeFrame(code))
+      finish()
     },
   }
   const onData = (chunk) => {
+    heard = now()
     buf = buf.length ? Buffer.concat([buf, chunk]) : chunk
     let frames
     try {
@@ -169,11 +231,19 @@ export function acceptWebSocket(req, socket, head) {
   }
   socket.on('data', onData)
   socket.on('close', () => {
-    if (closed) return
-    closed = true
-    ws.onclose()
+    if (!closed) finish()
   })
   socket.on('error', () => socket.destroy())
+  socket.on('drain', () => {
+    if (!closed) ws.ondrain()
+  })
+  // Checked each ping, so a dead socket goes within idleMs + pingMs
+  timer = every(() => {
+    if (closed) return
+    if (now() - heard >= idleMs) return drop(1001)
+    socket.write(encodeFrame(9, Buffer.alloc(0)))
+  }, pingMs)
+  timer?.unref?.()
   // Let the caller attach its callbacks before delivering upgrade-head data.
   if (buf.length)
     queueMicrotask(() => {

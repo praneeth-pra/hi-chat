@@ -33,47 +33,46 @@ vi.mock('@/lib/extension', () => ({
   }
 }))
 
-// Mock dynamic imports for web services
+// Mock dynamic imports for web services (function implementations, not arrows:
+// vitest 4 mocks called with `new` must be constructible)
 vi.mock('../theme/web', () => ({
-  WebThemeService: vi.fn().mockImplementation(() => ({
-    setTheme: vi.fn(),
-    getCurrentWindow: vi.fn()
-  }))
+  WebThemeService: vi.fn().mockImplementation(function () {
+    return { setTheme: vi.fn(), getCurrentWindow: vi.fn() }
+  })
 }))
 
 vi.mock('../app/web', () => ({
-  WebAppService: vi.fn().mockImplementation(() => ({}))
+  WebAppService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../path/web', () => ({
-  WebPathService: vi.fn().mockImplementation(() => ({}))
+  WebPathService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../core/web', () => ({
-  WebCoreService: vi.fn().mockImplementation(() => ({}))
+  WebCoreService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../dialog/web', () => ({
-  WebDialogService: vi.fn().mockImplementation(() => ({}))
+  WebDialogService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../events/web', () => ({
-  WebEventsService: vi.fn().mockImplementation(() => ({
-    emit: vi.fn(),
-    listen: vi.fn()
-  }))
+  WebEventsService: vi.fn().mockImplementation(function () {
+    return { emit: vi.fn(), listen: vi.fn() }
+  })
 }))
 
 vi.mock('../window/web', () => ({
-  WebWindowService: vi.fn().mockImplementation(() => ({}))
+  WebWindowService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../deeplink/web', () => ({
-  WebDeepLinkService: vi.fn().mockImplementation(() => ({}))
+  WebDeepLinkService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 vi.mock('../providers/web', () => ({
-  WebProvidersService: vi.fn().mockImplementation(() => ({}))
+  WebProvidersService: vi.fn().mockImplementation(function () { return {} })
 }))
 
 // Mock console to avoid noise in tests
