@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { log } from './log.mjs'
+import { createStore } from './persist.mjs'
 import {
   createHmac,
   createHash,
@@ -35,6 +36,9 @@ const NOT_SET_UP = "Sign-in isn't set up: LOGIN_EMAIL is missing on the server."
 // One person, one pending code at a time
 let pending = null
 let asks = []
+// Where they're saved (persistAuth), else nowhere
+let store = null
+const changed = () => store?.changed()
 let fallbackSecret
 let warnedSetup = false
 
@@ -184,25 +188,66 @@ export function newCode(now = Date.now()) {
   asks.push(now)
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
   pending = { hash: hashCode(code), exp: now + CODE_MINUTES * 60_000, tries: 0 }
+  changed()
   return code
 }
 
 /** 'ok' spends the code; anything else is a wrong, expired or used-up code. */
 export function checkCode(code, now = Date.now()) {
   if (!pending || pending.exp < now || pending.tries >= CODE_TRIES) {
+    if (pending) changed()
     pending = null
     return 'expired'
   }
   pending.tries++
+  changed()
   if (!safeEqual(hashCode(code), pending.hash)) return 'wrong'
   pending = null
   return 'ok'
+}
+
+/**
+ * Keeps the code limits (when codes were asked for) and the pending code
+ * (its hash, expiry and tries; never the code) in auth.json in `dir`
+ * (persist.mjs), so a restart neither resets the limits nor drops a code
+ * already emailed. Replaces the state in memory with what's saved, dropping
+ * what has expired (run once at startup). Without
+ * `dir` they stay in memory only. Returns the store.
+ */
+export function persistAuth(dir, { now = Date.now(), logger } = {}) {
+  store?.close()
+  pending = null
+  asks = []
+  store = createStore({
+    dir,
+    file: 'auth.json',
+    ...(logger ? { logger } : {}),
+    snapshot: () => ({ pending, asks }),
+  })
+  const saved = store.load()
+  if (Array.isArray(saved?.asks))
+    asks = saved.asks
+      .filter((t) => Number.isFinite(t) && t <= now && now - t < 3_600_000)
+      .sort((a, b) => a - b)
+  const p = saved?.pending
+  if (
+    p &&
+    /^[a-f0-9]{64}$/.test(p.hash ?? '') &&
+    Number.isFinite(p.exp) &&
+    p.exp >= now &&
+    Number.isInteger(p.tries) &&
+    p.tries >= 0 &&
+    p.tries < CODE_TRIES
+  )
+    pending = { hash: p.hash, exp: p.exp, tries: p.tries }
+  return store
 }
 
 /** For tests: forget codes and the ask history. */
 export function resetCodes() {
   pending = null
   asks = []
+  changed()
 }
 
 async function emailCode(env, code, fetchImpl) {

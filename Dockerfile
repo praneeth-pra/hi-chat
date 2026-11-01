@@ -61,8 +61,12 @@ ENV AUTH_SECRET=""
 ENV SESSION_DAYS="30"
 # The relay runs in production mode: no fallback cookie key.
 ENV NODE_ENV=production
+# Where the relay keeps its state across restarts and deploys (relay/persist.mjs):
+# mirror links and their tickets, and the login code limits. Mount a Railway
+# volume there (e.g. /data/relay) and set STATE_DIR to it. Empty: in memory only.
+ENV STATE_DIR=""
 
-COPY relay/server.mjs relay/log.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
+COPY relay/server.mjs relay/log.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/persist.mjs relay/logo.png relay/dictionary.txt /relay/
 
 # docker/supervise.sh runs the relay (restarting it with backoff) and nginx
 # (through the image's /docker-entrypoint.sh, which renders the templates).

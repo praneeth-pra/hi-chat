@@ -17,6 +17,7 @@ import {
   cameraKey,
   cameraKeyOk,
   handleAuth,
+  persistAuth,
   warnAuthSetup,
 } from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
@@ -24,6 +25,7 @@ import { searchWeb, warmSearch } from './search.mjs'
 import { createMirrorHub, LINK_ENDED } from './mirror.mjs'
 import { createCameraHub, createIceSource } from './camera.mjs'
 import { log } from './log.mjs'
+import { flushAll, stateDir } from './persist.mjs'
 
 // The longest the others wait once one engine has answered (the browser asks
 // for less).
@@ -693,11 +695,17 @@ export function createRelay(options = {}) {
       for (const c of linkCameras.get(secret) ?? []) c.close(LINK_ENDED)
       linkCameras.delete(secret)
     },
+    // STATE_DIR keeps the links across restarts (persist.mjs)
+    stateDir: options.stateDir ?? stateDir(options.env ?? process.env),
+    logger,
   })
   // A link ends at 90 minutes even with nobody connecting
   const sweep = setInterval(() => mirror.sweep(), 10_000)
   sweep.unref?.()
-  server.on('close', () => clearInterval(sweep))
+  server.on('close', () => {
+    clearInterval(sweep)
+    mirror.close()
+  })
   // Remote camera (camera.mjs): reached from Meet tabs, so the camera key
   // stands in for the login cookie
   const camera = createCameraHub({ env: options.env ?? process.env, ice })
@@ -779,7 +787,18 @@ export function createRelay(options = {}) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(process.env.RELAY_PORT ?? 3001)
   warnAuthSetup()
+  const dir = stateDir()
+  persistAuth(dir)
   createRelay().listen(port, '127.0.0.1', () =>
-    log.info(`transcription relay on 127.0.0.1:${port}`, { port })
+    log.info(`transcription relay on 127.0.0.1:${port}`, {
+      port,
+      stateDir: dir || undefined,
+    })
   )
+  // supervise.sh stops the relay with SIGTERM: save the state first
+  for (const sig of ['SIGTERM', 'SIGINT'])
+    process.once(sig, () => {
+      flushAll()
+      process.exit(0)
+    })
 }

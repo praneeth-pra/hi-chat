@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { createStore } from './persist.mjs'
 
 // Remote mirror: Hi-chat (the sender) sends the open conversation over
 // /api/mirror?role=send, and any signed-in browser that opens /mirror (a
@@ -257,6 +258,10 @@ export function createMirrorHub({
   now = Date.now,
   ice = { ready: () => null },
   onLinkEnded = () => {},
+  // With a directory, links and ended secrets are kept in mirror.json there
+  // (persist.mjs), so a restart doesn't end them
+  stateDir = '',
+  logger,
 } = {}) {
   // TURN credentials when ready (fetched in the background), else STUN
   const iceList = () => {
@@ -287,6 +292,51 @@ export function createMirrorHub({
   const doors = new Map()
   const dead = new Map() // ended secret -> when to forget it
   const senderChannels = new Map() // sender socket -> its channels
+
+  // Saved: each link's times, tickets and wrong codes, and the ended
+  // secrets. Not the conversation, images or sockets: after a restart the
+  // links' viewers reconnect with their tickets and the app's next snap
+  // rebuilds the channel. A link open at the time is saved as closed just
+  // now, so it gets the usual grace to come back
+  const store = createStore({
+    dir: stateDir,
+    file: 'mirror.json',
+    ...(logger ? { logger } : {}),
+    snapshot: () => ({
+      links: [...links].map(([secret, l]) => [
+        secret,
+        {
+          until: l.live > 0 ? now() + LINK_GRACE_MS : l.until,
+          born: l.born,
+          tickets: [...l.tickets],
+          wrong: l.wrong,
+        },
+      ]),
+      dead: [...dead],
+    }),
+  })
+  const saved = store.load()
+  const num = (v) => (Number.isFinite(v) ? v : 0)
+  for (const [secret, l] of Array.isArray(saved?.links) ? saved.links : []) {
+    if (!LINK_RE.test(secret ?? '') || !l || typeof l !== 'object') continue
+    const until = num(l.until)
+    const born = num(l.born)
+    if (until <= now() || born <= 0 || now() - born >= LINK_TTL_MS) continue
+    links.set(secret, {
+      live: 0,
+      until,
+      born,
+      tickets: new Set(
+        (Array.isArray(l.tickets) ? l.tickets : []).filter(
+          (t) => typeof t === 'string'
+        )
+      ),
+      wrong: Math.max(0, Math.trunc(num(l.wrong))),
+    })
+  }
+  for (const [secret, until] of Array.isArray(saved?.dead) ? saved.dead : [])
+    if (LINK_RE.test(secret ?? '') && num(until) > now())
+      dead.set(secret, until)
 
   const channel = (name) => {
     let ch = channels.get(name)
@@ -405,6 +455,7 @@ export function createMirrorHub({
     }
     if (l.live > 0 || l.until > now()) return true
     links.delete(secret)
+    store.changed()
     return false
   }
 
@@ -414,6 +465,7 @@ export function createMirrorHub({
     if (!LINK_RE.test(secret ?? '')) return
     links.delete(secret)
     dead.set(secret, now() + LINK_DEAD_MS)
+    store.changed()
     const ch = channels.get(secret)
     if (ch) {
       for (const v of [...ch.viewers, ...ch.waiting]) v.close(LINK_ENDED)
@@ -432,7 +484,11 @@ export function createMirrorHub({
   /** Ends the links that are out of time (run every few seconds). */
   function sweep() {
     for (const [secret, l] of links) if (expired(l)) end(secret)
-    for (const [secret, until] of dead) if (until <= now()) dead.delete(secret)
+    for (const [secret, until] of dead)
+      if (until <= now()) {
+        dead.delete(secret)
+        store.changed()
+      }
   }
 
   // A finished reply arrives as a message, so the stream ends with it. It is
@@ -657,6 +713,7 @@ export function createMirrorHub({
       l.live += 1
       l.born = bornAt(link, born)
       links.set(link, l)
+      store.changed()
     }
     newId(ws, 'send', names)
     ws.onmessage = (data) => fromSender(ws, data)
@@ -668,6 +725,7 @@ export function createMirrorHub({
       if (l) {
         l.live -= 1
         if (l.live <= 0) l.until = now() + LINK_GRACE_MS
+        store.changed()
       }
       status(names)
       names.forEach(tidy)
@@ -745,6 +803,7 @@ export function createMirrorHub({
       else if (m?.t === 'code' && /^\d{4}$/.test(m.code ?? '')) {
         // Counted as wrong until Hi-chat lets it in
         l.wrong += 1
+        store.changed()
         to.send(JSON.stringify({ t: 'knock', from: id, code: m.code }))
       }
     }
@@ -780,6 +839,7 @@ export function createMirrorHub({
         if (!ticketOk(name, ticket)) {
           ticket = randomBytes(18).toString('base64url')
           l.tickets.add(ticket)
+          store.changed()
         }
         ws.send(JSON.stringify({ t: 'admitted', ticket }))
       }
@@ -807,7 +867,10 @@ export function createMirrorHub({
         if (!waiting) return
         // The right code: it wasn't a wrong one after all
         const l = links.get(name)
-        if (l) l.wrong = Math.max(0, l.wrong - 1)
+        if (l) {
+          l.wrong = Math.max(0, l.wrong - 1)
+          store.changed()
+        }
         waiting = false
         doors.delete(id)
         ch.waiting.delete(ws)
@@ -833,6 +896,10 @@ export function createMirrorHub({
     isLink,
     ticketOk,
     sweep,
+    /** Writes the saved state now (on shutdown); nothing without stateDir. */
+    flush: () => store.flush(),
+    /** Flushes and stops saving (the server closed). */
+    close: () => store.close(),
     get counts() {
       const ch = channels.get('')
       const senders = ch?.senders.size ?? 0

@@ -209,6 +209,18 @@ mirror and camera sockets, mirror channels and links, requests by route and
 transcription errors; the counters start again at zero when the relay
 restarts (`startedAt`).
 
+By default the relay keeps its state in memory, so a restart or deploy ends
+the open mirror links and resets the login code limits. Set `STATE_DIR` to a
+directory to keep them (`relay/persist.mjs`): mirror links with their tickets
+and expiry times, ended link secrets, the code request limits and the pending
+code's hash, expiry and tries (never the code itself or any conversation).
+They are saved as JSON files (mode 0600) at most every 500 ms and on
+SIGTERM/SIGINT, and expired entries are dropped on load; a missing or corrupt
+file is skipped with a warning. On Railway, add a volume to the service
+mounted at e.g. `/data/relay` and set `STATE_DIR=/data/relay`. After a
+restart a link's viewers reconnect with their tickets and the app's next
+update rebuilds the conversation.
+
 The whole site sits behind a login: a 6-digit code is emailed to
 `LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
 can sign in. `AUTH_SECRET` signs the login cookie: at least 32 characters
