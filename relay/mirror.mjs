@@ -27,6 +27,10 @@ import { randomBytes } from 'node:crypto'
 // other and skip this server. A sender sends every update both ways, tagged
 // with its session `s` and a sequence number `q`, which the hub passes on;
 // the viewer applies each `q` once, from whichever route brings it first.
+//
+// A viewer whose socket is behind (a slow link) skips stream, scroll, typing
+// and 'shown' updates instead of queueing them, and gets their latest state
+// once it catches up (see toViewers).
 
 // Under wsProxy's 1 MB message cap, which would close the socket
 const MAX_TEXT = 900_000
@@ -296,6 +300,7 @@ export function createMirrorHub({
         phase: null,
         look: null,
         typing: null,
+        tags: {}, // a skippable kind -> the tag of its latest update
         images: new Map(), // key -> JSON of its 'img' message
         waiting: new Set(), // a link's viewers not yet let in with a code
       }
@@ -308,9 +313,55 @@ export function createMirrorHub({
     if (name && ch && !ch.senders.size && !ch.viewers.size && !ch.waiting.size)
       channels.delete(name)
   }
-  const toViewers = (ch, data) => {
-    const out = tag && data[0] === '{' ? '{' + tag + data.slice(1) : data
-    for (const v of ch.viewers) v.send(out)
+  const tagged = (data, t = tag) =>
+    t && data[0] === '{' ? '{' + t + data.slice(1) : data
+  // A viewer too far behind (wsProxy's `backpressured`) skips updates a newer
+  // one replaces, rather than queue them. What it skipped it gets as the
+  // latest whole state once it catches up: before its next update, or when
+  // its socket drains.
+  const missed = new WeakMap() // viewer -> Set of skipped kinds
+  // The latest whole state of a skippable kind, as JSON, or null
+  const stateOf = (ch, kind) =>
+    kind === 'stream'
+      ? JSON.stringify(
+          ch.stream ? { t: 'stream', ...ch.stream } : { t: 'stream', id: null }
+        )
+      : kind === 'scroll'
+        ? ch.scroll
+        : kind === 'typing'
+          ? (ch.typing ?? JSON.stringify({ t: 'typing', text: '' }))
+          : null // 'shown' isn't kept; the stream's whole text stands in
+  // Sends a viewer what it skipped, each with the tag of its latest update,
+  // so a direct route's copies of the skipped updates don't apply on top. The
+  // state of `kind` (the update being sent) stands in for that update;
+  // returns whether it did
+  const catchUp = (ch, v, kind) => {
+    const kinds = missed.get(v)
+    if (!kinds) return false
+    missed.delete(v)
+    let replaced = false
+    for (const k of kinds) {
+      const state = stateOf(ch, k)
+      if (!state) continue
+      v.send(tagged(state, ch.tags[k] ?? ''))
+      if (k === kind) replaced = true
+    }
+    return replaced
+  }
+  // `kind` marks an update a viewer that is behind may skip
+  const toViewers = (ch, data, kind) => {
+    const out = tagged(data)
+    if (kind) ch.tags[kind] = tag
+    for (const v of ch.viewers) {
+      if (kind && v.backpressured) {
+        const kinds = missed.get(v) ?? new Set()
+        kinds.add(kind)
+        missed.set(v, kinds)
+        continue
+      }
+      if (catchUp(ch, v, kind)) continue
+      v.send(out)
+    }
   }
   // A sender hears of each viewer (in any of its channels) it may connect to.
   // A link's viewer (no login) is marked as one; it was let in with the code
@@ -455,18 +506,18 @@ export function createMirrorHub({
           : null
     if (!clean) return
     ch.scroll = JSON.stringify(clean)
-    toViewers(ch, ch.scroll)
+    toViewers(ch, ch.scroll, 'scroll')
   }
 
   function onStream(ch, m) {
     if (m.id === null) {
       ch.stream = null
-      toViewers(ch, JSON.stringify({ t: 'stream', id: null }))
+      toViewers(ch, JSON.stringify({ t: 'stream', id: null }), 'stream')
     } else if (typeof m.id !== 'string') {
       return
     } else if (typeof m.text === 'string') {
       ch.stream = { id: m.id.slice(0, 100), text: m.text.slice(0, MAX_TEXT) }
-      toViewers(ch, JSON.stringify({ t: 'stream', ...ch.stream }))
+      toViewers(ch, JSON.stringify({ t: 'stream', ...ch.stream }), 'stream')
     } else if (
       typeof m.add === 'string' &&
       ch.stream?.id === m.id &&
@@ -475,7 +526,8 @@ export function createMirrorHub({
       ch.stream.text += m.add
       toViewers(
         ch,
-        JSON.stringify({ t: 'stream', id: ch.stream.id, add: m.add })
+        JSON.stringify({ t: 'stream', id: ch.stream.id, add: m.add }),
+        'stream'
       )
     }
   }
@@ -486,7 +538,11 @@ export function createMirrorHub({
   function onShown(ch, m) {
     if (typeof m.id !== 'string' || !Number.isSafeInteger(m.n)) return
     const n = Math.min(MAX_TEXT, Math.max(0, m.n))
-    toViewers(ch, JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }))
+    toViewers(
+      ch,
+      JSON.stringify({ t: 'shown', id: m.id.slice(0, 100), n }),
+      'shown'
+    )
   }
 
   function onLook(ch, m) {
@@ -499,7 +555,7 @@ export function createMirrorHub({
   function onTyping(ch, m) {
     const text = str(m.text, MAX_TYPING)
     ch.typing = text ? JSON.stringify({ t: 'typing', text }) : null
-    toViewers(ch, JSON.stringify({ t: 'typing', text }))
+    toViewers(ch, JSON.stringify({ t: 'typing', text }), 'typing')
   }
 
   const HANDLERS = {
@@ -694,7 +750,8 @@ export function createMirrorHub({
     }
     // Viewers mostly listen; a ping gets a pong (echoing its `n`, so the page
     // can time the round trip), which also keeps an idle socket open: nginx
-    // closes one that hears nothing for 120 s. They also answer a sender's
+    // closes one that hears nothing for 120 s (wsProxy's own pings do too, for
+    // pages that don't ping). They also answer a sender's
     // offer of a direct connection
     ws.onmessage = (raw) => {
       if (typeof raw !== 'string' || raw.length > MAX_SDP + 4096) return
@@ -727,6 +784,10 @@ export function createMirrorHub({
         ws.send(JSON.stringify({ t: 'admitted', ticket }))
       }
       ch.viewers.add(ws)
+      // Caught up after skipping updates (see toViewers)
+      ws.ondrain = () => {
+        if (ch.viewers.has(ws)) catchUp(ch, ws)
+      }
       for (const img of ch.images.values()) ws.send(img)
       if (ch.snap) ws.send(JSON.stringify(ch.snap))
       if (ch.stream) ws.send(JSON.stringify({ t: 'stream', ...ch.stream }))

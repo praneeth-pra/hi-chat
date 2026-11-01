@@ -868,3 +868,69 @@ test('the right code does not count against the link', () => {
     assert.ok(lastOf(v, 'admitted'), `viewer ${i} let in`)
   }
 })
+
+test('a viewer that is behind skips stream, scroll and typing, then catches up', () => {
+  const hub = createMirrorHub()
+  const app = fakeSocket()
+  const slow = fakeSocket()
+  const fast = fakeSocket()
+  hub.join(app, 'send')
+  hub.join(slow, 'view')
+  hub.join(fast, 'view')
+  const send = (m) => app.onmessage(JSON.stringify({ s: 'tab-1', ...m }))
+  send({ t: 'stream', id: 'r1', text: 'Hel', q: 1 })
+  const seen = slow.got.length
+
+  slow.backpressured = true
+  send({ t: 'stream', id: 'r1', add: 'lo', q: 2 })
+  send({ t: 'stream', id: 'r1', add: ' there', q: 3 })
+  send({ t: 'scroll', bottom: true, q: 4 })
+  send({ t: 'typing', text: 'ok', q: 5 })
+  send({ t: 'shown', id: 'r1', n: 4, q: 6 })
+  // Skipped, not queued; the other viewer gets each
+  assert.equal(slow.got.length, seen)
+  assert.equal(fast.got.filter((m) => m.t === 'stream').length, 3)
+
+  // Caught up (its socket drained): the latest of each, with its own tag
+  slow.backpressured = false
+  slow.ondrain()
+  assert.deepEqual(slow.got.slice(seen), [
+    { t: 'stream', s: 'tab-1', q: 3, id: 'r1', text: 'Hello there' },
+    { t: 'scroll', s: 'tab-1', q: 4, bottom: true },
+    { t: 'typing', s: 'tab-1', q: 5, text: 'ok' },
+  ])
+  slow.ondrain()
+  assert.equal(slow.got.length, seen + 3)
+
+  // Behind again: the next update, even one it can't skip, catches it up first
+  slow.backpressured = true
+  send({ t: 'stream', id: 'r1', add: '!', q: 7 })
+  send({ t: 'phase', phase: 'drafting', q: 8 })
+  assert.deepEqual(slow.got.slice(seen + 3), [
+    { t: 'stream', s: 'tab-1', q: 7, id: 'r1', text: 'Hello there!' },
+    { t: 'phase', s: 'tab-1', q: 8, phase: 'drafting' },
+  ])
+  // A skipped delta comes back whole in place of the next one
+  send({ t: 'stream', id: 'r1', add: '?', q: 9 })
+  slow.backpressured = false
+  send({ t: 'stream', id: 'r1', add: '.', q: 10 })
+  assert.deepEqual(slow.got.at(-1), {
+    t: 'stream',
+    s: 'tab-1',
+    q: 10,
+    id: 'r1',
+    text: 'Hello there!?.',
+  })
+  // A skipped 'shown' (not kept) doesn't hold back the next one
+  slow.backpressured = true
+  send({ t: 'shown', id: 'r1', n: 5, q: 11 })
+  slow.backpressured = false
+  send({ t: 'shown', id: 'r1', n: 9, q: 12 })
+  assert.deepEqual(slow.got.at(-1), {
+    t: 'shown',
+    s: 'tab-1',
+    q: 12,
+    id: 'r1',
+    n: 9,
+  })
+})
