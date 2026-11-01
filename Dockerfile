@@ -53,6 +53,14 @@ ENV EXA_API_KEY=""
 # Without LOGIN_EMAIL nobody can sign in.
 ENV LOGIN_EMAIL=""
 ENV RESEND_API_KEY=""
+# Signs the login cookie and the camera key; required (at least 32 random
+# characters, e.g. `openssl rand -hex 32`) once LOGIN_EMAIL is set, or sign-in
+# is refused. Changing it signs every browser out.
+ENV AUTH_SECRET=""
+# A session lasts this many days since the browser was last seen.
+ENV SESSION_DAYS="30"
+# The relay runs in production mode: no fallback cookie key.
+ENV NODE_ENV=production
 
 COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
 

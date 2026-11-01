@@ -188,7 +188,7 @@ yarn build:web-app      # output in web-app/dist-web
 ```bash
 docker build -t hi-chat .
 docker run -p 8080:8080 -e PORT=8080 \
-  -e LOGIN_EMAIL=... -e RESEND_API_KEY=... \
+  -e LOGIN_EMAIL=... -e RESEND_API_KEY=... -e AUTH_SECRET=... \
   -e ELEVENLABS_API_KEY=... \
   -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... hi-chat
 ```
@@ -200,7 +200,16 @@ the container sends SIGTERM to both.
 
 The whole site sits behind a login: a 6-digit code is emailed to
 `LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
-can sign in.
+can sign in. `AUTH_SECRET` signs the login cookie: at least 32 characters
+(e.g. `openssl rand -hex 32`), kept stable, since changing it signs every
+browser out and revokes the camera key. The image runs the relay with `NODE_ENV=production`, where a
+missing or short `AUTH_SECRET` refuses sign-in (the code endpoints answer 503
+and the error is logged at startup); outside production the relay falls back
+to a key derived from `RESEND_API_KEY`, so local runs need no setup.
+
+Sessions roll: a browser stays signed in for `SESSION_DAYS` (default 30)
+since it was last seen. Once less than half of that is left, `/auth/check`
+re-issues the cookie and nginx passes it on with the response.
 
 Dictation's Auto mode streams to Cartesia, Soniox and ElevenLabs, so it
 needs all three keys. Keys for the Groq and Cerebras chat models are

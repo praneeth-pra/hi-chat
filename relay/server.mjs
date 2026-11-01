@@ -12,7 +12,12 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { acceptWebSocket } from './wsProxy.mjs'
-import { cameraKey, cameraKeyOk, handleAuth } from './auth.mjs'
+import {
+  cameraKey,
+  cameraKeyOk,
+  handleAuth,
+  warnAuthSetup,
+} from './auth.mjs'
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
 import { createMirrorHub, LINK_ENDED } from './mirror.mjs'
@@ -672,6 +677,7 @@ export function createRelay(options = {}) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const port = Number(process.env.RELAY_PORT ?? 3001)
+  warnAuthSetup()
   createRelay().listen(port, '127.0.0.1', () =>
     console.log(`transcription relay on 127.0.0.1:${port}`)
   )

@@ -1,8 +1,12 @@
 // Site login: the whole site sits behind a 6-digit code emailed to
 // LOGIN_EMAIL (sent through Resend with RESEND_API_KEY). nginx asks
 // /auth/check before serving anything; a signed cookie keeps a browser
-// signed in for a year. Without LOGIN_EMAIL nobody can sign in, so a missing
-// variable locks the site instead of opening it.
+// signed in. The session rolls: it lasts SESSION_DAYS (default 30) since the
+// browser was last seen, and /auth/check re-issues the cookie once less than
+// half of that is left. Without LOGIN_EMAIL nobody can sign in, so a missing
+// variable locks the site instead of opening it. In production
+// (NODE_ENV=production) AUTH_SECRET, at least 32 characters, must be set too;
+// without it sign-in is refused rather than signed with a weaker key.
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -19,7 +23,10 @@ export const CODE_MINUTES = 10
 const CODE_TRIES = 5
 const CODE_GAP_MS = 30_000
 const CODES_PER_HOUR = 5
-const SESSION_DAYS = 365
+const DEFAULT_SESSION_DAYS = 30
+// Browsers cap cookie lifetimes at 400 days
+const MAX_SESSION_DAYS = 400
+export const MIN_SECRET_LENGTH = 32
 const COOKIE = 'hc_auth'
 const RESEND_URL = 'https://api.resend.com/emails'
 const NOT_SET_UP = "Sign-in isn't set up: LOGIN_EMAIL is missing on the server."
@@ -28,18 +35,56 @@ const NOT_SET_UP = "Sign-in isn't set up: LOGIN_EMAIL is missing on the server."
 let pending = null
 let asks = []
 let fallbackSecret
+let warnedSetup = false
 
 const loginEmail = (env) => (env.LOGIN_EMAIL ?? '').trim().toLowerCase()
 
 /** True when sign-in is set up (LOGIN_EMAIL is set). */
 export const loginOn = (env = process.env) => loginEmail(env) !== ''
 
-// The cookie is signed with AUTH_SECRET, else a key derived from
-// RESEND_API_KEY (stable across deploys, so they don't sign you out). Changing
-// either signs every browser out.
+const production = (env) => (env.NODE_ENV ?? '').trim() === 'production'
+
+/** How long a session lasts since the browser was last seen, in days. */
+export function sessionDays(env = process.env) {
+  const days = Number(env.SESSION_DAYS)
+  return Number.isFinite(days) && days > 0
+    ? Math.min(days, MAX_SESSION_DAYS)
+    : DEFAULT_SESSION_DAYS
+}
+
+/**
+ * Why sign-in can't work even though LOGIN_EMAIL is set ('' when it can): in
+ * production the cookie key must be AUTH_SECRET, at least 32 characters.
+ */
+export function authSetupError(env = process.env) {
+  if (!loginOn(env) || !production(env)) return ''
+  const own = (env.AUTH_SECRET ?? '').trim()
+  if (!own) return "Sign-in isn't set up: AUTH_SECRET is missing on the server."
+  if (own.length < MIN_SECRET_LENGTH)
+    return `Sign-in isn't set up: AUTH_SECRET on the server must be at least ${MIN_SECRET_LENGTH} characters.`
+  return ''
+}
+
+/** Logs authSetupError once (at startup and on the first auth request). */
+export function warnAuthSetup(env = process.env) {
+  const error = authSetupError(env)
+  if (error && !warnedSetup) {
+    warnedSetup = true
+    console.error(`login: ${error} Sign-in is refused until it is set.`)
+  }
+  return error
+}
+
+// Sign-in works: LOGIN_EMAIL is set and so is a usable cookie key
+const authReady = (env) => loginOn(env) && authSetupError(env) === ''
+
+// The cookie is signed with AUTH_SECRET. Outside production only, it falls
+// back to a key derived from RESEND_API_KEY (stable across restarts), then to
+// a random per-process key, so local runs need no setup. Changing the key
+// signs every browser out.
 function secret(env) {
   const own = (env.AUTH_SECRET ?? '').trim()
-  if (own) return own
+  if (own || production(env)) return own
   const resend = (env.RESEND_API_KEY ?? '').trim()
   if (resend)
     return createHash('sha256').update(`hc-auth:${resend}`).digest('hex')
@@ -68,7 +113,7 @@ function safeEqual(a, b) {
  * It changes with the cookie secret, so rotating AUTH_SECRET revokes it.
  */
 export function cameraKey(env = process.env) {
-  if (!loginOn(env)) return ''
+  if (!authReady(env)) return ''
   return createHmac('sha256', secret(env))
     .update(`camera:${loginEmail(env)}`)
     .digest('hex')
@@ -81,15 +126,47 @@ export function cameraKeyOk(key, env = process.env) {
   return want !== '' && typeof key === 'string' && safeEqual(key, want)
 }
 
-/** Whether the request carries a valid, unexpired session cookie. */
-export function signedIn(cookieHeader, env = process.env, now = Date.now()) {
-  if (!loginOn(env)) return false
+// The expiry (ms) of a valid, unexpired session cookie, else 0
+function sessionExp(cookieHeader, env, now) {
+  if (!authReady(env)) return 0
   const m = (cookieHeader ?? '').match(
     /(?:^|;\s*)hc_auth=(\d+)\.([a-f0-9]{64})(?=;|$)/
   )
-  if (!m) return false
+  if (!m) return 0
   const exp = Number(m[1])
-  return exp > now && safeEqual(m[2], sign(env, exp))
+  return exp > now && safeEqual(m[2], sign(env, exp)) ? exp : 0
+}
+
+/** Whether the request carries a valid, unexpired session cookie. */
+export function signedIn(cookieHeader, env = process.env, now = Date.now()) {
+  return sessionExp(cookieHeader, env, now) > 0
+}
+
+/** A fresh session cookie (Set-Cookie value) good for the whole window. */
+export function sessionCookie(env = process.env, now = Date.now()) {
+  const windowMs = sessionDays(env) * 86_400_000
+  return cookie(
+    sessionToken(env, now + windowMs),
+    Math.round(windowMs / 1000)
+  )
+}
+
+/**
+ * For a signed-in request, the cookie to send back when the session should
+ * roll forward: less than half the window is left, or (a cookie from before
+ * the window shrank) more than the whole window. '' when there's nothing to
+ * renew; null when not signed in.
+ */
+export function renewedCookie(
+  cookieHeader,
+  env = process.env,
+  now = Date.now()
+) {
+  const exp = sessionExp(cookieHeader, env, now)
+  if (!exp) return null
+  const windowMs = sessionDays(env) * 86_400_000
+  const left = exp - now
+  return left < windowMs / 2 || left > windowMs ? sessionCookie(env, now) : ''
 }
 
 const cookie = (value, maxAgeSec) =>
@@ -198,8 +275,11 @@ export async function handleAuth(
     json(res, 403, { error: 'Cross-origin request refused' })
     return true
   }
+  const setupError = warnAuthSetup(env)
   if (path === '/auth/check') {
-    res.writeHead(signedIn(req.headers.cookie, env) ? 204 : 401).end()
+    const renewed = renewedCookie(req.headers.cookie, env)
+    if (renewed === null) res.writeHead(401).end()
+    else res.writeHead(204, renewed ? { 'Set-Cookie': renewed } : {}).end()
     return true
   }
   if (path === '/login' && req.method === 'GET') {
@@ -216,6 +296,7 @@ export async function handleAuth(
   }
   if (path === '/auth/code' && req.method === 'POST') {
     if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
+    if (setupError) return (json(res, 503, { error: setupError }), true)
     const code = newCode()
     if (code === 'wait')
       return (
@@ -246,6 +327,7 @@ export async function handleAuth(
   }
   if (path === '/auth/verify' && req.method === 'POST') {
     if (!loginOn(env)) return (json(res, 503, { error: NOT_SET_UP }), true)
+    if (setupError) return (json(res, 503, { error: setupError }), true)
     const body = await readJson(req)
     const r = checkCode(String(body?.code ?? '').replace(/\D/g, ''))
     if (r !== 'ok') {
@@ -258,17 +340,9 @@ export async function handleAuth(
         true
       )
     }
-    const exp = Date.now() + SESSION_DAYS * 86_400_000
     console.log('login: signed in')
     return (
-      json(
-        res,
-        200,
-        { ok: true },
-        {
-          'Set-Cookie': cookie(sessionToken(env, exp), SESSION_DAYS * 86_400),
-        }
-      ),
+      json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(env) }),
       true
     )
   }
