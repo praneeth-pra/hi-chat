@@ -34,7 +34,8 @@ RUN yarn install --immutable && yarn build:core && make build-web-app
 FROM nginx:alpine
 
 # Node runs the transcription relay (relay/server.mjs) next to nginx
-RUN apk add --no-cache nodejs ca-certificates
+# tini is PID 1: it reaps zombies and passes stop signals to docker/supervise.sh
+RUN apk add --no-cache nodejs ca-certificates tini
 
 # Copy static files from build stage
 COPY --from=builder /app/web-app/dist-web /usr/share/nginx/html
@@ -53,11 +54,15 @@ ENV EXA_API_KEY=""
 ENV LOGIN_EMAIL=""
 ENV RESEND_API_KEY=""
 
-# The relay starts before nginx (the image runs /docker-entrypoint.d/*.sh)
 COPY relay/server.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/logo.png relay/dictionary.txt /relay/
-COPY relay/start-relay.sh /docker-entrypoint.d/40-start-relay.sh
+
+# docker/supervise.sh runs the relay (restarting it with backoff) and nginx
+# (through the image's /docker-entrypoint.sh, which renders the templates).
+COPY docker/supervise.sh /usr/local/bin/supervise.sh
 
 EXPOSE 80
 
-# Start nginx
+# The nginx base image stops with SIGQUIT; the supervisor expects SIGTERM.
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/sbin/tini", "--", "/bin/sh", "/usr/local/bin/supervise.sh"]
 CMD ["nginx", "-g", "daemon off;"]

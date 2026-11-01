@@ -179,7 +179,7 @@ lives in `web-app/public/hichat-extension/`.
 
 ```bash
 yarn workspace @janhq/web-app test
-node --test relay/server.test.mjs
+node --test relay/*.test.mjs
 yarn build:web-app      # output in web-app/dist-web
 ```
 
@@ -192,6 +192,11 @@ docker run -p 8080:8080 -e PORT=8080 \
   -e ELEVENLABS_API_KEY=... \
   -e SONIOX_API_KEY=... -e CARTESIA_API_KEY=... hi-chat
 ```
+
+In the image, tini is PID 1 and `docker/supervise.sh` runs nginx and the
+relay. A crashing relay is restarted with backoff (1s doubling to 30s) and
+each restart is logged as `supervise: relay exited ... restart #N`; stopping
+the container sends SIGTERM to both.
 
 The whole site sits behind a login: a 6-digit code is emailed to
 `LOGIN_EMAIL` through Resend (`RESEND_API_KEY`). Without `LOGIN_EMAIL` nobody
