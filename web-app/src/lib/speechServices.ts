@@ -1,9 +1,14 @@
 import { useAssistant } from '@/hooks/useAssistant'
-import { activeKeyTerms } from './keyTerms'
+import { activeKeyTerms, withInterviewTerms } from './keyTerms'
 
-/** The current assistant's vocabulary, with the saved dictionary as fallback. */
+/**
+ * The current assistant's vocabulary (the saved dictionary as fallback), then
+ * interview words in the room left of the 100.
+ */
 export function keyTerms(): string[] {
-  return activeKeyTerms(useAssistant.getState().currentAssistant?.keyterms)
+  return withInterviewTerms(
+    activeKeyTerms(useAssistant.getState().currentAssistant?.keyterms)
+  )
 }
 
 /** The site login (relay/auth.mjs) answers 401 once this browser is signed out. */

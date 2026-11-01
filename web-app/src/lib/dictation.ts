@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { toast } from 'sonner'
 import {
   TARGET_SAMPLE_RATE,
+  VoiceLeveler,
   concatSamples,
   downsample,
   rms,
@@ -266,6 +267,8 @@ type LiveStream = Pick<LiveTranscriber, 'push' | 'finish' | 'abort'> & {
 
 export type Recording = {
   rate: number
+  /** Computer audio: lifts a quiet, muffled far-side voice before the engines */
+  leveler?: VoiceLeveler
   engine: DictationEngine
   /** Live engines: the stream that gets every block as it comes */
   live?: LiveStream
@@ -625,7 +628,8 @@ export function onBlock(rec: Recording, block: Float32Array) {
     toast('Dictation stopped after 2 minutes of silence')
     void stopDictation()
   }
-  const down = downsample(block, rec.rate / TARGET_SAMPLE_RATE)
+  const sound = rec.leveler ? rec.leveler.process(block) : block
+  const down = downsample(sound, rec.rate / TARGET_SAMPLE_RATE)
   rec.audio.push(down)
   rec.live?.push(down)
   rec.autoLive?.forEach((l) => l.stream.push(down))
@@ -935,6 +939,7 @@ function begin(m: Mic) {
   recordedFrom = m.device === COMPUTER ? 'computer' : 'mic'
   const rec: Recording = {
     rate: m.rate,
+    leveler: m.device === COMPUTER ? new VoiceLeveler(m.rate) : undefined,
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,

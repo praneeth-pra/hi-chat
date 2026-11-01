@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAssistant } from '@/hooks/useAssistant'
-import { setDictionary } from '../keyTerms'
+import { INTERVIEW_KEY_TERMS, setDictionary } from '../keyTerms'
 import {
   fetchLiveToken,
   fetchLiveKeyWithTerms,
@@ -15,16 +15,29 @@ describe('dictation services independent of Speaker', () => {
     vi.unstubAllGlobals()
   })
   it('reads the current assistant vocabulary on each call and retains the saved dictionary', () => {
+    // Interview words follow, in the room the vocabulary leaves
+    const own = (terms: string[]) => keyTerms().slice(0, terms.length)
     setDictionary('Kubernetes\nTerraform')
-    expect(keyTerms()).toEqual(['Kubernetes', 'Terraform'])
+    expect(own(['Kubernetes', 'Terraform'])).toEqual([
+      'Kubernetes',
+      'Terraform',
+    ])
     useAssistant.setState({
       currentAssistant: { id: 'a', keyterms: ['EKS'] } as Assistant,
     })
-    expect(keyTerms()).toEqual(['EKS'])
+    expect(keyTerms()).toEqual(['EKS', ...INTERVIEW_KEY_TERMS])
     useAssistant.setState({
       currentAssistant: { id: 'b', keyterms: ['EC2'] } as Assistant,
     })
-    expect(keyTerms()).toEqual(['EC2'])
+    expect(own(['EC2'])).toEqual(['EC2'])
+  })
+
+  it('never lets interview words push out the vocabulary', () => {
+    const terms = Array.from({ length: 100 }, (_, i) => `term${i}`)
+    useAssistant.setState({
+      currentAssistant: { id: 'a', keyterms: terms } as Assistant,
+    })
+    expect(keyTerms()).toEqual(terms)
   })
   it('preserves live token and vocabulary retrieval for dictation engines', async () => {
     const fetch = vi.fn(
