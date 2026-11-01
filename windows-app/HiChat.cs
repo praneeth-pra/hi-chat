@@ -245,6 +245,7 @@ sealed class ChatWindow : Form
   readonly Updater updater;
   Shortcuts? keys;
   readonly TouchpadScroll touchpad;
+  readonly ComputerAudio computerAudio;
   bool quitting;
   /// On while Hi-chat has the keyboard from Z or a click in a box,
   /// until it goes back or another window takes it. The page shows it by
@@ -295,6 +296,13 @@ sealed class ChatWindow : Form
     Controls.Add(webView);
     mirror = new Mirror(this);
     updater = new Updater(this);
+    // The capture thread hands the sound to the page on the window's thread
+    computerAudio = new ComputerAudio(json =>
+    {
+      if (IsDisposed || !IsHandleCreated) return;
+      try { BeginInvoke(() => webView.CoreWebView2?.PostWebMessageAsJson(json)); }
+      catch (InvalidOperationException) { } // the window is going
+    });
     BuildTray();
   }
 
@@ -487,6 +495,7 @@ sealed class ChatWindow : Form
   {
     quitting = true;
     keys?.Stop();
+    computerAudio.Stop();
     mirror.Close();
     tray.Visible = false;
     Close();
@@ -556,7 +565,8 @@ sealed class ChatWindow : Form
       return;
     }
     var core = webView.CoreWebView2;
-    core.Settings.UserAgent += " HiChatWindows";
+    // HiChatComputerAudio: dictation can record the computer's sound (see ComputerAudio)
+    core.Settings.UserAgent += " HiChatWindows HiChatComputerAudio";
     core.Settings.IsStatusBarEnabled = false;
     // A click into a text box takes the keyboard (see WndProc)
     await core.AddScriptToExecuteOnDocumentCreatedAsync($$"""
@@ -613,6 +623,11 @@ sealed class ChatWindow : Form
         if (keys != null) keys.Dictating = status is "recording" or "starting";
         // Started from the page's own mic button or a shortcut alike
         if (status is "starting" or "recording" or "transcribing") BringUp();
+      }
+      if (Json.String(body, "computerAudio") is { } audio)
+      {
+        if (audio == "start") computerAudio.Start();
+        else if (audio == "stop") computerAudio.Stop();
       }
       // Settings > General > Check for updates
       if (Json.True(body, "checkForUpdates"))

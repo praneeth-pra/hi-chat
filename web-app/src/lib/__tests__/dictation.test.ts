@@ -225,6 +225,70 @@ describe('dictation', () => {
     localStorage.removeItem('dictation-reduce-echo')
     vi.unstubAllGlobals()
   })
+  it('records the computer audio from the app by default, not the mic', async () => {
+    setKeepMicReady(false)
+    useDictation.setState({ status: 'idle', failed: undefined })
+    const mic = fakeMic()
+    mic.open()
+    const sent: unknown[] = []
+    let listener: ((e: { data: unknown }) => void) | undefined
+    const reply = (data: unknown) => listener?.({ data })
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 HiChatWindows HiChatComputerAudio',
+      mediaDevices: {
+        getUserMedia: mic.getUserMedia,
+        enumerateDevices: async () => [],
+      },
+    })
+    ;(window as unknown as { chrome: unknown }).chrome = {
+      webview: {
+        postMessage: (m: { computerAudio?: string }) => {
+          sent.push(m)
+          if (m.computerAudio === 'start')
+            queueMicrotask(() =>
+              reply({ computerAudio: 'started', rate: 48000 })
+            )
+        },
+        addEventListener: (_: string, l: typeof listener) => (listener = l),
+        removeEventListener: () => (listener = undefined),
+      },
+    }
+    localStorage.removeItem('dictation-source')
+    await startDictation()
+    expect(useDictation.getState().status).toBe('recording')
+    expect(sent).toContainEqual({ computerAudio: 'start' })
+    expect(mic.getUserMedia).not.toHaveBeenCalled()
+    // 40 ms of 16-bit sound at 48 kHz moves the level dot
+    const pcm = new Uint8Array(3840)
+    for (let i = 0; i < pcm.length; i += 2) pcm[i + 1] = 0x20
+    reply({ computerAudio: 'data', pcm: btoa(String.fromCharCode(...pcm)) })
+    expect(useDictation.getState().level).toBeGreaterThan(0)
+    cancelDictation()
+    expect(sent.at(-1)).toEqual({ computerAudio: 'stop' })
+
+    // The app can't record it: the mic, once
+    sent.length = 0
+    ;(window as unknown as { chrome: unknown }).chrome = {
+      webview: {
+        postMessage: (m: { computerAudio?: string }) => {
+          sent.push(m)
+          if (m.computerAudio === 'start')
+            queueMicrotask(() =>
+              reply({ computerAudio: 'failed', error: 'no output' })
+            )
+        },
+        addEventListener: (_: string, l: typeof listener) => (listener = l),
+        removeEventListener: () => (listener = undefined),
+      },
+    }
+    await startDictation()
+    expect(mic.getUserMedia).toHaveBeenCalledTimes(1)
+    expect(useDictation.getState().status).toBe('recording')
+    cancelDictation()
+    delete (window as unknown as { chrome?: unknown }).chrome
+    vi.unstubAllGlobals()
+  })
+
   it('remembers the chosen engine, Auto by default', () => {
     localStorage.removeItem('dictation-engine')
     expect(getDictationEngine()).toBe('auto')
