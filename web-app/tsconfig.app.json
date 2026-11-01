@@ -7,8 +7,10 @@
     "module": "ESNext",
     "skipLibCheck": true,
     /* Only these global types: the speech SDK's old @types/webrtc would
-       otherwise replace the browser's own WebRTC types */
-    "types": [],
+       otherwise replace the browser's own WebRTC types. Node's are listed
+       explicitly (NodeJS.Timeout, path, Array#at); they used to leak in
+       through vitest 3's typings via src/test/setup.ts */
+    "types": ["node"],
 
     /* Bundler mode */
     "moduleResolution": "bundler",

@@ -17,14 +17,12 @@
   "scripts": {
     "build": "tsc && vite build",
     "dev": "tsc --watch",
-    "test": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@janhq/core": "workspace:*",
     "typescript": "5.9.2",
-    "vite": "5.4.20",
-    "vitest": "2.1.9"
+    "vite": "5.4.20"
   },
   "peerDependencies": {
     "@janhq/core": "*"

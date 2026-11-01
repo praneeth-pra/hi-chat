@@ -15,7 +15,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - run: yarn install
+      # Same as the Dockerfile: fail if yarn.lock is out of date instead of rewriting it
+      - run: yarn install --immutable
       - run: yarn build:core
       - name: Web app tests
         run: yarn workspace @janhq/web-app test
@@ -25,6 +26,42 @@ jobs:
         run: yarn build:web-app
       - name: Strict web application types
         run: yarn workspace @janhq/web-app exec tsc --noEmit -p tsconfig.app.json
+
+  # Known vulnerabilities in yarn.lock, from the OSV database.
+  # Policy: report every finding, fail only on CRITICAL (CVSS >= 9).
+  # Failing on HIGH was too noisy: after the last upgrade round ~80 HIGH
+  # advisories remain, almost all in build/dev tooling (vite dev server,
+  # minimatch, rollup, nanoid, the AWS SDK's pinned deps ...), and yarn.lock
+  # does not say which packages ship to the browser, so a HIGH gate would
+  # stay red without telling us anything new. Ignores live in osv-scanner.toml.
+  dependency-audit:
+    runs-on: ubuntu-latest
+    env:
+      OSV_SCANNER_VERSION: v2.7.0
+      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install osv-scanner (pinned release, checksum verified)
+        run: |
+          curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/$OSV_SCANNER_VERSION/osv-scanner_linux_amd64"
+          echo "$OSV_SCANNER_SHA256  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+      - name: Scan yarn.lock
+        run: |
+          # Exit 1 only means "found something"; anything else is a scanner error
+          ./osv-scanner scan source -L yarn.lock --format json --output osv.json || [ $? -eq 1 ]
+          ./osv-scanner scan source -L yarn.lock --format markdown >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Fail on CRITICAL findings
+        run: |
+          critical=$(jq -r '.results[]?.packages[] | .package as $p | .groups[]
+            | select((.max_severity // "" | tonumber? // 0) >= 9)
+            | "\($p.name)@\($p.version) \(.ids | join(","))"' osv.json)
+          if [ -n "$critical" ]; then
+            echo "::error::CRITICAL vulnerabilities in yarn.lock:"
+            echo "$critical"
+            exit 1
+          fi
+          echo "No CRITICAL findings ($(jq '[.results[]?.packages[].groups[]] | length' osv.json) lower-severity findings reported above)"
 
   docker:
     runs-on: ubuntu-latest

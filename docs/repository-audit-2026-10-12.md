@@ -76,6 +76,8 @@ The fresh registry scan reports **122 vulnerability/advisory records**: **9 crit
 
 The [inventory](security-advisories-2026-10-12.json) records packages, affected versions and advisory URLs. Remaining examples include optional SDK XML/form-data/WebSocket dependencies, Vite/Rollup development tooling, test environments and archive helpers. No dependency upgrades are hidden in this PR. Updating compatible parent SDK/toolchain versions in separately validated changes, adding a reviewed CI advisory baseline and scanning the deployed image are still required. A green test/build result is not a clean vulnerability scan.
 
+Follow-up (2026-11-01): CI now runs a `dependency-audit` job (osv-scanner on `yarn.lock`, config in `osv-scanner.toml`) that reports all findings and fails on CRITICAL only; see the comment in `.github/workflows/groq-web-ci.yml` for why HIGH is not gated. vitest moved to 4.x (removing tinypool), and tar, form-data, fast-xml-parser and happy-dom were raised to fixed versions, which took osv-scanner's count from 13 critical / 115 high to 0 critical / 81 high (per package version and advisory). Scanning the deployed image is still open.
+
 ### Design and maintainability
 
 - `useChat`, `ChatInput` and `accuracyReview` combine orchestration, state, UI preparation and provider concerns. Keep the tested public behavior while progressively extracting request lifecycle, persistence and evidence-review modules. A wholesale rewrite during a security/performance change would make regressions harder to isolate.

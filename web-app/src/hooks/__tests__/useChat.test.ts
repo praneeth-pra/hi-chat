@@ -341,7 +341,10 @@ vi.mock('@/lib/completion', () => ({
 }))
 
 vi.mock('@/lib/messages', () => ({
-  CompletionMessagesBuilder: vi.fn(() => mockCompletionMessagesBuilder),
+  // Functions, not arrows: vitest 4 mocks called with `new` must be constructible
+  CompletionMessagesBuilder: vi.fn(function () {
+    return mockCompletionMessagesBuilder
+  }),
 }))
 
 vi.mock('@/lib/instructionTemplate', () => ({
@@ -349,10 +352,12 @@ vi.mock('@/lib/instructionTemplate', () => ({
 }))
 
 vi.mock('@/utils/reasoning', () => ({
-  ReasoningProcessor: vi.fn(() => ({
-    processReasoningChunk: vi.fn(() => null),
-    finalize: vi.fn(() => ''),
-  })),
+  ReasoningProcessor: vi.fn(function () {
+    return {
+      processReasoningChunk: vi.fn(() => null),
+      finalize: vi.fn(() => ''),
+    }
+  }),
   extractReasoningFromMessage: vi.fn(() => null),
 }))
 
