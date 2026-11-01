@@ -35,6 +35,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { dictionaryTerms, getDictionary, setDictionary } from '@/lib/keyTerms'
 import { getDictationMic, listMics, setDictationMic } from '@/lib/micActivity'
 import {
+  DICTATION_SOURCES,
+  computerAudioAvailable,
+  getDictationSource,
+  setDictationSource,
+} from '@/lib/computerAudio'
+import {
   CHAT_THINKING_LEVELS,
   type ChatThinking,
   getChatThinking,
@@ -85,6 +91,9 @@ function General() {
   const [chatThinking, setChatThinkingState] =
     useState<ChatThinking>(getChatThinking)
   const [dictationMic, setDictationMicState] = useState(getDictationMic)
+  const [dictationSource, setDictationSourceState] =
+    useState(getDictationSource)
+  const canRecordComputer = computerAudioAvailable()
   const [mics, setMics] = useState<string[] | null>(null)
   const loadMics = (open: boolean) => {
     if (!open) return
@@ -332,6 +341,44 @@ function General() {
                   </DropdownMenu>
                 }
               />
+              {canRecordComputer && (
+                <CardItem
+                  title="Record from"
+                  description="Computer audio takes the call's sound straight from this computer, with no echo; the microphone hears the room."
+                  actions={
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex cursor-pointer items-center gap-1 px-2.5 py-1 rounded-lg border border-main-view-fg/10 bg-main-view-fg/[0.04] hover:bg-main-view-fg/[0.08] transition-colors text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/50 text-main-view-fg font-medium max-w-full text-left"
+                        >
+                          {
+                            DICTATION_SOURCES.find(
+                              (s) => s.value === dictationSource
+                            )?.label
+                          }
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {DICTATION_SOURCES.map((s) => (
+                          <DropdownMenuItem
+                            key={s.value}
+                            className={`cursor-pointer my-0.5 ${dictationSource === s.value ? 'bg-main-view-fg/5' : ''}`}
+                            onClick={() => {
+                              setDictationSource(s.value)
+                              setDictationSourceState(s.value)
+                              // An open dictation input moves to it now
+                              switchMic()
+                            }}
+                          >
+                            {s.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  }
+                />
+              )}
               <CardItem
                 title="Microphone"
                 description="The mic dictation records from."

@@ -151,6 +151,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   var typingReturnTo: NSRunningApplication?
   /// Keeps App Nap off, so the mirror stays live while Hi-chat is hidden.
   var awake: NSObjectProtocol?
+  /// Dictation from the Mac's own sound (see HiChatComputerAudio.swift)
+  lazy var computerAudio = ComputerAudio { [weak self] json in
+    self?.webView.evaluateJavaScript("window.hiChatComputerAudio && window.hiChatComputerAudio(\(json))")
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     // App Nap would throttle Hi-chat's timers and network when it is hidden;
@@ -175,6 +179,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   func applicationWillTerminate(_ notification: Notification) {
     if mirrorTask?.isRunning == true { tellMirror(["command": "quit"]) }
+    computerAudio.stop()
   }
 
   // MARK: Window
@@ -182,7 +187,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
   func buildWindow() {
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .default()
-    config.applicationNameForUserAgent = "Version/18.0 Safari/605.1.15 HiChatMac"
+    // HiChatComputerAudio: dictation can record the Mac's sound (see ComputerAudio)
+    config.applicationNameForUserAgent = "Version/18.0 Safari/605.1.15 HiChatMac HiChatComputerAudio"
     config.mediaTypesRequiringUserActionForPlayback = []
     config.preferences.setValue(true, forKey: "developerExtrasEnabled")
     config.userContentController.add(self, name: "hiChat")
@@ -819,6 +825,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
     guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "https",
           message.frameInfo.securityOrigin.host == appHost,
           let body = message.body as? [String: Any] else { return }
+    if let audio = body["computerAudio"] as? String {
+      if audio == "start" { computerAudio.start() } else if audio == "stop" { computerAudio.stop() }
+    }
     // Settings > General > Check for updates
     if body["checkForUpdates"] as? Bool == true { checkForUpdates(nil) }
     // Settings > App keys

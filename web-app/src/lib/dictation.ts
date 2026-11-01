@@ -31,6 +31,7 @@ import {
   warmJudges,
 } from '@/lib/dictationJudge'
 import { withCodingTerms } from '@/lib/keyTerms'
+import { openComputerAudio, usesComputerAudio } from '@/lib/computerAudio'
 import { useDictationEnabled } from '@/hooks/useDictationEnabled'
 
 /**
@@ -46,11 +47,7 @@ import { useDictationEnabled } from '@/hooks/useDictationEnabled'
  * ElevenLabs by default): as soon as two agree their text
  * is sent, else a judge model writes the best version.
  */
-export type DictationEngine =
-  | 'elevenlabs'
-  | 'soniox'
-  | 'cartesia'
-  | 'auto'
+export type DictationEngine = 'elevenlabs' | 'soniox' | 'cartesia' | 'auto'
 export const DICTATION_ENGINES: { value: DictationEngine; label: string }[] = [
   { value: 'auto', label: 'Auto (race the chosen engines)' },
   { value: 'soniox', label: 'Soniox (live)' },
@@ -290,14 +287,18 @@ export type Recording = {
 
 let recording: Recording | undefined
 
-/** The open mic, kept between dictations when "keep the mic ready" is on. */
+/**
+ * The open mic, or the computer's sound (see computerAudio.ts), kept between
+ * dictations when "keep the mic ready" is on.
+ */
 type Mic = {
-  stream: MediaStream
-  ctx: AudioContext
-  tap: AudioWorkletNode
+  /** The sample rate of its blocks */
+  rate: number
+  alive: () => boolean
+  close: () => void
   /** The last moments before a dictation starts, so no first word is lost */
   preroll: Float32Array[]
-  /** The Microphone setting it was opened for */
+  /** The Microphone setting it was opened for, or COMPUTER */
   device: string
   /** Which input that was (its group), to notice when the default changes */
   deviceKey?: string
@@ -306,12 +307,11 @@ type Mic = {
 let mic: Mic | undefined
 const PREROLL_BLOCKS = 3 // ~130 ms at 48 kHz
 
-function micAlive(m: Mic) {
-  return (
-    m.ctx.state === 'running' &&
-    m.stream.getAudioTracks().some((t) => t.readyState === 'live')
-  )
-}
+/** Mic.device for the computer's sound */
+const COMPUTER = '\0computer'
+
+/** What dictation should record from now: COMPUTER or the Microphone setting. */
+const wantedDevice = () => (usesComputerAudio() ? COMPUTER : getDictationMic())
 
 /** The input the Microphone setting picks right now, and its key. */
 async function wantedMic() {
@@ -359,9 +359,48 @@ function takeEarlyStream(): MicStream | undefined {
   return undefined
 }
 
+/** Computer audio couldn't start this session: said once, then the mic. */
+let computerFailed = false
+
+/** The computer's sound, from the app. */
+async function openComputer(): Promise<Mic> {
+  const m: Mic = {
+    rate: 0,
+    alive: () => false,
+    close: () => {},
+    preroll: [],
+    device: COMPUTER,
+    reduceEcho: getDictationReduceEcho(),
+  }
+  const audio = await openComputerAudio((block) => {
+    if (recording && mic === m) return onBlock(recording, block)
+    m.preroll.push(block)
+    if (m.preroll.length > PREROLL_BLOCKS) m.preroll.shift()
+  })
+  m.rate = audio.rate
+  m.alive = audio.alive
+  m.close = audio.close
+  computerFailed = false
+  return m
+}
+
 // A new audio context each time the mic opens, made once the mic is open
 // (Safari doesn't reliably restart a suspended one, so it's never suspended).
 async function openMic(): Promise<Mic> {
+  if (usesComputerAudio()) {
+    takeEarlyStream()
+      ?.stream.getTracks()
+      .forEach((t) => t.stop())
+    try {
+      return await openComputer()
+    } catch (err) {
+      if (!computerFailed)
+        toast(
+          `Computer audio unavailable, using the microphone: ${(err as Error).message}`
+        )
+      computerFailed = true
+    }
+  }
   const { stream, device, key, reduceEcho } =
     takeEarlyStream() ?? (await getMicStream())
   let ctx: AudioContext | undefined
@@ -386,9 +425,16 @@ async function openMic(): Promise<Mic> {
   // Outputs silence; the connection just keeps the node running.
   tap.connect(ctx.destination)
   const m: Mic = {
-    stream,
-    ctx,
-    tap,
+    rate: ctx.sampleRate,
+    alive: () =>
+      ctx.state === 'running' &&
+      stream.getAudioTracks().some((t) => t.readyState === 'live'),
+    close: () => {
+      tap.port.onmessage = null
+      tap.disconnect()
+      stream.getTracks().forEach((t) => t.stop())
+      ctx.close().catch(() => {})
+    },
     preroll: [],
     device,
     deviceKey: key,
@@ -407,10 +453,7 @@ function closeMic() {
     ?.stream.getTracks()
     .forEach((t) => t.stop())
   if (!mic) return
-  mic.tap.port.onmessage = null
-  mic.tap.disconnect()
-  mic.stream.getTracks().forEach((t) => t.stop())
-  mic.ctx.close().catch(() => {})
+  mic.close()
   mic = undefined
 }
 
@@ -428,9 +471,12 @@ let opening: Promise<Mic> | undefined
 
 /** The mic is open, and on the input the Microphone setting picks. */
 function micReady(m: Mic) {
+  const wanted = wantedDevice()
+  // Computer audio failed this session: the mic it fell back to will do
+  const fellBack = wanted === COMPUTER && computerFailed
   return (
-    micAlive(m) &&
-    m.device === getDictationMic() &&
+    m.alive() &&
+    (m.device === wanted || (fellBack && m.device === getDictationMic())) &&
     m.reduceEcho === getDictationReduceEcho()
   )
 }
@@ -489,6 +535,11 @@ export function readyMicEarly() {
     (await micAllowed())
   void wanted().then(async (yes) => {
     if (!yes || early || mic || opening) return
+    // The computer's sound needs no click first, and no mic
+    if (usesComputerAudio()) {
+      ensureMic().catch(() => {})
+      return
+    }
     try {
       const opened = await getMicStream()
       if (early || mic || opening || !getKeepMicReady()) {
@@ -510,7 +561,7 @@ export function readyMicEarly() {
   // A mic plugged in or out (AirPods connecting) can change which input the
   // setting picks; the open mic follows it
   navigator.mediaDevices.addEventListener?.('devicechange', () => {
-    if (recording || opening || !mic) return
+    if (recording || opening || !mic || mic.device === COMPUTER) return
     const open = mic
     void wantedMic()
       .then(({ key }) => {
@@ -876,10 +927,14 @@ export function gatherAuto(
   })
 }
 
+/** Where the last dictation was recorded from, for the speech log */
+let recordedFrom: 'computer' | 'mic' = 'mic'
+
 function begin(m: Mic) {
   const engine = getDictationEngine()
+  recordedFrom = m.device === COMPUTER ? 'computer' : 'mic'
   const rec: Recording = {
-    rate: m.ctx.sampleRate,
+    rate: m.rate,
     engine,
     live: liveStream(engine),
     autoLive: engine === 'auto' ? autoLiveStreams() : undefined,
@@ -1142,7 +1197,7 @@ export async function reportAuto(
     .join(' ')
   const texts = engines.map((e) => `${e}: ${heard.get(e) ?? '-'}`).join(' | ')
   reportSpeech(
-    `dictation auto: sent=${info.sent} total=${info.totalMs}ms ${times}` +
+    `dictation auto: sent=${info.sent} total=${info.totalMs}ms from=${recordedFrom} ${times}` +
       `${info.judgeMs !== undefined ? ` judge=${info.judgeMs}ms` : ''}` +
       ` | ${texts}${info.judged ? ` | judge: ${JSON.stringify(info.judged)}` : ''}`
   )

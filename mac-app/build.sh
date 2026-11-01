@@ -9,7 +9,8 @@ APP="$OUT/Hi-chat.app"
 rm -rf "$OUT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 for arch in arm64 x86_64; do
-  swiftc -O -parse-as-library -target "$arch-apple-macos14.0" HiChat.swift -o "$OUT/HiChat-$arch"
+  swiftc -O -parse-as-library -target "$arch-apple-macos14.0" HiChat.swift HiChatComputerAudio.swift \
+    -o "$OUT/HiChat-$arch"
   swiftc -O -parse-as-library -target "$arch-apple-macos14.0" \
     HiChatMirror.swift -o "$OUT/HiChatMirror-$arch"
 done
