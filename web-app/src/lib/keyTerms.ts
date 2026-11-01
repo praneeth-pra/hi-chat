@@ -57,9 +57,74 @@ export const CODING_KEY_TERMS = [
   'hash map',
 ]
 
-/** The assistant's terms, then the coding terms it doesn't already have. */
+/**
+ * Interview words the engines misheard in P's interviews (30 Oct, 1 Nov:
+ * "active join" for anti join, "Sheffield" for shuffle, "Unitarian Test" for
+ * endurance test, "unsafe exceptions" for unchecked). The live engines get
+ * them in the room the assistant's own terms leave of the 100, and the judge
+ * gets them all.
+ */
+export const INTERVIEW_KEY_TERMS = [
+  'anti join',
+  'left anti join',
+  'left outer join',
+  'inner join',
+  'group by',
+  'repartition',
+  'coalesce',
+  'shuffle',
+  'partition',
+  'AQE',
+  'Apache Iceberg',
+  'Apache Spark',
+  'PySpark',
+  'Spark architecture',
+  'cluster manager',
+  'driver program',
+  'Databricks',
+  'Snowflake',
+  'Redshift',
+  'Airflow',
+  'Kafka',
+  'ETL pipeline',
+  'schema evolution',
+  'data mesh',
+  'data quality',
+  'S3 bucket',
+  'Splunk',
+  'Dynatrace',
+  'Grafana',
+  'JMeter',
+  'LoadRunner',
+  'endurance test',
+  'memory leak',
+  'correlation',
+  'Jenkins',
+  'JQL',
+  'Selenium',
+  'checked exception',
+  'unchecked exception',
+  'ArrayIndexOutOfBoundsException',
+  'garbage collector',
+  'string pool',
+  'immutable',
+  'tuple',
+  'microservices',
+  'message queue',
+  'MySQL',
+  'SSMS',
+]
+
+/** The given terms, then interview terms they don't have, up to `max`. */
+export const withInterviewTerms = (terms: string[], max = MAX_KEY_TERMS) =>
+  cleanKeyTerms([...terms, ...INTERVIEW_KEY_TERMS], max)
+
+/** The assistant's terms, then the coding and interview terms it doesn't already have. */
 export const withCodingTerms = (terms: string[]) =>
-  cleanKeyTerms([...terms, ...CODING_KEY_TERMS], Infinity)
+  cleanKeyTerms(
+    [...terms, ...CODING_KEY_TERMS, ...INTERVIEW_KEY_TERMS],
+    Infinity
+  )
 
 /**
  * Your own dictionary (for example Wispr Flow's), kept in this browser. It
