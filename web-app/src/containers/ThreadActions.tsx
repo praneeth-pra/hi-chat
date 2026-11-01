@@ -3,8 +3,8 @@ import { IconTrash } from '@tabler/icons-react'
 import { useThreads } from '@/hooks/useThreads'
 import { DeleteThreadDialog } from './dialogs/DeleteThreadDialog'
 import { ChatQuestionsDialog } from './dialogs/ChatQuestionsDialog'
-import { MirrorLinkButton } from './MirrorLinkButton'
-import { RemoteSessionButton } from './RemoteSessionButton'
+import { MirrorLinkButton } from '@/features/hichat/mirror/MirrorLinkButton'
+import { RemoteSessionButton } from '@/features/hichat/mirror/RemoteSessionButton'
 import { DictationToggleButton } from './DictationToggleButton'
 
 /** Dictation, the mirror and its link: on the home screen and in a chat. */

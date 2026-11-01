@@ -5,8 +5,10 @@ import userEvent from '@testing-library/user-event'
 // What the page passes the camera: the ticket, once let in
 const camera = vi.hoisted(() => ({ ticket: undefined as string | undefined }))
 
-vi.mock('@/hooks/useCameraSender', async (actual) => ({
-  ...(await actual<typeof import('@/hooks/useCameraSender')>()),
+vi.mock('@/features/hichat/camera/useCameraSender', async (actual) => ({
+  ...(await actual<
+    typeof import('@/features/hichat/camera/useCameraSender')
+  >()),
   useCameraSender: ({ ticket }: { ticket?: string }) => {
     camera.ticket = ticket
     return {
@@ -21,8 +23,10 @@ vi.mock('@/hooks/useCameraSender', async (actual) => ({
     }
   },
 }))
-vi.mock('@/containers/RemoteCameraPanel', async (actual) => ({
-  ...(await actual<typeof import('@/containers/RemoteCameraPanel')>()),
+vi.mock('@/features/hichat/camera/RemoteCameraPanel', async (actual) => ({
+  ...(await actual<
+    typeof import('@/features/hichat/camera/RemoteCameraPanel')
+  >()),
   RemoteCameraPanel: () => null,
 }))
 

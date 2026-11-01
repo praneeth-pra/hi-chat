@@ -15,8 +15,10 @@ type Viewer = {
 }
 const direct = vi.hoisted(() => ({ viewer: null as Viewer | null }))
 
-vi.mock('@/lib/mirrorDirect', async (actual) => ({
-  ...(await actual<typeof import('@/lib/mirrorDirect')>()),
+vi.mock('@/features/hichat/mirror/lib/mirrorDirect', async (actual) => ({
+  ...(await actual<
+    typeof import('@/features/hichat/mirror/lib/mirrorDirect')
+  >()),
   // The real sequence filter, a stand-in for the WebRTC channel
   createDirectViewer: (opts: Viewer) => {
     direct.viewer = opts

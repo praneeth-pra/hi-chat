@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
-import type { MirrorState } from '@/lib/remoteMirror'
+import type { MirrorState } from '@/features/hichat/mirror/lib/remoteMirror'
 
 // How the mirror page is laid out: the shared screen, the text column and
 // the camera panel side by side on a laptop, and Hi-chat's own look.

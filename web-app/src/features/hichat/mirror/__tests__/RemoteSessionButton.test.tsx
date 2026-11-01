@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RemoteSessionButton } from '../RemoteSessionButton'
-import { useRemoteSession } from '@/hooks/useRemoteSession'
+import { useRemoteSession } from '@/features/hichat/mirror/useRemoteSession'
 
 describe('remote session button', () => {
   it('is off by default and turns the remote session on and off', async () => {

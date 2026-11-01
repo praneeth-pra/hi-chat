@@ -18,8 +18,8 @@ import {
   mirrorLinkUrl,
   renewMirrorLink,
   shareMirrorLink,
-} from '@/lib/mirrorLink'
-import { downloadCameraExtension } from '@/lib/remoteCamera'
+} from '@/features/hichat/mirror/lib/mirrorLink'
+import { downloadCameraExtension } from '@/features/hichat/camera/remoteCamera'
 import { cn } from '@/lib/utils'
 
 // This app's mirror link, in the chat header: copy it to follow this app's

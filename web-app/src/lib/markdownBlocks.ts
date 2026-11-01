@@ -1,4 +1,4 @@
-// Streaming markdown, drawn in blocks (containers/mirror/MirrorMessage.tsx).
+// Streaming markdown, drawn in blocks (features/hichat/mirror/view/MirrorMessage.tsx).
 
 /**
  * Splits markdown into blocks at blank lines, never inside a code block.

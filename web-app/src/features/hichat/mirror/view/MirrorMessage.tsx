@@ -11,7 +11,7 @@ import ThinkingBlock from '@/containers/ThinkingBlock'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { useSmoothText } from '@/lib/useSmoothText'
 import { splitReasoning } from '@/lib/splitReasoning'
-import type { MirrorMessage as MirrorMessageData } from '@/lib/remoteMirror'
+import type { MirrorMessage as MirrorMessageData } from '@/features/hichat/mirror/lib/remoteMirror'
 import { cn } from '@/lib/utils'
 import { IN_STEP_MS, inStepLength, useInStep } from './inStep'
 

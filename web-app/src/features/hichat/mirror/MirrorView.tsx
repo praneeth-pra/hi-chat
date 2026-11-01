@@ -1,7 +1,10 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { IconArrowDown } from '@tabler/icons-react'
 import { AccuracyProgress } from '@/containers/AccuracyProgress'
-import { RemoteCameraPanel, StatusPill } from '@/containers/RemoteCameraPanel'
+import {
+  RemoteCameraPanel,
+  StatusPill,
+} from '@/features/hichat/camera/RemoteCameraPanel'
 import {
   AUTOSTART,
   CAMERA_PANEL,
@@ -9,11 +12,11 @@ import {
   store,
   stored,
   useCameraSender,
-} from '@/hooks/useCameraSender'
+} from '@/features/hichat/camera/useCameraSender'
 import {
   useMirrorTransport,
   useScreenWakeLock,
-} from './mirror/useMirrorTransport'
+} from './view/useMirrorTransport'
 import {
   GAP,
   PANEL_WIDTH,
@@ -23,28 +26,28 @@ import {
   clampScreen,
   useLook,
   useWide,
-} from './mirror/layout'
-import { mirrorStatus } from './mirror/connectionStatus'
-import { CALL_MUTED } from './mirror/CallSound'
-import { MirrorHeader } from './mirror/MirrorHeader'
-import { useFollowScroll } from './mirror/useFollowScroll'
-import { Divider } from './mirror/Divider'
-import { LinkDoor } from './mirror/LinkDoor'
-import { SharedScreen } from './mirror/SharedScreen'
-import { EmptyState } from './mirror/EmptyState'
-import { MirrorComposer } from './mirror/MirrorComposer'
-import { MirrorMessage } from './mirror/MirrorMessage'
-import { streamingMsg } from './mirror/streamingMsg'
+} from './view/layout'
+import { mirrorStatus } from './view/connectionStatus'
+import { CALL_MUTED } from './view/CallSound'
+import { MirrorHeader } from './view/MirrorHeader'
+import { useFollowScroll } from './view/useFollowScroll'
+import { Divider } from './view/Divider'
+import { LinkDoor } from './view/LinkDoor'
+import { SharedScreen } from './view/SharedScreen'
+import { EmptyState } from './view/EmptyState'
+import { MirrorComposer } from './view/MirrorComposer'
+import { MirrorMessage } from './view/MirrorMessage'
+import { streamingMsg } from './view/streamingMsg'
 
-export type { Gate } from './mirror/useMirrorTransport'
+export type { Gate } from './view/useMirrorTransport'
 
 // The remote mirror's viewer: open an app's link (/m/<link>) on another
 // computer and type the code Hi-chat shows, to follow the conversation open
 // in that app, live (see lib/remoteMirror.ts).
 // Its camera panel sends this computer's camera and mic to Meet on the
-// computer running Hi-chat (see lib/remoteCamera.ts), and while that computer
+// computer running Hi-chat (see features/hichat/camera/remoteCamera.ts), and while that computer
 // presents in Meet, its shared screen fills the space left of the text.
-// The page is composed from containers/mirror/: the transport
+// The page is composed from view/: the transport
 // (useMirrorTransport), the layout, the shared screen and its connection
 // readout, the code door and the messages.
 

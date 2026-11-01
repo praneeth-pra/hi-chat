@@ -11,7 +11,10 @@ import {
 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { cameraState, type CameraSender } from '@/hooks/useCameraSender'
+import {
+  cameraState,
+  type CameraSender,
+} from '@/features/hichat/camera/useCameraSender'
 import { cn } from '@/lib/utils'
 
 // The remote camera's controls, shown beside the mirror: a preview, the

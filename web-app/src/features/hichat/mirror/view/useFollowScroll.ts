@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { UIEvent } from 'react'
-import type { MirrorState } from '@/lib/remoteMirror'
+import type { MirrorState } from '@/features/hichat/mirror/lib/remoteMirror'
 
 /**
  * The conversation's scrolling: it follows Hi-chat's scroll (to the same

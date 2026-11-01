@@ -27,15 +27,18 @@ import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { usePrompt } from '@/hooks/usePrompt'
 import { useThreads } from '@/hooks/useThreads'
-import { showMirrorCode } from '@/containers/MirrorCodeToast'
-import { createDirectSender, SEQUENCED } from '@/lib/mirrorDirect'
-import { createGate, type Knock } from '@/lib/mirrorGate'
+import { showMirrorCode } from '@/features/hichat/mirror/MirrorCodeToast'
+import {
+  createDirectSender,
+  SEQUENCED,
+} from '@/features/hichat/mirror/lib/mirrorDirect'
+import { createGate, type Knock } from '@/features/hichat/mirror/lib/mirrorGate'
 import {
   linkFromPath,
   mirrorLinkBorn,
   mirrorLinkSecret,
   onMirrorLinkRenewed,
-} from '@/lib/mirrorLink'
+} from '@/features/hichat/mirror/lib/mirrorLink'
 
 // The remote laptop's page (/m/<link>) follows the conversation and sends the
 // camera, so it never sends a conversation of its own over the real one
@@ -708,7 +711,7 @@ export function startRemoteMirror({
   }
 }
 
-// Viewing side (containers/MirrorView.tsx)
+// Viewing side (MirrorView.tsx)
 
 type Stream = { id: string; text: string } | null
 export type MirrorState = {

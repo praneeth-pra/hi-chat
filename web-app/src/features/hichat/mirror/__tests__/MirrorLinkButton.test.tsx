@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { endsIn, onMirrorLinkRenewed } from '@/lib/mirrorLink'
+import {
+  endsIn,
+  onMirrorLinkRenewed,
+} from '@/features/hichat/mirror/lib/mirrorLink'
 import { MirrorLinkButton } from '../MirrorLinkButton'
 
 beforeEach(() => localStorage.clear())

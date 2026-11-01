@@ -1,5 +1,5 @@
 import { IconBroadcast, IconBroadcastOff } from '@tabler/icons-react'
-import { useRemoteSession } from '@/hooks/useRemoteSession'
+import { useRemoteSession } from '@/features/hichat/mirror/useRemoteSession'
 import { cn } from '@/lib/utils'
 
 // In the chat header: turns the remote session (the mirror to this app's

@@ -1565,7 +1565,7 @@ struct HiChatMain {
 
 // MARK: Remote control
 
-/// Replays /mirror's mouse and keys (web-app/src/lib/remoteInput.ts) while
+/// Replays /mirror's mouse and keys (web-app/src/features/hichat/mirror/lib/remoteInput.ts) while
 /// someone edits the shared screen there: they arrive from Hi-chat's page,
 /// which takes them only from a signed-in /mirror. Positions are 0 to 1
 /// across the shared screen; `a`, the picture's width / height, says which

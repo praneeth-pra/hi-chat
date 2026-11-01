@@ -12,7 +12,7 @@
 // Each carries `m`, the modifiers held (MOD bits), and mouse actions `a`, the
 // shared picture's width / height, so the app knows which display it is.
 
-import type { RemoteInput } from '@/lib/mirrorDirect'
+import type { RemoteInput } from '@/features/hichat/mirror/lib/mirrorDirect'
 
 export const MOD = { cmd: 1, shift: 2, option: 4, control: 8 } as const
 

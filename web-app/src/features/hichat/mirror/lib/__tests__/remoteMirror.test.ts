@@ -14,7 +14,7 @@ import {
   startRemoteMirror,
   streamUpdate,
 } from '../remoteMirror'
-import { markdownBlocks } from '../markdownBlocks'
+import { markdownBlocks } from '@/lib/markdownBlocks'
 import { useAppState } from '@/hooks/useAppState'
 import { useMessages } from '@/hooks/useMessages'
 import { usePrompt } from '@/hooks/usePrompt'
@@ -188,9 +188,7 @@ describe('remote mirror', () => {
         link,
         1234.5
       )
-    ).toBe(
-      `wss://hi.example/api/mirror?role=send&link=${link}&born=1234&v=1`
-    )
+    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}&born=1234&v=1`)
   })
 
   it('viewer state follows snapshots and streams', () => {

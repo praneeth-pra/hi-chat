@@ -1,4 +1,4 @@
-import type { ScreenStats } from '@/lib/remoteCamera'
+import type { ScreenStats } from '@/features/hichat/camera/remoteCamera'
 
 // How well the mirror is connected: the status pill's text and tone, and
 // the shared screen's delay, explained.

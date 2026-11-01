@@ -4,7 +4,7 @@ import {
   fetchCameraKey,
   startCameraSender,
   type CameraStatus,
-} from '@/lib/remoteCamera'
+} from '@/features/hichat/camera/remoteCamera'
 
 // The remote camera's sending side as a hook, so /mirror can send this
 // laptop's camera and mic while it follows the conversation. The sender lives

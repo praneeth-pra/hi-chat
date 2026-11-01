@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconMaximize, IconPencil, IconScreenShare } from '@tabler/icons-react'
-import type { RemoteInput } from '@/lib/mirrorDirect'
-import { createSlowWatch, type ScreenStats } from '@/lib/remoteCamera'
-import { StatusPill } from '@/containers/RemoteCameraPanel'
+import type { RemoteInput } from '@/features/hichat/mirror/lib/mirrorDirect'
+import {
+  createSlowWatch,
+  type ScreenStats,
+} from '@/features/hichat/camera/remoteCamera'
+import { StatusPill } from '@/features/hichat/camera/RemoteCameraPanel'
 import { cn } from '@/lib/utils'
 import { ScreenStatsBadge } from './ConnectionQuality'
 import { useRemoteControl } from './useRemoteControl'

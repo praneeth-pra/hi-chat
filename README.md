@@ -7,7 +7,10 @@ The continuous Speaker listener has been removed.
 
 ## Layout
 
-- `web-app/` - the React app (built with `vite.config.web.ts`)
+- `web-app/` - the React app (built with `vite.config.web.ts`). Hi-chat's own
+  features live under `web-app/src/features/hichat/` (so far `mirror/` and
+  `camera/`); see [docs/upstream.md](docs/upstream.md) for the upstream Jan
+  repo, the fork point and which code is Hi-chat's
 - `core/` - `@janhq/core`, shared types and extension base classes
 - `extensions-web/` - browser storage for threads and messages
 - `relay/` - small Node server that keeps the speech API keys on the server:
@@ -138,7 +141,7 @@ These are the defaults. Each can be changed, turned off or reset in Hi-chat's **
 Open `/mirror` on this site from any other computer (sign in with the
 emailed code) to follow the conversation open in Hi-chat, live: replies show
 as they stream, a fraction of a second behind. Hi-chat sends the text, not
-video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/lib/remoteMirror.ts`),
+video, over `/api/mirror` (`relay/mirror.mjs`, `web-app/src/features/hichat/mirror/lib/remoteMirror.ts`),
 and only while a viewer is open. With Hi-chat open in several windows, the
 one in front is shown. The same page has the remote camera (below): the
 **Camera** button in its header opens the panel.
@@ -180,7 +183,8 @@ The video and sound go directly between the two browsers (WebRTC). The relay
 derived from the login secret, because Meet's pages can't send Hi-chat's
 login cookie. Networks that block direct connections need a TURN server, set
 as `CAMERA_ICE_SERVERS` (a JSON list of RTCIceServer objects). The extension
-lives in `web-app/public/hichat-extension/`.
+lives in `web-app/public/hichat-extension/`; the page side is in
+`web-app/src/features/hichat/camera/`.
 
 ## Test and build
 

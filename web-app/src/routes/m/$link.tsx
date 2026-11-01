@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { MirrorViewer } from '@/containers/MirrorView'
+import { MirrorViewer } from '@/features/hichat/mirror/MirrorView'
 
 // An app's own mirror link, opened without login: the conversation open in
-// that copy of Hi-chat, with the camera panel (see lib/mirrorLink.ts)
+// that copy of Hi-chat, with the camera panel (see features/hichat/mirror/lib/mirrorLink.ts)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const Route = createFileRoute('/m/$link' as any)({

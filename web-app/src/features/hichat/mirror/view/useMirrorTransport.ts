@@ -8,13 +8,13 @@ import {
   createDirectViewer,
   createSeqFilter,
   type RemoteInput,
-} from '@/lib/mirrorDirect'
+} from '@/features/hichat/mirror/lib/mirrorDirect'
 import {
   applyMirrorMessage,
   emptyMirror,
   mirrorSocketUrl,
   type MirrorState,
-} from '@/lib/remoteMirror'
+} from '@/features/hichat/mirror/lib/remoteMirror'
 
 // The mirror viewer's transport: the socket to Hi-chat's server (with its
 // reconnects and pings), the direct WebRTC channel to Hi-chat

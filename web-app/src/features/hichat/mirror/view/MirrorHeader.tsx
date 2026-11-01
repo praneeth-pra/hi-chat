@@ -4,8 +4,8 @@ import {
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
-import { StatusPill, toneDot } from '@/containers/RemoteCameraPanel'
-import type { cameraState } from '@/hooks/useCameraSender'
+import { StatusPill, toneDot } from '@/features/hichat/camera/RemoteCameraPanel'
+import type { cameraState } from '@/features/hichat/camera/useCameraSender'
 import { cn } from '@/lib/utils'
 import { CallSound } from './CallSound'
 import type { mirrorStatus } from './connectionStatus'

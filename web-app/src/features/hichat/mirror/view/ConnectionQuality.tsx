@@ -1,4 +1,4 @@
-import type { ScreenStats } from '@/lib/remoteCamera'
+import type { ScreenStats } from '@/features/hichat/camera/remoteCamera'
 import { cn } from '@/lib/utils'
 import { screenStatsTitle } from './connectionStatus'
 

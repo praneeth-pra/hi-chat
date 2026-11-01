@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 
 // The shared screen layout on a laptop: the screen on the left, a divider
@@ -7,8 +15,10 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 
 const camera = vi.hoisted(() => ({ screen: null as unknown }))
 
-vi.mock('@/hooks/useCameraSender', async (actual) => ({
-  ...(await actual<typeof import('@/hooks/useCameraSender')>()),
+vi.mock('@/features/hichat/camera/useCameraSender', async (actual) => ({
+  ...(await actual<
+    typeof import('@/features/hichat/camera/useCameraSender')
+  >()),
   useCameraSender: () => ({
     screen: camera.screen,
     call: null,
@@ -20,8 +30,10 @@ vi.mock('@/hooks/useCameraSender', async (actual) => ({
     screenStats: async () => null,
   }),
 }))
-vi.mock('@/containers/RemoteCameraPanel', async (actual) => ({
-  ...(await actual<typeof import('@/containers/RemoteCameraPanel')>()),
+vi.mock('@/features/hichat/camera/RemoteCameraPanel', async (actual) => ({
+  ...(await actual<
+    typeof import('@/features/hichat/camera/RemoteCameraPanel')
+  >()),
   RemoteCameraPanel: () => null,
 }))
 

@@ -1,4 +1,4 @@
-import type { MirrorMessage as MirrorMessageData } from '@/lib/remoteMirror'
+import type { MirrorMessage as MirrorMessageData } from '@/features/hichat/mirror/lib/remoteMirror'
 
 /** The streamed reply's message object, kept while its text is the same. */
 const streamMsgs = new WeakMap<object, MirrorMessageData>()

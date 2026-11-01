@@ -1,12 +1,12 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import type { RemoteInput } from '@/lib/mirrorDirect'
+import type { RemoteInput } from '@/features/hichat/mirror/lib/mirrorDirect'
 import {
   createClickCounter,
   keyAction,
   macMods,
   screenPoint,
   wheelPixels,
-} from '@/lib/remoteInput'
+} from '@/features/hichat/mirror/lib/remoteInput'
 
 /**
  * While `on`: this page's mouse over the shared screen, its wheel and its

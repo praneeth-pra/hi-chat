@@ -29,7 +29,11 @@ describe('the mirror link code in Hi-chat', () => {
   it('closes from its button', async () => {
     const onClose = vi.fn()
     render(
-      <MirrorCodeToast code="0042" expiresAt={Date.now() + 60_000} onClose={onClose} />
+      <MirrorCodeToast
+        code="0042"
+        expiresAt={Date.now() + 60_000}
+        onClose={onClose}
+      />
     )
     await userEvent.click(screen.getByRole('button', { name: 'Hide the code' }))
     expect(onClose).toHaveBeenCalled()
