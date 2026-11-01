@@ -7,17 +7,16 @@
 // in order, usually from the direct route (createSeqFilter), so the direct
 // channel failing, or never opening, loses nothing.
 
+import {
+  MIRROR_SEQUENCED_KINDS,
+  type MirrorHello,
+  type MirrorPong,
+  type MirrorRtcIn,
+  type MirrorRtcOut,
+} from '@janhq/core'
+
 /** Updates that carry a sequence number (images go by key, server only). */
-export const SEQUENCED = new Set([
-  'snap',
-  'ops',
-  'stream',
-  'phase',
-  'scroll',
-  'shown',
-  'look',
-  'typing',
-])
+export const SEQUENCED: ReadonlySet<string> = new Set(MIRROR_SEQUENCED_KINDS)
 
 // Data channel messages much over 64 KB aren't safe everywhere: a longer one
 // goes in pieces, `~` for each but the last and `!` for the last
@@ -101,15 +100,9 @@ const STUN: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
 // server route carries on alone
 const MAX_BUFFERED = 1_000_000
 
-type Signal = (m: Record<string, unknown>) => void
-type RtcMessage = {
-  t?: string
-  from?: string
-  type?: string
-  sdp?: string
-  candidate?: RTCIceCandidateInit | null
-  ice?: RTCIceServer[]
-}
+type Signal = (m: MirrorRtcOut) => void
+// As it arrives from the server: checked before use
+type RtcMessage = { t?: string } & Partial<Omit<MirrorRtcIn, 't'>>
 
 /** A mouse or key action from /mirror, for the Mac app to replay. */
 export type RemoteInput = Record<string, unknown> & { k: string }
@@ -185,7 +178,7 @@ export function createDirectSender({
     dc.onopen = () => {
       if (!mine()) return
       // Whether this viewer may control the computer
-      send(JSON.stringify({ t: 'hello', control }))
+      send(JSON.stringify({ t: 'hello', control } satisfies MirrorHello))
       onOpen?.()
     }
     const take = (data: string) => {
@@ -218,14 +211,15 @@ export function createDirectSender({
       try {
         const m = JSON.parse(data)
         if (m?.t === 'ping' && typeof m.n === 'number')
-          send(JSON.stringify({ t: 'pong', n: m.n }))
+          send(JSON.stringify({ t: 'pong', n: m.n } satisfies MirrorPong))
       } catch {
         // not a ping
       }
     }
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
-    if (mine()) signal({ t: 'rtc', to: id, type: 'offer', sdp: offer.sdp })
+    if (mine() && offer.sdp)
+      signal({ t: 'rtc', to: id, type: 'offer', sdp: offer.sdp })
   }
 
   async function handle(m: RtcMessage & { id?: string; on?: boolean }) {
@@ -393,7 +387,8 @@ export function createDirectViewer({
     await pc.setRemoteDescription({ type: 'offer', sdp })
     const reply = await pc.createAnswer()
     await pc.setLocalDescription(reply)
-    if (mine()) signal({ t: 'rtc', to: from, type: 'answer', sdp: reply.sdp })
+    if (mine() && reply.sdp)
+      signal({ t: 'rtc', to: from, type: 'answer', sdp: reply.sdp })
   }
 
   async function handle(m: RtcMessage) {

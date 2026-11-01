@@ -579,7 +579,8 @@ test('speech log: Speed lines keep timings and reject anything else', () => {
   )
 })
 
-test('mirror link: an unknown or ended link is told so (4001), not refused', async () => {
+// The close code a mirror socket at `path` gets right after the upgrade
+async function mirrorCloseCode(path) {
   const { request } = await import('node:http')
   const server = createRelay({ env: {} }).listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
@@ -588,7 +589,7 @@ test('mirror link: an unknown or ended link is told so (4001), not refused', asy
       const req = request({
         host: '127.0.0.1',
         port: server.address().port,
-        path: `/api/mirror-link?link=${'A'.repeat(24)}`,
+        path,
         headers: {
           'connection': 'Upgrade',
           'upgrade': 'websocket',
@@ -607,12 +608,32 @@ test('mirror link: an unknown or ended link is told so (4001), not refused', asy
       req.on('error', reject)
       req.end()
     })
-    // A close frame (opcode 8) carrying code 4001
+    // A close frame (opcode 8) and its code
     assert.equal(frame[0] & 0x0f, 8)
-    assert.equal(frame.readUInt16BE(2), 4001)
+    return frame.readUInt16BE(2)
   } finally {
     server.close()
   }
+}
+
+test('mirror link: an unknown or ended link is told so (4001), not refused', async () => {
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}`),
+    4001
+  )
+  // Saying the version it speaks changes nothing
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}&v=1`),
+    4001
+  )
+})
+
+test('mirror: a newer protocol version than the relay speaks is closed with 4002', async () => {
+  assert.equal(
+    await mirrorCloseCode(`/api/mirror-link?link=${'A'.repeat(24)}&v=2`),
+    4002
+  )
+  assert.equal(await mirrorCloseCode('/api/mirror?role=send&v=2'), 4002)
 })
 
 const captureLogger = () => {

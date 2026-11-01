@@ -9,7 +9,18 @@
 // happen (a microtask, not a timer, which a background window slows to once
 // a second), and only what changed.
 
-import { MessageStatus, type ThreadMessage } from '@janhq/core'
+import {
+  MessageStatus,
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  MIRROR_PROTOCOL_VERSION,
+  type MirrorFromSender,
+  type MirrorLook,
+  type MirrorMessage,
+  type MirrorPhase,
+  type MirrorScroll,
+  type MirrorStream,
+  type ThreadMessage,
+} from '@janhq/core'
 import type { AccuracyReview } from '@/lib/accuracyReview'
 import { extractFilesFromPrompt } from '@/lib/fileMetadata'
 import { useAppState } from '@/hooks/useAppState'
@@ -38,34 +49,14 @@ const MAX_MESSAGES = 200
 const IMAGE_MAX_PX = 1600
 const IMAGE_MAX_CHARS = 850_000
 
-/** An Accuracy review as the mirror shows it (as under the answer in Hi-chat). */
-export type MirrorReview = {
-  verdict: string
-  fallback?: string
-  verifier?: string
-  webStatus?: string
-  sources: { title: string; url: string }[]
-}
-
-/** A message as the mirror shows it: what Hi-chat's chat shows for it. */
-export type MirrorMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  /** For a question, its text without attached files; for an answer, its
-   * whole text, thinking included (the mirror folds it as Hi-chat does) */
-  text: string
-  /** Names of files attached to a question */
-  files?: string[]
-  /** Keys of images (screenshots) attached to a question, sent as 'img' */
-  images?: string[]
-  /** An answer stopped before it finished */
-  stopped?: boolean
-  /** How long an answer's model thought, in seconds ("Thought for 2s") */
-  thinking?: number
-  review?: MirrorReview
-  /** Tools an answer used */
-  tools?: { name: string; pending: boolean }[]
-}
+// The messages themselves are defined once, in @janhq/core
+// (core/src/types/mirror), shared with the viewer and checked against the relay
+export type {
+  MirrorLook,
+  MirrorMessage,
+  MirrorReview,
+  MirrorScroll,
+} from '@janhq/core'
 
 export const messageText = (m: ThreadMessage | undefined) =>
   m?.content?.find((c) => c.type === 'text')?.text?.value ?? ''
@@ -198,16 +189,6 @@ export function mirrorShownTap(threadId: string, id: string, n: number) {
   shownTap?.(threadId, id, n)
 }
 
-/** How Hi-chat looks, so /mirror can look the same. */
-export type MirrorLook = {
-  t: 'look'
-  /** The chat column's width, in px */
-  width: number
-  dark: boolean
-  /** Hi-chat's CSS variables (colours, font, font size) */
-  vars: Record<string, string>
-}
-
 /** Reads how the chat looks: the page's own CSS variables and its column. */
 export function readLook(root: HTMLElement, scroller: HTMLElement): MirrorLook {
   const vars: Record<string, string> = {}
@@ -223,23 +204,6 @@ export function readLook(root: HTMLElement, scroller: HTMLElement): MirrorLook {
     vars,
   }
 }
-
-/**
- * Where the chat is scrolled to: at the bottom, or at a message (`id`) and how
- * far into it the top of the view is (`f`, 0 to 1). By message rather than in
- * pixels, as the viewer's text wraps at its own width.
- */
-export type MirrorScroll =
-  | { t: 'scroll'; bottom: true }
-  | {
-      t: 'scroll'
-      id: string
-      f: number
-      /** Exactly how far into it, in px (negative: in the gap above it) */
-      px?: number
-      /** Its height here, in px, so a viewer can scale `px` to its own */
-      h?: number
-    }
 
 const AT_BOTTOM_PX = 40
 const MESSAGE = '[data-test-id^="message-"]'
@@ -276,7 +240,7 @@ export function streamUpdate(
   last: { id: string | null; text: string },
   id: string | null,
   text: string
-): Record<string, unknown> | null {
+): MirrorStream | null {
   if (id === null) return last.id === null ? null : { t: 'stream', id: null }
   if (id === last.id && text.startsWith(last.text)) {
     const add = text.slice(last.text.length)
@@ -294,11 +258,15 @@ export function mirrorSocketUrl(
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const base = `${scheme}//${location.host}`
   const secret = link ? encodeURIComponent(link) : ''
+  // The protocol version this page speaks (relay/protocol.mjs closes a
+  // socket with a newer one than it knows)
+  const v = `&v=${MIRROR_PROTOCOL_VERSION}`
   // A link's viewer has no login: it watches through the link's own socket
-  if (role === 'view' && link) return `${base}/api/mirror-link?link=${secret}`
+  if (role === 'view' && link)
+    return `${base}/api/mirror-link?link=${secret}${v}`
   // The app says when it made its link, so the server ends it on time
   const since = link && born !== undefined ? `&born=${Math.floor(born)}` : ''
-  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}${since}`
+  return `${base}/api/mirror?role=${role}${link ? `&link=${secret}` : ''}${since}${v}`
 }
 
 /** The Mac app's bridge to its page, when this page is in the Mac app. */
@@ -403,7 +371,7 @@ export function startRemoteMirror({
     },
     onCode: showMirrorCode,
   })
-  const send = (data: { t: string } & Record<string, unknown>) => {
+  const send = (data: MirrorFromSender) => {
     if (!open()) return
     if (!SEQUENCED.has(data.t)) return ws!.send(JSON.stringify(data))
     const out = JSON.stringify({ ...data, s: session, q: ++seq })
@@ -440,7 +408,7 @@ export function startRemoteMirror({
     }
     const update = streamUpdate(sentStream, id, text ?? '')
     if (update) {
-      send(update as { t: string })
+      send(update)
       sentStream = { id, text: id === null ? '' : (text ?? '') }
     }
   }
@@ -639,7 +607,7 @@ export function startRemoteMirror({
         schedule()
       }
     }
-    socket.onclose = () => {
+    socket.onclose = (e?: { code?: number }) => {
       if (ws !== socket) return
       ws = null
       viewers = 0
@@ -648,6 +616,8 @@ export function startRemoteMirror({
       direct?.closeAll()
       gate.clear()
       if (stopped) return
+      // A server older than this page: try now and then, it may be updated
+      if (e?.code === MIRROR_CLOSE_VERSION_UNSUPPORTED) retryMs = 30_000
       retryTimer = setTimeout(connect, retryMs)
       retryMs = Math.min(retryMs * 2, 30_000)
     }
@@ -754,7 +724,7 @@ export type MirrorState = {
   /** Screenshots messages show, by key */
   images: Record<string, string>
   /** Accuracy mode's progress, while it runs */
-  phase: 'searching' | 'drafting' | 'verifying' | null
+  phase: MirrorPhase | null
   /** How much of a reply's answer Hi-chat shows right now */
   shown: { id: string; n: number } | null
   /** How Hi-chat looks */

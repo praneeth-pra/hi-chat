@@ -1,5 +1,10 @@
 import { randomBytes } from 'node:crypto'
 import { createStore } from './persist.mjs'
+import {
+  MIRROR_CLOSE_LINK_ENDED,
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  versionOk,
+} from './protocol.mjs'
 
 // Remote mirror: Hi-chat (the sender) sends the open conversation over
 // /api/mirror?role=send, and any signed-in browser that opens /mirror (a
@@ -18,6 +23,12 @@ import { createStore } from './persist.mjs'
 //   look   how Hi-chat looks: its colours, font and size (CSS variables),
 //          dark or light, and the chat column's width, so /mirror matches it
 //   typing what is in Hi-chat's message box
+//
+// The full protocol (every message, both ways, with types) is defined once in
+// core/src/types/mirror/index.ts; protocol.mjs keeps the relay's copy of its
+// version, kinds and close codes, checked against core by protocol.test.mjs.
+// A socket or message with a newer `v` than protocol.mjs's is closed with
+// MIRROR_CLOSE_VERSION_UNSUPPORTED; one without `v` (older apps) is fine.
 //
 // The hub keeps the latest of each in memory, so a viewer that joins late
 // starts from it. Senders hear how many viewers there are and send nothing
@@ -201,7 +212,7 @@ function pong(ws, raw) {
 /** A mirror link's secret: random, URL-safe, long enough not to guess. */
 export const LINK_RE = /^[A-Za-z0-9_-]{22,64}$/
 /** Close code for a link's viewer when the link has ended. */
-export const LINK_ENDED = 4001
+export const LINK_ENDED = MIRROR_CLOSE_LINK_ENDED
 // A link keeps working this long after its app closes, so a restart (or the
 // remote camera, which uses the link) doesn't lose it; "New link" ends it now
 const LINK_GRACE_MS = 12 * 60 * 60 * 1000
@@ -635,6 +646,7 @@ export function createMirrorHub({
     } catch {
       return
     }
+    if (!versionOk(m?.v)) return ws.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
     // "New link": the app's old link stops working now
     if (m?.t === 'revoke') return end(m.link)
     // Letting a link's viewer in (the right code), or telling it the code
@@ -669,13 +681,7 @@ export function createMirrorHub({
     )
   }
 
-  function rtcToSender(ws, name, raw) {
-    let m
-    try {
-      m = JSON.parse(raw)
-    } catch {
-      return
-    }
+  function rtcToSender(ws, name, m) {
     if (m?.t !== 'rtc') return
     const to = typeof m.to === 'string' && ID_RE.test(m.to) && byId.get(m.to)
     if (!to || to.role !== 'send' || !to.names.includes(name)) return
@@ -773,13 +779,7 @@ export function createMirrorHub({
     const id = newId(ws, 'view', [name])
     let waiting = !!name && !ticketOk(name, ticket)
     let knocks = 0
-    const knock = (raw) => {
-      let m
-      try {
-        m = JSON.parse(raw)
-      } catch {
-        return
-      }
+    const knock = (m) => {
       const to = doorman(ch)
       if (!to || ++knocks > 40) return
       const l = links.get(name)
@@ -815,8 +815,15 @@ export function createMirrorHub({
     ws.onmessage = (raw) => {
       if (typeof raw !== 'string' || raw.length > MAX_SDP + 4096) return
       if (pong(ws, raw)) return
-      if (waiting) knock(raw)
-      else rtcToSender(ws, name, raw)
+      let m
+      try {
+        m = JSON.parse(raw)
+      } catch {
+        return
+      }
+      if (!versionOk(m?.v)) return ws.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
+      if (waiting) knock(m)
+      else rtcToSender(ws, name, m)
     }
     ws.onclose = () => {
       forget(ws)

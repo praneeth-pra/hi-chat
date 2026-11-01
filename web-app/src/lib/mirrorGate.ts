@@ -3,6 +3,9 @@
 // passes on its knocks ('knock': asking for a code, typing one, or gone) and
 // lets it in when Hi-chat says so ('admit'); a wrong code is told back
 // ('gate'). Once in, on the Mac it may also control the computer.
+// The messages are typed once in @janhq/core (core/src/types/mirror).
+
+import type { MirrorAdmit, MirrorGateReply, MirrorKnock } from '@janhq/core'
 
 /** Wrong codes a viewer may try before it needs to reload the page. */
 export const CODE_TRIES = 5
@@ -16,13 +19,7 @@ export function newCode(): string {
   return String(n[0] % 10_000).padStart(4, '0')
 }
 
-export type Knock = {
-  t: 'knock'
-  from: string
-  ask?: boolean
-  code?: string
-  gone?: boolean
-}
+export type Knock = MirrorKnock
 
 /**
  * Hi-chat's side of the door: `reply` goes to the server, `onCode` shows the
@@ -35,9 +32,7 @@ export function createGate({
   makeCode = newCode,
   now = Date.now,
 }: {
-  reply: (
-    m: { t: 'admit' | 'gate'; to: string } & Record<string, unknown>
-  ) => void
+  reply: (m: MirrorAdmit | MirrorGateReply) => void
   onCode: (code: string | null, expiresAt?: number) => void
   makeCode?: () => string
   now?: () => number

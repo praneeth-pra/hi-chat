@@ -25,6 +25,11 @@ import {
   IconVolume,
   IconVolumeOff,
 } from '@tabler/icons-react'
+import {
+  MIRROR_CLOSE_LINK_ENDED,
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  type MirrorFromViewer,
+} from '@janhq/core'
 import { RenderMarkdown } from '@/containers/RenderMarkdown'
 import { AccuracyProgress } from '@/containers/AccuracyProgress'
 import { AccuracyReviewInfo } from '@/containers/ThreadContent'
@@ -68,8 +73,8 @@ import {
 import { useTranslation } from '@/i18n/react-i18next-compat'
 import { cn } from '@/lib/utils'
 
-/** The server's close code for a link that has ended (relay/mirror.mjs). */
-const LINK_ENDED = 4001
+/** The server's close code for a link that has ended (core's mirror types). */
+const LINK_ENDED = MIRROR_CLOSE_LINK_ENDED
 
 // The remote mirror's viewer: open an app's link (/m/<link>) on another
 // computer and type the code Hi-chat shows, to follow the conversation open
@@ -98,7 +103,7 @@ function useMirror(link?: string) {
   // dropped connection (and lets its camera send)
   const [gate, setGate] = useState<Gate>({ shut: !!link })
   const [ticket, setTicket] = useState<string | undefined>()
-  const toServer = useRef<(m: object) => boolean>(() => false)
+  const toServer = useRef<(m: MirrorFromViewer) => boolean>(() => false)
   const askForCode = useCallback(() => {
     if (!toServer.current({ t: 'unlock' })) return false
     // The box starts fresh; Hi-chat says again if no code is left
@@ -225,6 +230,8 @@ function useMirror(link?: string) {
           setEnded(true)
           return
         }
+        // A server older than this page: try now and then, it may be updated
+        if (e.code === MIRROR_CLOSE_VERSION_UNSUPPORTED) retryMs = 15_000
         retry = setTimeout(connect, retryMs)
         retryMs = Math.min(retryMs * 2, 15_000)
       }

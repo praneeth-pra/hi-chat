@@ -66,7 +66,7 @@ ENV NODE_ENV=production
 # volume there (e.g. /data/relay) and set STATE_DIR to it. Empty: in memory only.
 ENV STATE_DIR=""
 
-COPY relay/server.mjs relay/log.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/persist.mjs relay/logo.png relay/dictionary.txt /relay/
+COPY relay/server.mjs relay/log.mjs relay/protocol.mjs relay/wsProxy.mjs relay/auth.mjs relay/requestSafety.mjs relay/search.mjs relay/mirror.mjs relay/camera.mjs relay/persist.mjs relay/logo.png relay/dictionary.txt /relay/
 
 # docker/supervise.sh runs the relay (restarting it with backoff) and nginx
 # (through the image's /docker-entrypoint.sh, which renders the templates).

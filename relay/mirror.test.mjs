@@ -7,6 +7,10 @@ import {
   LINK_WRONG_CODES,
 } from './mirror.mjs'
 import { createRelay } from './server.mjs'
+import {
+  MIRROR_CLOSE_VERSION_UNSUPPORTED,
+  MIRROR_PROTOCOL_VERSION,
+} from './protocol.mjs'
 
 // The last message of type `t` a socket got (others, like 'peer', may follow)
 const lastOf = (ws, t) => ws.got.filter((m) => m.t === t).at(-1)
@@ -19,6 +23,10 @@ function fakeSocket() {
     },
     onmessage: () => {},
     onclose: () => {},
+    closed: undefined,
+    close(code) {
+      ws.closed = code
+    },
   }
   return ws
 }
@@ -942,4 +950,26 @@ test('a viewer that is behind skips stream, scroll and typing, then catches up',
     id: 'r1',
     n: 9,
   })
+})
+
+test('protocol version: messages without v or with v 1 are taken, newer v closes (4002)', () => {
+  const hub = createMirrorHub()
+  const sender = fakeSocket()
+  const viewer = fakeSocket()
+  hub.join(sender, 'send')
+  hub.join(viewer, 'view')
+  sender.onmessage(snap([{ id: 'a', role: 'user', text: 'hi' }]))
+  sender.onmessage(
+    JSON.stringify({ t: 'typing', text: 'one', v: MIRROR_PROTOCOL_VERSION })
+  )
+  assert.equal(lastOf(viewer, 'snap').msgs[0].text, 'hi')
+  assert.equal(lastOf(viewer, 'typing').text, 'one')
+  assert.equal(sender.closed, undefined)
+  sender.onmessage(JSON.stringify({ t: 'typing', text: 'two', v: 2 }))
+  assert.equal(sender.closed, MIRROR_CLOSE_VERSION_UNSUPPORTED)
+  assert.equal(lastOf(viewer, 'typing').text, 'one')
+  viewer.onmessage(JSON.stringify({ t: 'rtc', to: 'x', v: 1 }))
+  assert.equal(viewer.closed, undefined)
+  viewer.onmessage(JSON.stringify({ t: 'rtc', to: 'x', v: 2 }))
+  assert.equal(viewer.closed, MIRROR_CLOSE_VERSION_UNSUPPORTED)
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ThreadMessage } from '@janhq/core'
+import { MIRROR_PROTOCOL_VERSION, type ThreadMessage } from '@janhq/core'
 import {
   applyMirrorMessage,
   diffMessages,
@@ -158,21 +158,28 @@ describe('remote mirror', () => {
     })
   })
 
+  it('the socket address says the protocol version, from core', () => {
+    const url = new URL(
+      mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'send')
+    )
+    expect(url.searchParams.get('v')).toBe(String(MIRROR_PROTOCOL_VERSION))
+  })
+
   it('builds the socket address from the page', () => {
     expect(
       mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'view')
-    ).toBe('wss://hi.example/api/mirror?role=view')
+    ).toBe('wss://hi.example/api/mirror?role=view&v=1')
     expect(
       mirrorSocketUrl({ protocol: 'http:', host: 'localhost:1420' }, 'send')
-    ).toBe('ws://localhost:1420/api/mirror?role=send')
+    ).toBe('ws://localhost:1420/api/mirror?role=send&v=1')
     // An app sends to its own link too; a link's viewer has its own socket
     const link = 'L'.repeat(24)
     expect(
       mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'send', link)
-    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}`)
+    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}&v=1`)
     expect(
       mirrorSocketUrl({ protocol: 'https:', host: 'hi.example' }, 'view', link)
-    ).toBe(`wss://hi.example/api/mirror-link?link=${link}`)
+    ).toBe(`wss://hi.example/api/mirror-link?link=${link}&v=1`)
     // with when it made its link, so the server ends it on time
     expect(
       mirrorSocketUrl(
@@ -181,7 +188,9 @@ describe('remote mirror', () => {
         link,
         1234.5
       )
-    ).toBe(`wss://hi.example/api/mirror?role=send&link=${link}&born=1234`)
+    ).toBe(
+      `wss://hi.example/api/mirror?role=send&link=${link}&born=1234&v=1`
+    )
   })
 
   it('viewer state follows snapshots and streams', () => {
@@ -266,7 +275,7 @@ describe('remote mirror', () => {
       const ws = start()
       // Signed in, it also sends to this app's own mirror link
       expect(ws.url).toMatch(
-        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}&born=\d+$/
+        /^wss:\/\/hi\.example\/api\/mirror\?role=send&link=[A-Za-z0-9_-]{24}&born=\d+&v=1$/
       )
       useMessages.setState({
         messages: { t1: [msg('u', 'user', 'Hi again')] },

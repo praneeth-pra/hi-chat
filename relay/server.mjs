@@ -23,6 +23,7 @@ import {
 import { sameOriginRequest } from './requestSafety.mjs'
 import { searchWeb, warmSearch } from './search.mjs'
 import { createMirrorHub, LINK_ENDED } from './mirror.mjs'
+import { MIRROR_CLOSE_VERSION_UNSUPPORTED, versionOk } from './protocol.mjs'
 import { createCameraHub, createIceSource } from './camera.mjs'
 import { log } from './log.mjs'
 import { flushAll, stateDir } from './persist.mjs'
@@ -753,6 +754,9 @@ export function createRelay(options = {}) {
       const link = url.searchParams.get('link')
       const client = acceptWebSocket(req, socket, head)
       if (!client) return
+      // A page speaking a newer protocol than this relay (protocol.mjs)
+      if (!versionOk(url.searchParams.get('v') ?? undefined))
+        return client.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
       // An ended link (replaced, 90 minutes old, or its app gone 12 h) is told
       // so with 4001, the code a replaced link's viewers get, so the page
       // clears and stops trying rather than keep showing the old conversation
@@ -771,12 +775,14 @@ export function createRelay(options = {}) {
       if (url.searchParams.get('role') !== 'send')
         return socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
       const client = acceptWebSocket(req, socket, head)
-      if (client)
-        mirror.join(client, 'send', {
-          // The app's link, for that link's viewers
-          link: url.searchParams.get('link') ?? undefined,
-          born: url.searchParams.get('born') ?? undefined,
-        })
+      if (!client) return
+      if (!versionOk(url.searchParams.get('v') ?? undefined))
+        return client.close(MIRROR_CLOSE_VERSION_UNSUPPORTED)
+      mirror.join(client, 'send', {
+        // The app's link, for that link's viewers
+        link: url.searchParams.get('link') ?? undefined,
+        born: url.searchParams.get('born') ?? undefined,
+      })
       return
     }
     return socket.destroy()

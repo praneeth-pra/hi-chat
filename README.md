@@ -143,6 +143,13 @@ and only while a viewer is open. With Hi-chat open in several windows, the
 one in front is shown. The same page has the remote camera (below): the
 **Camera** button in its header opens the panel.
 
+The mirror's messages are defined once, with types and a protocol version, in
+`core/src/types/mirror/` (`@janhq/core`); the relay keeps the version, kinds
+and close codes in `relay/protocol.mjs`, and `relay/protocol.test.mjs` fails
+if the two drift. Pages send `v=<version>` in the socket URL; the relay takes
+sockets without it (older apps) and closes ones with a newer version than it
+knows with code 4002.
+
 ## Remote camera
 
 Lets Google Meet on one computer use the camera and microphone of a laptop
