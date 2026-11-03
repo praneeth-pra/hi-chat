@@ -252,7 +252,7 @@ describe('SonioxLiveTranscriber', () => {
     const config = JSON.parse(socket.raw[0] as string)
     expect(config).toMatchObject({
       api_key: 'temp:1',
-      model: 'stt-rt-v5',
+      model: 'stt-rt-v6',
       audio_format: 'pcm_s16le',
       sample_rate: 16000,
       num_channels: 1,

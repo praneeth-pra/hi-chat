@@ -215,7 +215,7 @@ export function toPcm16(samples: Float32Array): ArrayBuffer {
 }
 
 export const SONIOX_LIVE_URL = 'wss://stt-rt.soniox.com/transcribe-websocket'
-export const SONIOX_LIVE_MODEL = 'stt-rt-v5'
+export const SONIOX_LIVE_MODEL = 'stt-rt-v6'
 /**
  * Soniox bills the context as text on every clip, so it's kept short: about
  * 1,500 characters instead of the 10,000 it holds (~80% cheaper per clip).
@@ -261,7 +261,7 @@ export function sonioxTerms(keyterms: string[], dictionary: string[] = []) {
 }
 
 /**
- * One utterance streamed to Soniox (stt-rt-v5) with a temporary key from the
+ * One utterance streamed to Soniox (stt-rt-v6) with a temporary key from the
  * relay. The first message is the config, with P's dictionary as context
  * terms; then raw 16-bit PCM. `finish()` sends the empty end-of-audio
  * message, Soniox finalizes every word and says finished, and the final
