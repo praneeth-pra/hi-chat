@@ -680,8 +680,14 @@ sealed class ChatWindow : Form
       $"body: JSON.stringify({{ line: 'windows key: waited={ms}ms mirror={view}' }}) }}).catch(() => {{}})");
   }
 
-  public void ScrollChat(double fraction) => RunInPage(
-    $"const s = document.querySelector('[data-thread-scroller]'); if (s) s.scrollBy({{ top: s.clientHeight * {fraction.ToString(System.Globalization.CultureInfo.InvariantCulture)}, behavior: 'smooth' }})");
+  // The page's own glide keeps going while an answer streams in; the
+  // browser's smooth scroll is the fallback for an older page
+  public void ScrollChat(double fraction)
+  {
+    var f = fraction.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    RunInPage(
+      $"if (window.hiChatScrollPage && window.hiChatScrollPage({f})) return; const s = document.querySelector('[data-thread-scroller]'); if (s) s.scrollBy({{ top: s.clientHeight * {f}, behavior: 'smooth' }})");
+  }
 
   public void StopTouchpadScroll() => touchpad.Stop();
 
