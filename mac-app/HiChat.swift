@@ -547,7 +547,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
   func scrollChat(by fraction: Double) {
     webView.evaluateJavaScript("""
-      (() => { const s = document.querySelector('[data-thread-scroller]');
+      (() => { if (window.hiChatScrollPage && window.hiChatScrollPage(\(fraction))) return;
+        const s = document.querySelector('[data-thread-scroller]');
         if (s) s.scrollBy({ top: s.clientHeight * \(fraction), behavior: 'smooth' }) })()
       """)
   }

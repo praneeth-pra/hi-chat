@@ -31,3 +31,11 @@ export const isThreadScrollBehavior = (
   value === THREAD_SCROLL_BEHAVIOR.FLOW ||
   value === THREAD_SCROLL_BEHAVIOR.STICKY
 
+
+/**
+ * Told on the chat's scroller when a shortcut scrolls the chat (fn + Up /
+ * Down in the Mac and Windows apps), so the chat stops holding the new
+ * question at the top or following the answer, which would otherwise pull
+ * the view back mid-scroll.
+ */
+export const USER_SCROLL_EVENT = 'hichat:user-scroll'

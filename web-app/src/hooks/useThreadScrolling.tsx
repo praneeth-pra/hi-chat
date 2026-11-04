@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppState } from './useAppState'
 import { useMessages } from './useMessages'
 import { useInterfaceSettings } from './useInterfaceSettings'
-import { THREAD_SCROLL_BEHAVIOR } from '@/constants/threadScroll'
+import {
+  THREAD_SCROLL_BEHAVIOR,
+  USER_SCROLL_EVENT,
+} from '@/constants/threadScroll'
 
 const VIEWPORT_PADDING = 40 // Offset from viewport bottom for user message positioning
 const MAX_DOM_RETRY_ATTEMPTS = 5 // Maximum attempts to find DOM elements before giving up
@@ -162,6 +165,20 @@ export const useThreadScrolling = (
     }
   }, [handleScroll, scrollContainerRef])
 
+  // A shortcut scrolling the chat (fn + Up / Down) stops following the
+  // answer, or the next words pulled it straight back to the bottom
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current
+    if (!scrollContainer || !isStickyScroll) return
+    const unfollow = () => {
+      clearStickyReleaseTimeout()
+      userForcedUnfollowRef.current = true
+      setIsStickyScrollFollowing(false)
+    }
+    scrollContainer.addEventListener(USER_SCROLL_EVENT, unfollow)
+    return () => scrollContainer.removeEventListener(USER_SCROLL_EVENT, unfollow)
+  }, [clearStickyReleaseTimeout, isStickyScroll, scrollContainerRef])
+
   const checkScrollState = useCallback(() => {
     const scrollContainer = scrollContainerRef.current
     if (!scrollContainer) return
@@ -223,7 +240,15 @@ export const useThreadScrolling = (
         const stopFollowing = () => {
           userScrolled = true
         }
-        const userInput = ['wheel', 'touchstart', 'pointerdown', 'keydown']
+        // The app's shortcuts (fn + Up / Down) scroll without a key press on
+        // the page; they say so with USER_SCROLL_EVENT
+        const userInput = [
+          'wheel',
+          'touchstart',
+          'pointerdown',
+          'keydown',
+          USER_SCROLL_EVENT,
+        ]
         userInput.forEach((name) =>
           scrollContainer.addEventListener(name, stopFollowing, {
             passive: true,
@@ -370,9 +395,18 @@ export const useThreadScrolling = (
           const actualSpacing = assistantRect.top - userRect.bottom
           const totalAssistantHeight =
             currentAssistantMessage.offsetHeight + actualSpacing
+          // Keep enough room for where the person has scrolled to (a code
+          // block near the end of the answer, brought to the top): taking
+          // it away made the view jump up as the answer finished
+          const { scrollContainer } = elements
+          const roomInUse =
+            scrollContainer.scrollTop +
+            scrollContainer.clientHeight -
+            (scrollContainer.scrollHeight - originalPaddingRef.current)
           const newPadding = Math.max(
             0,
-            originalPaddingRef.current - totalAssistantHeight
+            originalPaddingRef.current - totalAssistantHeight,
+            Math.min(originalPaddingRef.current, Math.ceil(roomInUse))
           )
 
           setPaddingHeight(newPadding)

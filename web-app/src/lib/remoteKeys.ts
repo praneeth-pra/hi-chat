@@ -6,6 +6,7 @@ import {
   useDictation,
 } from '@/lib/dictation'
 import { deliverScreenshot } from '@/lib/screenshotDelivery'
+import { USER_SCROLL_EVENT } from '@/constants/threadScroll'
 
 /**
  * Keys the Hi-chat Mac and Windows apps send to the page (as calls to
@@ -31,17 +32,94 @@ let openNewChat: () => void = () => {}
 
 /** A press within this long of the last continues from where it was going. */
 const CODE_STEP_MS = 1000
-let codeStep: { at: number; target: HTMLElement } | null = null
+let codeStep: { at: number; target: HTMLElement; index: number } | null =
+  null
+
+
+/** How long a shortcut's scroll takes. */
+const GLIDE_MS = 260
 
 /**
- * The area the chat scrolls in, as on screen. It is looked up by its marker:
- * a code block's own <pre> also counts as scrollable.
+ * The area the chat scrolls in. It is looked up by its marker: a code
+ * block's own <pre> also counts as scrollable.
  */
+function chatScroller(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-thread-scroller]')
+}
+
+/** The chat's area as on screen. */
 function chatView(): { top: number; bottom: number } {
-  const scroller = document.querySelector('[data-thread-scroller]')
+  const scroller = chatScroller()
   if (!scroller) return { top: 0, bottom: window.innerHeight }
   const { top, bottom } = scroller.getBoundingClientRect()
   return { top, bottom }
+}
+
+type Glide = { frame: number; aimed: number; stop: () => void }
+let glide: Glide | null = null
+
+function stopGlide() {
+  glide?.stop()
+}
+
+/**
+ * Scrolls the chat to where aim() says, re-asking every frame. The browser's
+ * own smooth scroll aims once: while an answer streams in the text above the
+ * block reflows, and WebKit cuts a smooth scroll short when the layout
+ * changes, so it stopped somewhere in the middle of the answer.
+ */
+function glideTo(scroller: HTMLElement, aim: () => number | null) {
+  stopGlide()
+  scroller.dispatchEvent(new Event(USER_SCROLL_EVENT))
+  const from = scroller.scrollTop
+  const start = performance.now()
+  const instant =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const clamp = (top: number) =>
+    Math.max(0, Math.min(top, scroller.scrollHeight - scroller.clientHeight))
+  // Scrolling by hand takes over
+  const userInput = ['wheel', 'touchstart', 'pointerdown', 'keydown']
+  const current: Glide = {
+    frame: 0,
+    aimed: clamp(aim() ?? from),
+    stop: () => {
+      cancelAnimationFrame(current.frame)
+      userInput.forEach((name) =>
+        scroller.removeEventListener(name, current.stop)
+      )
+      if (glide === current) glide = null
+    },
+  }
+  userInput.forEach((name) =>
+    scroller.addEventListener(name, current.stop, { passive: true })
+  )
+  const step = (now: number) => {
+    if (glide !== current) return
+    const to = aim()
+    if (to === null || !scroller.isConnected) return current.stop()
+    current.aimed = clamp(to)
+    const t = instant ? 1 : Math.min(1, Math.max(0, now - start) / GLIDE_MS)
+    const eased = 1 - (1 - t) ** 3
+    scroller.scrollTop = from + (current.aimed - from) * eased
+    if (t < 1) current.frame = requestAnimationFrame(step)
+    else current.stop()
+  }
+  glide = current
+  current.frame = requestAnimationFrame(step)
+}
+
+/**
+ * Scrolls the chat by a share of its height (Shift + fn + Up / Down); held
+ * down, each press goes on from where the last was heading.
+ */
+export function scrollChatPage(fraction: number): boolean {
+  const scroller = chatScroller()
+  if (!scroller) return false
+  const base = glide ? glide.aimed : scroller.scrollTop
+  const dest = base + scroller.clientHeight * fraction
+  glideTo(scroller, () => dest)
+  return true
 }
 
 /**
@@ -60,7 +138,14 @@ export function stepCode(dir: -1 | 1, now = Date.now()): boolean {
     return true
   }
   const view = chatView()
-  const last = codeStep ? blocks.indexOf(codeStep.target) : -1
+  // A streaming answer can draw its blocks again; then go by position
+  const last = !codeStep
+    ? -1
+    : codeStep.target.isConnected
+      ? blocks.indexOf(codeStep.target)
+      : codeStep.index < blocks.length
+        ? codeStep.index
+        : -1
   const onScreen = (b: HTMLElement) => {
     const r = b.getBoundingClientRect()
     return r.bottom > view.top && r.top < view.bottom
@@ -85,8 +170,26 @@ export function stepCode(dir: -1 | 1, now = Date.now()): boolean {
     toast(dir < 0 ? 'No code above' : 'No code below')
     return true
   }
-  codeStep = { at: now, target }
-  target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  const goal = target
+  const index = blocks.indexOf(goal)
+  codeStep = { at: now, target: goal, index }
+  const scroller = chatScroller()
+  if (!scroller) {
+    goal.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    return true
+  }
+  glideTo(scroller, () => {
+    const block = goal.isConnected
+      ? goal
+      : document.querySelectorAll<HTMLElement>('[data-code-block]')[index]
+    if (!block) return null
+    return (
+      scroller.scrollTop +
+      block.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      16
+    )
+  })
   return true
 }
 
@@ -146,6 +249,8 @@ type Bridge = { postMessage: (message: unknown) => void }
 type AppWindow = Window & {
   hiChatRemote?: (key: string) => boolean
   hiChatTyping?: (on: boolean) => void
+  /** Shift + fn + Up / Down: scroll the chat by a share of a screen */
+  hiChatScrollPage?: (fraction: number) => boolean
   /** The screenshot key: a JPEG or PNG data URL to send as it is */
   hiChatScreenshot?: (dataUrl: string) => boolean
   /** The Mac app (WKWebView) */
@@ -165,6 +270,7 @@ export function connectApp(win: AppWindow = window): () => void {
   win.hiChatRemote = handleRemoteKey
   win.hiChatTyping = (on) => useAppTyping.setState({ typing: on })
   win.hiChatScreenshot = (dataUrl) => deliverScreenshot(dataUrl)
+  win.hiChatScrollPage = scrollChatPage
   useAppTyping.setState({ inApp: true })
   const post = (status: string) => app.postMessage({ dictation: status })
   post(useDictation.getState().status)
@@ -176,6 +282,7 @@ export function connectApp(win: AppWindow = window): () => void {
     delete win.hiChatRemote
     delete win.hiChatTyping
     delete win.hiChatScreenshot
+    delete win.hiChatScrollPage
     useAppTyping.setState({ inApp: false, typing: false })
   }
 }

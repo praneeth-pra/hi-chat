@@ -4,7 +4,10 @@ import { useRef } from 'react'
 import type { ThreadMessage } from '@janhq/core'
 import { useMessages } from '@/hooks/useMessages'
 import { useInterfaceSettings } from '@/hooks/useInterfaceSettings'
-import { THREAD_SCROLL_BEHAVIOR } from '@/constants/threadScroll'
+import {
+  THREAD_SCROLL_BEHAVIOR,
+  USER_SCROLL_EVENT,
+} from '@/constants/threadScroll'
 import { ThreadPadding } from '@/containers/ThreadPadding'
 import { useAppState } from '@/hooks/useAppState'
 import {
@@ -245,6 +248,106 @@ describe('useThreadScrolling (flow)', () => {
     // Shrunk by the answer's height, not dropped to 0 (which made the page
     // shorter and the view jump down as the answer finished)
     expect(padding()).toBe('360px')
+    useAppState.setState({ streamingContent: undefined })
+    vi.useRealTimers()
+  })
+
+  it('stops holding the question at the top once a shortcut scrolls the chat', () => {
+    vi.useFakeTimers()
+    const resized: ResizeObserverCallback[] = []
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: ResizeObserverCallback) {
+          resized.push(cb)
+        }
+        observe() {}
+        disconnect() {}
+      }
+    )
+    const { getByTestId } = render(<Thread />)
+    const scroller = getByTestId('scroll-container')
+    const layout = mockLayout(scroller)
+    restoreLayout = layout.restore
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb)
+      return 0
+    })
+    act(() => {
+      const current = useMessages.getState().messages[THREAD_ID]
+      useMessages.setState({
+        messages: { [THREAD_ID]: [...current, message('question', 'user')] },
+      })
+    })
+    act(() => {
+      while (frames.length) frames.shift()!(0)
+    })
+    const held = layout.getScrollTop()
+    expect(resized).toHaveLength(1)
+    const layoutChanged = () =>
+      resized[0]([], {} as ResizeObserver)
+
+    // Without a shortcut the hold puts the question back
+    scroller.scrollTop = 100
+    layoutChanged()
+    expect(layout.getScrollTop()).toBe(held)
+
+    // fn + Up / Down: the app's glide says so; the hold lets go
+    scroller.dispatchEvent(new Event(USER_SCROLL_EVENT))
+    scroller.scrollTop = 100
+    layoutChanged()
+    expect(layout.getScrollTop()).toBe(100)
+    vi.useRealTimers()
+  })
+
+  it('keeps the room the person scrolled into when the answer finishes', () => {
+    vi.useFakeTimers()
+    const { getByTestId, container } = render(<ThreadWithStream />)
+    const scroller = getByTestId('scroll-container')
+    const layout = mockLayout(scroller)
+    restoreLayout = layout.restore
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb)
+      return 0
+    })
+    const padding = () =>
+      (container.querySelector('[data-testid="chat-padding"]') as HTMLElement)
+        .style.height
+
+    act(() => {
+      const current = useMessages.getState().messages[THREAD_ID]
+      useMessages.setState({
+        messages: { [THREAD_ID]: [...current, message('question', 'user')] },
+      })
+    })
+    act(() => {
+      while (frames.length) frames.shift()!(0)
+    })
+    expect(padding()).toBe('460px')
+
+    const answer = { ...message('answer', 'assistant') }
+    act(() => {
+      useAppState.setState({ streamingContent: answer })
+    })
+    // Scrolled right to the end (a code block brought to the top)
+    scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight
+    const before = scroller.scrollTop
+    act(() => {
+      const current = useMessages.getState().messages[THREAD_ID]
+      useMessages.setState({ messages: { [THREAD_ID]: [...current, answer] } })
+      useAppState.setState({
+        streamingContent: { ...answer, id: 'empty', thread_id: '' },
+      })
+    })
+    act(() => {
+      vi.runAllTimers()
+    })
+    // Shrinking it to 360 would have cut the page short under the view and
+    // jumped it up by 100 px
+    expect(padding()).toBe('460px')
+    expect(
+      scroller.scrollHeight - scroller.clientHeight
+    ).toBeGreaterThanOrEqual(before)
     useAppState.setState({ streamingContent: undefined })
     vi.useRealTimers()
   })

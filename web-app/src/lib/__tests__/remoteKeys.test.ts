@@ -1,5 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { stepCode, handleRemoteKey, listenForRemoteKeys } from '../remoteKeys'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import {
+  stepCode,
+  handleRemoteKey,
+  listenForRemoteKeys,
+  scrollChatPage,
+} from '../remoteKeys'
+import { USER_SCROLL_EVENT } from '@/constants/threadScroll'
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 const toggleDictation = vi.fn()
 const discardRecording = vi.fn()
@@ -143,6 +149,131 @@ describe('remote keys', () => {
     stepCode(1, 50_000)
     expect(scrolled.length).toBe(count) // No code below
     document.querySelectorAll('[data-code-block]').forEach((b) => b.remove())
+  })
+})
+
+describe('shortcut scrolling inside the chat', () => {
+  let frames: FrameRequestCallback[]
+  let clock: number
+  const runFrames = (ms: number) => {
+    // One frame every 16 ms until nothing is waiting or ms have passed
+    const end = clock + ms
+    while (frames.length && clock < end) {
+      clock += 16
+      const due = frames
+      frames = []
+      due.forEach((cb) => cb(clock))
+    }
+  }
+  beforeEach(() => {
+    frames = []
+    clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb)
+      return frames.length
+    })
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  /** A chat 600 px high, its top at 50 px on screen, 5000 px of content. */
+  function chat() {
+    const scroller = document.createElement('div')
+    scroller.setAttribute('data-thread-scroller', '')
+    let scrollTop = 0
+    Object.defineProperties(scroller, {
+      clientHeight: { get: () => 600 },
+      scrollHeight: { get: () => 5000 },
+      scrollTop: {
+        get: () => scrollTop,
+        set: (v: number) => {
+          scrollTop = v
+        },
+      },
+    })
+    scroller.getBoundingClientRect = () =>
+      ({ top: 50, bottom: 650 }) as DOMRect
+    document.body.appendChild(scroller)
+    return scroller
+  }
+
+  it('lands on the code block even when the answer above it reflows mid-scroll', () => {
+    const scroller = chat()
+    const told = vi.fn()
+    scroller.addEventListener(USER_SCROLL_EVENT, told)
+    // The block sits 2000 px into the chat; text streaming in above it
+    // pushes it down while the scroll is on its way
+    let blockAt = 2000
+    const block = document.createElement('div')
+    block.setAttribute('data-code-block', '')
+    block.getBoundingClientRect = () => {
+      const top = 50 + blockAt - scroller.scrollTop
+      return { top, bottom: top + 200 } as DOMRect
+    }
+    scroller.appendChild(block)
+
+    stepCode(1, 1_000_000)
+    expect(told).toHaveBeenCalledOnce()
+    runFrames(100)
+    blockAt = 2300
+    runFrames(1000)
+    // 16 px below the chat's top, where scroll-mt-4 puts it
+    expect(block.getBoundingClientRect().top).toBe(50 + 16)
+    expect(scroller.scrollTop).toBe(2300 - 16)
+  })
+
+  it('finds the block again when the streaming answer draws it afresh', () => {
+    const scroller = chat()
+    const make = (at: number) => {
+      const b = document.createElement('div')
+      b.setAttribute('data-code-block', '')
+      b.getBoundingClientRect = () => {
+        const top = 50 + at - scroller.scrollTop
+        return { top, bottom: top + 200 } as DOMRect
+      }
+      return b
+    }
+    const first = make(1000)
+    scroller.appendChild(first)
+    stepCode(1, 2_000_000)
+    runFrames(64)
+    first.replaceWith(make(1500))
+    runFrames(1000)
+    expect(scroller.scrollTop).toBe(1500 - 16)
+  })
+
+  it('a hand on the wheel takes over from the glide', () => {
+    const scroller = chat()
+    const b = document.createElement('div')
+    b.setAttribute('data-code-block', '')
+    b.getBoundingClientRect = () => {
+      const top = 50 + 3000 - scroller.scrollTop
+      return { top, bottom: top + 200 } as DOMRect
+    }
+    scroller.appendChild(b)
+    stepCode(1, 3_000_000)
+    runFrames(64)
+    scroller.dispatchEvent(new Event('wheel'))
+    scroller.scrollTop = 123
+    runFrames(1000)
+    expect(scroller.scrollTop).toBe(123)
+  })
+
+  it('pages the chat, and held down each press goes on from the last', () => {
+    const scroller = chat()
+    expect(scrollChatPage(0.8)).toBe(true)
+    runFrames(64)
+    scrollChatPage(0.8)
+    runFrames(1000)
+    expect(scroller.scrollTop).toBeCloseTo(960)
+    scrollChatPage(-0.8)
+    runFrames(1000)
+    expect(scroller.scrollTop).toBeCloseTo(480)
   })
 })
 
