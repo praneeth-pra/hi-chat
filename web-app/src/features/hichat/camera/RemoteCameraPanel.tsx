@@ -121,8 +121,8 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
           Remote camera
         </h2>
         <p className="text-sm leading-relaxed text-main-view-fg/60">
-          Send this laptop's camera and microphone to Meet, Teams or Zoom (in
-          the browser) on your other computer.
+          Send this laptop's camera and microphone to Meet, Teams, Zoom or
+          Glider (in the browser) on your other computer.
         </p>
       </div>
 
@@ -257,9 +257,9 @@ export function RemoteCameraPanel({ cam }: { cam: CameraSender }) {
               <code>hichat-camera</code> folder.
             </li>
             <li>
-              Join the call in the browser (Meet, Teams, or Zoom's web client).
-              In its audio and video settings pick <b>Hi-chat remote camera</b>{' '}
-              and <b>Hi-chat remote mic</b>.
+              Join the call in the browser (Meet, Teams, Zoom's web client, or
+              Glider at hire.glider.ai). In its audio and video settings pick{' '}
+              <b>Hi-chat remote camera</b> and <b>Hi-chat remote mic</b>.
             </li>
           </ol>
           <p className="text-xs text-main-view-fg/50">

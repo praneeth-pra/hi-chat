@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Hi-chat remote camera",
-  "version": "1.11.0",
-  "description": "Lets Google Meet, Microsoft Teams and Zoom (in the browser) use the camera and microphone of the laptop running Hi-chat's /mirror page, and shows that page what you present and hear.",
+  "version": "1.12.0",
+  "description": "Lets Google Meet, Microsoft Teams, Zoom (in the browser) and Glider AI interviews (hire.glider.ai) use the camera and microphone of the laptop running Hi-chat's /mirror page, and shows that page what you present and hear.",
   "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js"
@@ -15,7 +15,8 @@
         "https://teams.live.com/*",
         "https://teams.cloud.microsoft/*",
         "https://app.zoom.us/*",
-        "https://*.zoom.us/wc/*"
+        "https://*.zoom.us/wc/*",
+        "https://*.glider.ai/*"
       ],
       "js": ["page.js"],
       "run_at": "document_start",
@@ -30,7 +31,8 @@
         "https://teams.live.com/*",
         "https://teams.cloud.microsoft/*",
         "https://app.zoom.us/*",
-        "https://*.zoom.us/wc/*"
+        "https://*.zoom.us/wc/*",
+        "https://*.glider.ai/*"
       ],
       "js": ["bridge.js"],
       "run_at": "document_start",
