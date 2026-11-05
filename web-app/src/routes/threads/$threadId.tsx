@@ -275,7 +275,8 @@ function ThreadDetail() {
             ref={scrollContainerRef}
             data-thread-scroller
             className={cn(
-              'flex flex-col h-full w-full overflow-auto pt-4 pb-3',
+              // overflow-anchor: none, as useKeepScrollPlace keeps the place
+              'flex flex-col h-full w-full overflow-auto pt-4 pb-3 [overflow-anchor:none]',
               // Mobile-first responsive padding
               isMobile ? 'px-3' : 'px-4'
             )}
