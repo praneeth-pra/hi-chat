@@ -283,9 +283,10 @@ describe('useThreadScrolling (flow)', () => {
       while (frames.length) frames.shift()!(0)
     })
     const held = layout.getScrollTop()
-    expect(resized).toHaveLength(1)
-    const layoutChanged = () =>
-      resized[0]([], {} as ResizeObserver)
+    // The last one made is the hold's (the first keeps the place on resize)
+    expect(resized.length).toBeGreaterThanOrEqual(1)
+    const hold = resized.at(-1)!
+    const layoutChanged = () => hold([], {} as ResizeObserver)
 
     // Without a shortcut the hold puts the question back
     scroller.scrollTop = 100

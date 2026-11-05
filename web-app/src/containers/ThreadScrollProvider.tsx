@@ -5,6 +5,7 @@ import {
   type RefObject,
 } from 'react'
 import { useThreadScrolling } from '@/hooks/useThreadScrolling'
+import { useKeepScrollPlace } from '@/hooks/useKeepScrollPlace'
 
 const ThreadScrollContext = createContext<ReturnType<
   typeof useThreadScrolling
@@ -21,6 +22,7 @@ export function ThreadScrollProvider({
   children: ReactNode
 }) {
   const state = useThreadScrolling(threadId, scrollContainerRef)
+  useKeepScrollPlace(scrollContainerRef)
   return (
     <ThreadScrollContext.Provider value={state}>
       {children}
