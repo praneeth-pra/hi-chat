@@ -319,3 +319,35 @@ test("a link's remote camera is cut off when the link ends", async () => {
     await new Promise((r) => server.close(r))
   }
 })
+
+test('sound reports go to the log, once per change, and to nobody else', () => {
+  const lines = []
+  const hub = createCameraHub({ env: {}, log: (l) => lines.push(l) })
+  const viewer = fakeSocket()
+  hub.join(viewer, 'view')
+  const camera = fakeSocket()
+  hub.join(camera, 'send')
+  const before = camera.got.length
+  const report = {
+    t: 'diag',
+    v: '1.14.0',
+    host: 'meet.google.com',
+    tracks: 3,
+    ctx: 'running',
+    sound: true,
+    extra: 'x'.repeat(500),
+  }
+  viewer.onmessage(JSON.stringify(report))
+  viewer.onmessage(JSON.stringify(report))
+  viewer.onmessage(JSON.stringify({ ...report, sound: false, host: 'a b\n"c' }))
+  camera.onmessage(
+    JSON.stringify({ t: 'diag', tabs: 1, sound: false, muted: true })
+  )
+  const sound = lines.filter((l) => l.includes(' sound '))
+  assert.deepEqual(sound, [
+    'camera: meet tab sound v=1.14.0 host=meet.google.com tracks=3 ctx=running sound=true',
+    'camera: meet tab sound v=1.14.0 host=abc tracks=3 ctx=running sound=false',
+    'camera: mirror sound tabs=1 sound=false muted=true',
+  ])
+  assert.equal(camera.got.length, before, 'reports are not passed on')
+})

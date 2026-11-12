@@ -280,6 +280,57 @@ describe('remote camera', () => {
     cam.stop()
   })
 
+  it('reports whether the call sound arrives and is played', async () => {
+    vi.useFakeTimers()
+    const cam = startCameraSender({
+      stream: { getTracks: () => [] } as unknown as MediaStream,
+      key: 'k',
+      location: { protocol: 'https:', host: 'hi.example' },
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
+    })
+    const ws = FakeSocket.last
+    ws.hear({ t: 'join', from: 'tab-s' })
+    await vi.advanceTimersByTimeAsync(0)
+    const pc = FakePeer.all.at(-1)!
+    pc.connectionState = 'connected'
+    let energy = 0
+    const receiver = {
+      getStats: async () =>
+        new Map([
+          [
+            'a',
+            { type: 'inbound-rtp', kind: 'audio', totalAudioEnergy: energy },
+          ],
+        ]),
+    }
+    pc.ontrack?.({
+      transceiver: pc.lanes[1],
+      track: { kind: 'audio', id: 's' },
+      receiver,
+    } as never)
+    cam.setHearing({ muted: true, blocked: false })
+    energy = 0.5
+    await vi.advanceTimersByTimeAsync(5000)
+    const reports = () => ws.sent.filter((m) => m.t === 'diag')
+    expect(reports().at(-1)).toEqual({
+      t: 'diag',
+      tabs: 1,
+      tracks: 1,
+      sound: true,
+      muted: true,
+      blocked: false,
+    })
+    // Nothing more arrives: silent
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(reports().at(-1)?.sound).toBe(false)
+    cam.stop()
+    const n = reports().length
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(reports()).toHaveLength(n)
+    vi.useRealTimers()
+  })
+
   it('reads how quickly the shared screen arrives', () => {
     const report = new Map<string, Record<string, unknown>>([
       [

@@ -52,6 +52,9 @@ export function useMirrorTransport(link?: string) {
   const [controllable, setControllable] = useState(false)
   const sendInputRef = useRef<(m: RemoteInput) => boolean>(() => false)
   const sendInput = useCallback((m: RemoteInput) => sendInputRef.current(m), [])
+  // Where the packets of Hi-chat's computer sound go (lib/callSound.ts);
+  // the page sets it
+  const soundTo = useRef<(packet: unknown) => void>(() => {})
   // On a link: shut until the code Hi-chat shows is typed, and how the
   // last code went. Let in, the ticket lets this page back in after a
   // dropped connection (and lets its camera send)
@@ -110,6 +113,7 @@ export function useMirrorTransport(link?: string) {
         if (!open) setDirectLag(null)
       },
       onControl: setControllable,
+      onSound: (packet) => soundTo.current(packet),
     })
     sendInputRef.current = (m) => peer.sendInput(m)
     let pass: string | undefined
@@ -234,6 +238,7 @@ export function useMirrorTransport(link?: string) {
     direct,
     controllable,
     sendInput,
+    soundTo,
     gate,
     ticket,
     askForCode,

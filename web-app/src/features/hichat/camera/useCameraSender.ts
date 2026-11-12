@@ -4,6 +4,7 @@ import {
   fetchCameraKey,
   startCameraSender,
   type CameraStatus,
+  type Hearing,
 } from '@/features/hichat/camera/remoteCamera'
 
 // The remote camera's sending side as a hook, so /mirror can send this
@@ -116,6 +117,7 @@ export function useCameraSender({
         onScreen: setScreen,
         onCall: setCall,
       })
+      sender.current.setHearing(hearing.current)
       store(AUTOSTART, '1')
       setAutostartState(true)
     } catch (e) {
@@ -136,6 +138,12 @@ export function useCameraSender({
   }, [])
 
   // A slow laptop here: the shared screen comes smaller
+  // What the page does with the call's sound, for the server's sound report
+  const hearing = useRef<Hearing>({})
+  const setHearing = useCallback((h: Hearing) => {
+    hearing.current = h
+    sender.current?.setHearing(h)
+  }, [])
   const setLightScreen = useCallback((on: boolean) => {
     sender.current?.setLightScreen(on)
   }, [])
@@ -241,6 +249,7 @@ export function useCameraSender({
     screen,
     setFastScreen,
     setLightScreen,
+    setHearing,
     screenStats,
     call,
     autostart,

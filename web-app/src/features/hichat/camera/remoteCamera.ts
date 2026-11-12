@@ -4,6 +4,16 @@
 // Each connection also has one video lane the other way: a Meet tab that is
 // presenting sends its shared screen back on it, for /mirror to show.
 
+/** What /mirror does with the call's sound, for the server's sound report. */
+export type Hearing = {
+  muted?: boolean
+  blocked?: boolean
+  /** The Hi-chat app's copy of the sound is arriving */
+  app?: boolean
+  /** The copy heard now */
+  heard?: string
+}
+
 export type CameraStatus = {
   connected: boolean // to Hi-chat's server
   viewers: number // Meet tabs receiving the camera
@@ -223,6 +233,42 @@ export function startCameraSender({
   // track per tab: with only the latest tab heard, a second tab or frame
   // that connected later and has no call of its own left /mirror silent
   const calls = new Map<string, MediaStreamTrack>()
+  const callReceivers = new Map<string, RTCRtpReceiver>()
+  // What the page does with the call's sound (muted here, or waiting for a
+  // click), for the sound report
+  let hearing: Hearing = {}
+  let lastEnergy = 0
+  /** How much sound has arrived on the call lanes so far, all tabs. */
+  async function callEnergy() {
+    let total = 0
+    for (const r of callReceivers.values()) {
+      const report = await r.getStats().catch(() => null)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      report?.forEach((s: any) => {
+        if (s.type === 'inbound-rtp' && s.kind === 'audio')
+          total += s.totalAudioEnergy ?? 0
+      })
+    }
+    return total
+  }
+  // A sound report for the server's log every few seconds while a Meet tab
+  // is connected: whether the call's sound arrives here, and whether this
+  // page plays it. With the Meet tab's own report, a silent call shows
+  // where the sound stopped
+  const report = setInterval(async () => {
+    if (!peers.size || ws?.readyState !== WebSocketImpl.OPEN) return
+    const energy = await callEnergy()
+    const sound = energy - lastEnergy > 1e-7
+    lastEnergy = energy
+    send({
+      t: 'diag',
+      tabs: [...peers.values()].filter((p) => p.connectionState === 'connected')
+        .length,
+      tracks: calls.size,
+      sound,
+      ...hearing,
+    })
+  }, 5000)
   let heard = ''
   function hearCall() {
     const key = [...calls.keys()].join(' ')
@@ -257,6 +303,7 @@ export function startCameraSender({
     screenReceivers.delete(id)
     presenting = presenting.filter((p) => p !== id)
     showScreen()
+    callReceivers.delete(id)
     if (calls.delete(id)) hearCall()
     status()
   }
@@ -307,6 +354,7 @@ export function startCameraSender({
         showScreen()
       } else if (e.transceiver === callLane) {
         calls.set(id, e.track)
+        if (e.receiver) callReceivers.set(id, e.receiver)
         heard = '' // the same tab again brings a new track
         hearCall()
       }
@@ -406,6 +454,7 @@ export function startCameraSender({
         for (const id of [...peers.keys()]) drop(id)
         stopped = true
         clearInterval(ping)
+        clearInterval(report)
         onStatus({ connected: false, viewers: 0, replaced: true })
         return
       }
@@ -450,6 +499,10 @@ export function startCameraSender({
         read.relay
       )
     },
+    /** Whether the page has the call's sound muted, or waits for a click. */
+    setHearing(h: Hearing) {
+      hearing = h
+    },
     /** The shared screen quick (30 fps, no playout delay) or as usual. */
     setFastScreen(on: boolean) {
       if (fast === on) return
@@ -480,6 +533,7 @@ export function startCameraSender({
       stopped = true
       clearInterval(ping)
       clearTimeout(retry)
+      clearInterval(report)
       for (const t of retryTimers.values()) clearTimeout(t)
       retryTimers.clear()
       for (const id of [...peers.keys()]) drop(id)

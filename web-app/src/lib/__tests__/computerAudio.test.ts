@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   decodePcm,
+  openComputerAudio,
   getDictationSource,
   setDictationSource,
 } from '../computerAudio'
@@ -21,6 +22,56 @@ describe('computer audio', () => {
     ])
     const samples = decodePcm(btoa(String.fromCharCode(...bytes)))
     expect(Array.from(samples)).toEqual([0, 32767 / 32768, -1, 0.5])
+  })
+})
+
+describe('shared computer audio', () => {
+  it('runs one capture for every listener, stopped with the last', async () => {
+    const posted: unknown[] = []
+    const win = window as unknown as {
+      webkit?: unknown
+      hiChatComputerAudio?: (m: unknown) => void
+    }
+    win.webkit = {
+      messageHandlers: {
+        hiChat: { postMessage: (m: unknown) => posted.push(m) },
+      },
+    }
+    const pcm = btoa(String.fromCharCode(0x00, 0x40))
+    const a = vi.fn()
+    const b = vi.fn()
+    const first = openComputerAudio(a)
+    const second = openComputerAudio(b)
+    expect(posted).toEqual([{ computerAudio: 'start' }])
+    win.hiChatComputerAudio?.({ computerAudio: 'started', rate: 48000 })
+    const [one, two] = await Promise.all([first, second])
+    expect(one.rate).toBe(48000)
+    win.hiChatComputerAudio?.({ computerAudio: 'data', pcm })
+    expect(a).toHaveBeenCalledTimes(1)
+    expect(b).toHaveBeenCalledTimes(1)
+
+    // Dictation stops: the other listener keeps getting the sound
+    one.close()
+    expect(posted).toHaveLength(1)
+    expect(one.alive()).toBe(false)
+    expect(two.alive()).toBe(true)
+    win.hiChatComputerAudio?.({ computerAudio: 'data', pcm })
+    expect(a).toHaveBeenCalledTimes(1)
+    expect(b).toHaveBeenCalledTimes(2)
+
+    two.close()
+    expect(posted.at(-1)).toEqual({ computerAudio: 'stop' })
+    expect(win.hiChatComputerAudio).toBeUndefined()
+
+    // And starts again for a new listener
+    const third = openComputerAudio(a)
+    expect(posted.at(-1)).toEqual({ computerAudio: 'start' })
+    win.hiChatComputerAudio?.({
+      computerAudio: 'failed',
+      error: 'No permission',
+    })
+    await expect(third).rejects.toThrow('No permission')
+    delete win.webkit
   })
 })
 

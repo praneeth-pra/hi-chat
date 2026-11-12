@@ -9,6 +9,8 @@
 // happen (a microtask, not a timer, which a background window slows to once
 // a second), and only what changed.
 
+import { computerAudioAvailable, openComputerAudio } from '@/lib/computerAudio'
+import { createSoundPacker } from './callSound'
 import {
   MessageStatus,
   MIRROR_CLOSE_VERSION_UNSUPPORTED,
@@ -365,8 +367,59 @@ export function startRemoteMirror({
         // app to replay
         canControl: nativeBridge() !== null,
         onInput: (m) => nativeBridge()?.postMessage({ input: m }),
+        onSoundWanted: (n) => shareSound(n > 0),
       })
     : null
+  // The computer's sound (the call's other side) for the viewers, while any
+  // can take it and the app can record it (lib/callSound.ts)
+  let sound: { close: () => void } | null = null
+  let soundAsked = false
+  let soundRetry: ReturnType<typeof setTimeout> | undefined
+  function shareSound(on: boolean) {
+    soundAsked = on
+    clearTimeout(soundRetry)
+    if (!on) {
+      sound?.close()
+      sound = null
+      return
+    }
+    if (sound || !computerAudioAvailable()) return
+    const pack = createSoundPacker()
+    let rate = 48000
+    const opening = openComputerAudio((block) => {
+      const packet = pack(block, rate)
+      if (packet) direct?.sendSound(packet)
+    })
+    const mine = {
+      close: () =>
+        void opening.then(
+          (a) => a.close(),
+          () => {}
+        ),
+    }
+    sound = mine
+    opening.then(
+      (a) => {
+        rate = a.rate
+        // The app's capture can stop on its own (the screen locking, a
+        // display change): start it again while viewers want it
+        const watch = setInterval(() => {
+          if (sound !== mine) return clearInterval(watch)
+          if (a.alive()) return
+          clearInterval(watch)
+          a.close()
+          sound = null
+          if (soundAsked) shareSound(true)
+        }, 2000)
+      },
+      () => {
+        // No permission yet, or the app is busy: try again in a while
+        if (sound !== mine) return
+        sound = null
+        if (soundAsked) soundRetry = setTimeout(() => shareSound(true), 10_000)
+      }
+    )
+  }
   // The link's door: the code to give a viewer, and checking what it types
   const gate = createGate({
     reply: (m) => {
@@ -705,6 +758,7 @@ export function startRemoteMirror({
     clearInterval(linkCheck)
     clearTimeout(retryTimer)
     direct?.closeAll()
+    shareSound(false)
     gate.clear()
     ws?.close()
     ws = null
