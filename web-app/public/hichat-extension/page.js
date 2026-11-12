@@ -22,6 +22,22 @@
   const realGetUserMedia = md.getUserMedia.bind(md)
   const realGetDisplayMedia = md.getDisplayMedia?.bind(md)
 
+  // Tracks that start on this computer (its mic, camera and screen, the
+  // remote camera and mic, and copies of them) are never the call's sound,
+  // and neither is anything our own players play
+  const localTracks = new WeakSet()
+  const local = (stream) => {
+    for (const t of stream.getTracks()) localTracks.add(t)
+    return stream
+  }
+  const realClone = MediaStreamTrack.prototype.clone
+  MediaStreamTrack.prototype.clone = function () {
+    const copy = realClone.call(this)
+    if (localTracks.has(this)) localTracks.add(copy)
+    return copy
+  }
+  const ownPlayers = new WeakSet()
+
   // Meet keeps these tracks for the whole call. Frames from whichever remote
   // connection is current are copied into them, so a reconnect doesn't end
   // the tracks Meet holds.
@@ -34,6 +50,8 @@
     audio: out.audio.writable.getWriter(),
   }
   const pumps = { video: null, audio: null }
+  localTracks.add(out.video)
+  localTracks.add(out.audio)
 
   async function pump(kind, track) {
     pumps[kind]?.cancel().catch(() => {})
@@ -73,6 +91,7 @@
   // mic back to you. (Meant for laptops in different places: in one room the
   // remote mic would pick this up and echo it into the call.)
   const sink = new Audio()
+  ownPlayers.add(sink)
   sink.autoplay = true
   // It can stop without a word: Chrome blocks sound until the page has been
   // clicked, a play() started before the remote sound arrives can come to
@@ -87,6 +106,7 @@
   document.addEventListener('visibilitychange', playSink)
   setInterval(playSink, 2000)
   function hearRemote(track) {
+    localTracks.add(track)
     sink.srcObject = new MediaStream([track])
     track.addEventListener('unmute', playSink)
     playSink()
@@ -212,6 +232,7 @@
     // Chrome only lets a call's track into Web Audio while something plays
     // it; a muted element does, without a second copy of the sound here
     const keep = new Audio()
+    ownPlayers.add(keep)
     keep.muted = true
     keep.srcObject = stream
     keep.play().catch(() => {})
@@ -225,6 +246,41 @@
     if (!callSender || !mix) return
     callSender.replaceTrack(mix.out.stream.getAudioTracks()[0]).catch(() => {})
   }
+
+  // A second way in, for a call page whose connections can't be watched
+  // (made in another frame, or with a constructor it kept from elsewhere):
+  // whatever stream the page gives a player to play is the call's sound
+  // too. A track already in the mix from its connection is the same track,
+  // so it isn't taken twice.
+  const srcObject = Object.getOwnPropertyDescriptor(
+    HTMLMediaElement.prototype,
+    'srcObject'
+  )
+  function hearPlayed(el, stream) {
+    if (ownPlayers.has(el) || !(stream instanceof MediaStream)) return
+    const take = (t) => {
+      if (t.kind !== 'audio' || t.readyState !== 'live') return
+      if (localTracks.has(t)) return
+      if (t === mix?.out.stream.getAudioTracks()[0]) return
+      addCallAudio(t)
+    }
+    stream.getAudioTracks().forEach(take)
+    stream.addEventListener('addtrack', (e) => {
+      if (el.srcObject === stream) take(e.track)
+    })
+  }
+  if (srcObject?.set)
+    Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', {
+      ...srcObject,
+      set(value) {
+        srcObject.set.call(this, value)
+        try {
+          hearPlayed(this, value)
+        } catch {
+          // the page's player works either way
+        }
+      },
+    })
 
   // Zoom's web client doesn't hand its sound to the page as call tracks: it
   // decodes it itself and plays it through Web Audio. So there, whatever is
@@ -474,7 +530,7 @@
   // Presenting: Meet gets the screen as usual, and /mirror gets a copy
   if (realGetDisplayMedia)
     md.getDisplayMedia = async function (...args) {
-      const stream = await realGetDisplayMedia(...args)
+      const stream = local(await realGetDisplayMedia(...args))
       const source = stream.getVideoTracks()[0]
       if (source) {
         stopSharing()
@@ -504,7 +560,7 @@
       remoteCamera: video,
       remoteMic: audio,
     })
-    if (!video && !audio) return realGetUserMedia(constraints)
+    if (!video && !audio) return local(await realGetUserMedia(constraints))
     start()
     const tracks = []
     const rest = {
@@ -512,7 +568,7 @@
       audio: audio ? false : (constraints.audio ?? false),
     }
     if (rest.video || rest.audio)
-      tracks.push(...(await realGetUserMedia(rest)).getTracks())
+      tracks.push(...local(await realGetUserMedia(rest)).getTracks())
     if (video) tracks.push(deviceTrack('video', CAM))
     if (audio) tracks.push(deviceTrack('audio', MIC))
     return new MediaStream(tracks)
