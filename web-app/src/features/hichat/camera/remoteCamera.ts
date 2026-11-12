@@ -12,6 +12,10 @@ export type CameraStatus = {
 }
 
 const MAX_VIDEO_BITRATE = 2_500_000
+/** Offers after a connection failed, before waiting for the tab to rejoin. */
+export const MAX_REOFFERS = 8
+/** The server's close code for a mirror link that ended (relay/protocol.mjs). */
+const LINK_ENDED = 4001
 
 /** Counters of a screen lane's inbound video, as getStats reports them. */
 export type ScreenCounters = {
@@ -215,15 +219,16 @@ export function startCameraSender({
   // The last stats read, to measure the time between two reads
   let lastStats: { id: string; at: number; s: ScreenCounters } | null = null
   let shown: MediaStream | null = null
-  // Each Meet tab's call sound; the latest tab to connect is heard
-  const calls = new Map<string, MediaStream>()
-  let heard: MediaStream | null = null
+  // Each Meet tab's call sound. All of them are heard, as one stream with a
+  // track per tab: with only the latest tab heard, a second tab or frame
+  // that connected later and has no call of its own left /mirror silent
+  const calls = new Map<string, MediaStreamTrack>()
+  let heard = ''
   function hearCall() {
-    let next: MediaStream | null = null
-    for (const c of calls.values()) next = c
-    if (next === heard) return
-    heard = next
-    onCall(next)
+    const key = [...calls.keys()].join(' ')
+    if (key === heard) return
+    heard = key
+    onCall(calls.size ? new MediaStream([...calls.values()]) : null)
   }
 
   function showScreen() {
@@ -263,8 +268,26 @@ export function startCameraSender({
         t.contentHint = t.kind === 'video' ? 'motion' : 'speech'
   }
   hint(current)
-  // Viewers re-offered after their connection failed, until it connects again
-  const retried = new Set<string>()
+  // Meet tabs here now (joined, not left), and how often each was offered
+  // again since its connection last worked
+  const joined = new Set<string>()
+  const retries = new Map<string, number>()
+  const retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Offers again after a failure: at once, then 2, 4, 8, 15, 15… s apart. */
+  function offerAgain(id: string) {
+    const n = retries.get(id) ?? 0
+    if (n >= MAX_REOFFERS || retryTimers.has(id)) return
+    retries.set(id, n + 1)
+    const go = () => {
+      retryTimers.delete(id)
+      if (stopped || !joined.has(id)) return
+      if (ws?.readyState !== WebSocketImpl.OPEN) return
+      if (peers.get(id)?.connectionState === 'connected') return
+      queue = queue.then(() => offer(id)).catch(() => {})
+    }
+    if (n === 0) go()
+    else retryTimers.set(id, setTimeout(go, Math.min(1000 * 2 ** n, 15_000)))
+  }
 
   async function offer(id: string) {
     drop(id)
@@ -283,8 +306,8 @@ export function startCameraSender({
         tuneScreen(id)
         showScreen()
       } else if (e.transceiver === callLane) {
-        calls.delete(id) // the newest connection goes last
-        calls.set(id, new MediaStream([e.track]))
+        calls.set(id, e.track)
+        heard = '' // the same tab again brings a new track
         hearCall()
       }
     }
@@ -292,15 +315,13 @@ export function startCameraSender({
       send({ t: 'ice', to: id, candidate: e.candidate?.toJSON() ?? null })
     pc.onconnectionstatechange = () => {
       if (peers.get(id) !== pc) return
-      if (pc.connectionState === 'connected') retried.delete(id)
+      if (pc.connectionState === 'connected') retries.delete(id)
       if (pc.connectionState !== 'failed') return status()
       drop(id)
-      // A network change on either side: connect again once, at once,
-      // rather than leave Meet on a frozen picture until the tab rejoins
-      if (!retried.has(id) && ws?.readyState === WebSocketImpl.OPEN) {
-        retried.add(id)
-        queue = queue.then(() => offer(id)).catch(() => {})
-      }
+      // A network change on either side: connect again, at once and then a
+      // few more times, rather than leave Meet on a frozen picture and
+      // /mirror without the call's sound until the tab rejoins
+      offerAgain(id)
     }
     for (const sender of pc.getSenders())
       if (sender.track?.kind === 'video') {
@@ -326,10 +347,17 @@ export function startCameraSender({
     else if (m.t === 'join' && m.from) {
       // The same Meet tab again after a blip in the server connection: its
       // camera and sound never stopped, so they carry on as they are
+      joined.add(m.from)
       if (peers.get(m.from)?.connectionState === 'connected') return status()
+      retries.delete(m.from)
       await offer(m.from)
-    } else if (m.t === 'leave' && m.from) drop(m.from)
-    else if (m.t === 'screen' && m.from) {
+    } else if (m.t === 'leave' && m.from) {
+      joined.delete(m.from)
+      retries.delete(m.from)
+      clearTimeout(retryTimers.get(m.from))
+      retryTimers.delete(m.from)
+      drop(m.from)
+    } else if (m.t === 'screen' && m.from) {
       const from = m.from
       presenting = presenting.filter((p) => p !== from)
       if (m.on === true && peers.has(from)) {
@@ -380,6 +408,14 @@ export function startCameraSender({
         clearInterval(ping)
         onStatus({ connected: false, viewers: 0, replaced: true })
         return
+      }
+      // The mirror link ended: its ticket is refused from now on, so trying
+      // again would only knock every few seconds for nothing. The calls
+      // under way keep going, as the media goes directly
+      if (e?.code === LINK_ENDED) {
+        stopped = true
+        clearInterval(ping)
+        return status()
       }
       // Lost the server only: connections that are up keep going, as the
       // media goes directly between the browsers. Ones still being set up
@@ -444,6 +480,8 @@ export function startCameraSender({
       stopped = true
       clearInterval(ping)
       clearTimeout(retry)
+      for (const t of retryTimers.values()) clearTimeout(t)
+      retryTimers.clear()
       for (const id of [...peers.keys()]) drop(id)
       ws?.close()
       ws = null

@@ -117,9 +117,7 @@ function DeviceSelect({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">
-          {defaultName
-            ? `Default (${defaultName})`
-            : `Default ${fallback}`}
+          {defaultName ? `Default (${defaultName})` : `Default ${fallback}`}
         </option>
         {list.map((d) => (
           <option key={d.deviceId} value={d.deviceId}>
