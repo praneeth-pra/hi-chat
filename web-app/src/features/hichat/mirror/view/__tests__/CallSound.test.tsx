@@ -9,15 +9,22 @@ const track = () => {
   const t = new EventTarget()
   return Object.assign(t, { kind: 'audio' })
 }
-const stream = () => {
-  const t = track()
-  return { getAudioTracks: () => [t] } as unknown as MediaStream
+const stream = (n = 1) => {
+  const tracks = Array.from({ length: n }, track)
+  return { getAudioTracks: () => tracks } as unknown as MediaStream
 }
 
 describe('CallSound', () => {
   let play: ReturnType<typeof vi.fn>
   let paused = true
   beforeEach(() => {
+    // jsdom has no MediaStream
+    vi.stubGlobal(
+      'MediaStream',
+      class {
+        constructor(public tracks: unknown[]) {}
+      }
+    )
     vi.useFakeTimers()
     paused = true
     play = vi.fn(() => Promise.resolve())
@@ -29,6 +36,20 @@ describe('CallSound', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('plays every Meet tab connected, not only the latest', () => {
+    const { container } = render(
+      <CallSound
+        stream={stream(2)}
+        muted={false}
+        blocked={false}
+        onBlocked={() => {}}
+      />
+    )
+    expect(container.querySelectorAll('audio')).toHaveLength(2)
+    expect(play).toHaveBeenCalledTimes(2)
   })
 
   it('plays again when it stops by itself', () => {

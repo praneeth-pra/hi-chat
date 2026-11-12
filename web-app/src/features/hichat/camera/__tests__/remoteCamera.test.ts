@@ -6,6 +6,7 @@ import {
   cameraSocketUrl,
   crc32,
   extensionConfig,
+  MAX_REOFFERS,
   startCameraSender,
   zipFiles,
 } from '../remoteCamera'
@@ -177,18 +178,105 @@ describe('remote camera', () => {
     expect(FakePeer.all.length).toBe(peers)
     expect(second.sent.some((m) => m.t === 'offer')).toBe(false)
 
-    // Its connection fails (a network change): offered again, once
+    // Its connection fails (a network change): offered again at once
     up.connectionState = 'failed'
     up.onconnectionstatechange?.()
     await flush()
     expect(up.closed).toBe(true)
     expect(FakePeer.all.length).toBe(peers + 1)
     expect(second.sent.filter((m) => m.t === 'offer')).toHaveLength(1)
-    const again = FakePeer.all.at(-1)!
-    again.connectionState = 'failed'
-    again.onconnectionstatechange?.()
+    // That one fails too: tried again after a wait, each wait longer, and
+    // not for ever
+    vi.useFakeTimers()
+    for (let n = 1; n < MAX_REOFFERS; n++) {
+      const again = FakePeer.all.at(-1)!
+      again.connectionState = 'failed'
+      again.onconnectionstatechange?.()
+      expect(FakePeer.all.length).toBe(peers + n)
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(FakePeer.all.length).toBe(peers + n + 1)
+    }
+    const last = FakePeer.all.at(-1)!
+    last.connectionState = 'failed'
+    last.onconnectionstatechange?.()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakePeer.all.length).toBe(peers + MAX_REOFFERS)
+    vi.useRealTimers()
+    cam.stop()
+  })
+
+  it('stops offering again once the Meet tab has left', async () => {
+    const cam = startCameraSender({
+      stream: { getTracks: () => [] } as unknown as MediaStream,
+      key: 'k',
+      location: { protocol: 'https:', host: 'hi.example' },
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
+    })
+    const ws = FakeSocket.last
+    ws.hear({ t: 'join', from: 'tab-9' })
     await flush()
-    expect(FakePeer.all.length).toBe(peers + 1)
+    const n = FakePeer.all.length
+    for (let i = 0; i < 2; i++) {
+      const pc = FakePeer.all.at(-1)!
+      pc.connectionState = 'failed'
+      pc.onconnectionstatechange?.()
+      await flush()
+    }
+    // One offered at once; the second waits, and the tab leaves meanwhile
+    expect(FakePeer.all.length).toBe(n + 1)
+    vi.useFakeTimers()
+    ws.hear({ t: 'leave', from: 'tab-9' })
+    await vi.advanceTimersByTimeAsync(30_000)
+    vi.useRealTimers()
+    expect(FakePeer.all.length).toBe(n + 1)
+    cam.stop()
+  })
+
+  it('hears every Meet tab, and stops knocking once its link has ended', async () => {
+    const onCall = vi.fn()
+    globalThis.MediaStream ??= class {
+      constructor(public tracks: unknown[]) {}
+    } as unknown as typeof MediaStream
+    const cam = startCameraSender({
+      stream: { getTracks: () => [] } as unknown as MediaStream,
+      key: '',
+      link: 'l',
+      ticket: 't',
+      location: { protocol: 'https:', host: 'hi.example' },
+      onCall,
+      WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
+    })
+    const ws = FakeSocket.last
+    const sound = (id: string) => {
+      const pc = FakePeer.all.at(-1)!
+      const track = { kind: 'audio', id }
+      pc.ontrack?.({ transceiver: pc.lanes[1], track })
+      return track
+    }
+    ws.hear({ t: 'join', from: 'tab-a' })
+    await flush()
+    const a = sound('a')
+    // A second tab (or frame) connects later, with no call of its own
+    ws.hear({ t: 'join', from: 'tab-b' })
+    await flush()
+    const b = sound('b')
+    const heard = onCall.mock.lastCall?.[0] as unknown as { tracks: unknown[] }
+    expect(heard.tracks).toEqual([a, b])
+    ws.hear({ t: 'leave', from: 'tab-b' })
+    await flush()
+    expect(
+      (onCall.mock.lastCall?.[0] as unknown as { tracks: unknown[] }).tracks
+    ).toEqual([a])
+
+    // The link ends: no reconnecting with a ticket that is refused now
+    vi.useFakeTimers()
+    ;(ws.onclose as unknown as (e: { code: number }) => void)({ code: 4001 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    vi.useRealTimers()
+    expect(FakeSocket.last).toBe(ws)
+    expect(FakePeer.all.at(-2)!.closed).toBe(false)
     cam.stop()
   })
 
