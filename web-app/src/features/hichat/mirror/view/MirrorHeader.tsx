@@ -18,6 +18,8 @@ export function MirrorHeader({
   title,
   mirror,
   call,
+  appSound = false,
+  callSilenced = false,
   callMuted,
   callBlocked,
   onToggleMute,
@@ -31,6 +33,10 @@ export function MirrorHeader({
   mirror: ReturnType<typeof mirrorStatus>
   /** The Meet call's sound, while there is a call */
   call: MediaStream | null | undefined
+  /** The call's sound also comes from the Hi-chat app (lib/callSound.ts) */
+  appSound?: boolean
+  /** The app's copy is the one heard now: the extension's players stay quiet */
+  callSilenced?: boolean
   callMuted: boolean
   /** The browser wants a click before it plays the call */
   callBlocked: boolean
@@ -61,7 +67,7 @@ export function MirrorHeader({
         label={mirror.label}
         className="hidden sm:inline-flex"
       />
-      {call &&
+      {(call || appSound) &&
         (callBlocked ? (
           <button
             type="button"
@@ -93,7 +99,7 @@ export function MirrorHeader({
       {call && (
         <CallSound
           stream={call}
-          muted={callMuted}
+          muted={callMuted || callSilenced}
           blocked={callBlocked}
           onBlocked={onCallBlocked}
         />

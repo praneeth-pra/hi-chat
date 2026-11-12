@@ -97,66 +97,118 @@ export type ComputerAudio = {
 const START_MS = 4000
 const STALL_MS = 3000
 
-/** Starts the app's computer-audio capture; each 40 ms block goes to onBlock. */
-export function openComputerAudio(
-  onBlock: (block: Float32Array) => void
-): Promise<ComputerAudio> {
-  const app = bridge()
-  if (!app)
-    return Promise.reject(new Error('Computer audio needs the Hi-chat app'))
+// One capture in the app, shared by everything that listens (dictation, and
+// the call's sound sent to /mirror): the app is asked to start for the first
+// listener and to stop when the last one closes.
+type Capture = {
+  rate: number
+  lastData: number
+  failed: boolean
+  listeners: Set<(block: Float32Array) => void>
+  /** Settles when the app has started (or couldn't) */
+  started: Promise<void>
+  stop: () => void
+}
+let capture: Capture | null = null
+
+function startCapture(app: Bridge): Capture {
   const win = window as AppWindow
-  return new Promise((resolve, reject) => {
-    let rate = 0
-    let lastData = Date.now()
-    let failed = false
-    let closed = false
-    const close = () => {
-      if (closed) return
-      closed = true
+  let done = false
+  let settle: { resolve: () => void; reject: (e: Error) => void }
+  const c: Capture = {
+    rate: 0,
+    lastData: Date.now(),
+    failed: false,
+    listeners: new Set(),
+    started: new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject }
+    }),
+    stop: () => {
+      if (done) return
+      done = true
       clearTimeout(timer)
       win.chrome?.webview?.removeEventListener('message', onEvent)
       if (win.hiChatComputerAudio === onMessage)
         win.hiChatComputerAudio = undefined
+      if (capture === c) capture = null
       app.postMessage({ computerAudio: 'stop' })
+    },
+  }
+  // A listener that came and went before the start settles nothing
+  c.started.catch(() => {})
+  const onMessage = (data: unknown) => {
+    if (done || !data || typeof data !== 'object') return
+    const m = data as {
+      computerAudio?: string
+      rate?: number
+      pcm?: string
+      error?: string
     }
-    const handle: ComputerAudio = {
-      get rate() {
-        return rate
-      },
-      alive: () => !closed && !failed && Date.now() - lastData < STALL_MS,
-      close,
-    }
-    const onMessage = (data: unknown) => {
-      if (closed || !data || typeof data !== 'object') return
-      const m = data as {
-        computerAudio?: string
-        rate?: number
-        pcm?: string
-        error?: string
-      }
-      if (m.computerAudio === 'data' && m.pcm && rate) {
-        lastData = Date.now()
-        onBlock(decodePcm(m.pcm))
-      } else if (m.computerAudio === 'started' && !rate) {
-        rate = m.rate || 48000
-        lastData = Date.now()
-        clearTimeout(timer)
-        resolve(handle)
-      } else if (m.computerAudio === 'failed') {
-        failed = true
-        if (!rate) {
-          close()
-          reject(new Error(m.error || 'Computer audio failed'))
-        }
+    if (m.computerAudio === 'data' && m.pcm && c.rate) {
+      c.lastData = Date.now()
+      const block = decodePcm(m.pcm)
+      for (const l of [...c.listeners]) l(block)
+    } else if (m.computerAudio === 'started' && !c.rate) {
+      c.rate = m.rate || 48000
+      c.lastData = Date.now()
+      clearTimeout(timer)
+      settle.resolve()
+    } else if (m.computerAudio === 'failed') {
+      c.failed = true
+      if (!c.rate) {
+        c.stop()
+        settle.reject(new Error(m.error || 'Computer audio failed'))
       }
     }
-    const onEvent = (e: { data: unknown }) => onMessage(e.data)
-    const timer = setTimeout(() => {
-      close()
-      reject(new Error('The app did not start computer audio'))
-    }, START_MS)
-    win.chrome?.webview?.addEventListener('message', onEvent)
-    if (win.webkit?.messageHandlers?.hiChat) win.hiChatComputerAudio = onMessage
-    app.postMessage({ computerAudio: 'start' })
-  })
+  }
+  const onEvent = (e: { data: unknown }) => onMessage(e.data)
+  const timer = setTimeout(() => {
+    c.stop()
+    settle.reject(new Error('The app did not start computer audio'))
+  }, START_MS)
+  win.chrome?.webview?.addEventListener('message', onEvent)
+  if (win.webkit?.messageHandlers?.hiChat) win.hiChatComputerAudio = onMessage
+  app.postMessage({ computerAudio: 'start' })
+  return c
+}
+
+/** Starts the app's computer-audio capture; each 40 ms block goes to onBlock. */
+export async function openComputerAudio(
+  onBlock: (block: Float32Array) => void
+): Promise<ComputerAudio> {
+  const app = bridge()
+  if (!app) throw new Error('Computer audio needs the Hi-chat app')
+  // A capture that stalled or failed is started afresh
+  if (
+    capture &&
+    (capture.failed ||
+      (capture.rate && Date.now() - capture.lastData >= STALL_MS))
+  )
+    capture.stop()
+  const c = (capture ??= startCapture(app))
+  c.listeners.add(onBlock)
+  let closed = false
+  const close = () => {
+    if (closed) return
+    closed = true
+    c.listeners.delete(onBlock)
+    if (!c.listeners.size) c.stop()
+  }
+  try {
+    await c.started
+  } catch (e) {
+    close()
+    throw e
+  }
+  return {
+    get rate() {
+      return c.rate
+    },
+    alive: () =>
+      !closed &&
+      !c.failed &&
+      capture === c &&
+      Date.now() - c.lastData < STALL_MS,
+    close,
+  }
 }

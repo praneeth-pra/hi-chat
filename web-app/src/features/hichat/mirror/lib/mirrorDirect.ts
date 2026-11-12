@@ -121,12 +121,15 @@ export function createDirectSender({
   onOpen,
   canControl = false,
   onInput,
+  onSoundWanted,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
   onOpen?: () => void
   canControl?: boolean
   onInput?: (m: RemoteInput) => void
+  /** How many viewers can take the computer's sound now (lib/callSound.ts) */
+  onSoundWanted?: (viewers: number) => void
   PeerConnection?: typeof RTCPeerConnection
 }) {
   const peers = new Map<
@@ -136,9 +139,16 @@ export function createDirectSender({
       dc: RTCDataChannel
       input: RTCDataChannel
       moves: RTCDataChannel
+      sound: RTCDataChannel
     }
   >()
   let queue = Promise.resolve()
+  let soundWanted = 0
+  const noteSound = () => {
+    let n = 0
+    for (const { sound } of peers.values()) if (sound.readyState === 'open') n++
+    if (n !== soundWanted) onSoundWanted?.((soundWanted = n))
+  }
 
   function close(id: string) {
     const p = peers.get(id)
@@ -147,7 +157,9 @@ export function createDirectSender({
     p.dc.close()
     p.input.close()
     p.moves.close()
+    p.sound.close()
     p.pc.close()
+    noteSound()
   }
 
   async function start(id: string, ice: RTCIceServer[]) {
@@ -163,7 +175,16 @@ export function createDirectSender({
       ordered: false,
       maxRetransmits: 0,
     })
-    peers.set(id, { pc, dc, input, moves })
+    // The computer's sound, in small packets: a late one is useless, so
+    // none is resent or made to wait for another
+    const sound = pc.createDataChannel('sound', {
+      ordered: false,
+      maxRetransmits: 0,
+    })
+    sound.binaryType = 'arraybuffer'
+    sound.onopen = noteSound
+    sound.onclose = noteSound
+    peers.set(id, { pc, dc, input, moves, sound })
     const control = canControl
     const mine = () => peers.get(id)?.pc === pc
     pc.onicecandidate = (e) =>
@@ -251,6 +272,13 @@ export function createDirectSender({
         else for (const c of chunks(data)) dc.send(c)
       }
     },
+    /** A packet of the computer's sound, to every viewer that takes it. */
+    sendSound(packet: ArrayBuffer) {
+      for (const { sound } of peers.values())
+        // A viewer too far behind skips packets rather than queue them
+        if (sound.readyState === 'open' && sound.bufferedAmount < 64_000)
+          sound.send(packet)
+    },
     /** How many viewers have an open channel. */
     get open() {
       let n = 0
@@ -284,9 +312,12 @@ export function createDirectViewer({
   onPong,
   onChange,
   onControl = () => {},
+  onSound = () => {},
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
   signal: Signal
+  /** A packet of the sender's computer sound (lib/callSound.ts) */
+  onSound?: (packet: unknown) => void
   onMessage: (m: Record<string, unknown>) => void
   onPong: (n: number) => void
   onChange: (open: number) => void
@@ -350,6 +381,11 @@ export function createDirectViewer({
       const dc = e.channel
       if (dc.label === 'moves') {
         entry.moves = dc
+        return
+      }
+      if (dc.label === 'sound') {
+        dc.binaryType = 'arraybuffer'
+        dc.onmessage = (ev) => mine() && onSound(ev.data)
         return
       }
       if (dc.label === 'input') {

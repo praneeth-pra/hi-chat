@@ -161,7 +161,7 @@ export function createCameraHub({
   // was silent shows where the sound stopped. Known fields, short values.
   const DIAG_FIELDS = {
     view: ['v', 'host', 'tracks', 'ctx', 'sound', 'lane', 'pc'],
-    send: ['tabs', 'tracks', 'sound', 'muted', 'blocked', 'playing'],
+    send: ['tabs', 'tracks', 'sound', 'muted', 'blocked', 'app', 'heard'],
   }
   const clean = (v) =>
     typeof v === 'number' || typeof v === 'boolean'

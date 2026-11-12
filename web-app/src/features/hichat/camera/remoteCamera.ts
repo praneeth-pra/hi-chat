@@ -4,6 +4,16 @@
 // Each connection also has one video lane the other way: a Meet tab that is
 // presenting sends its shared screen back on it, for /mirror to show.
 
+/** What /mirror does with the call's sound, for the server's sound report. */
+export type Hearing = {
+  muted?: boolean
+  blocked?: boolean
+  /** The Hi-chat app's copy of the sound is arriving */
+  app?: boolean
+  /** The copy heard now */
+  heard?: string
+}
+
 export type CameraStatus = {
   connected: boolean // to Hi-chat's server
   viewers: number // Meet tabs receiving the camera
@@ -226,7 +236,7 @@ export function startCameraSender({
   const callReceivers = new Map<string, RTCRtpReceiver>()
   // What the page does with the call's sound (muted here, or waiting for a
   // click), for the sound report
-  let hearing: { muted?: boolean; blocked?: boolean } = {}
+  let hearing: Hearing = {}
   let lastEnergy = 0
   /** How much sound has arrived on the call lanes so far, all tabs. */
   async function callEnergy() {
@@ -256,8 +266,7 @@ export function startCameraSender({
         .length,
       tracks: calls.size,
       sound,
-      muted: hearing.muted,
-      blocked: hearing.blocked,
+      ...hearing,
     })
   }, 5000)
   let heard = ''
@@ -491,7 +500,7 @@ export function startCameraSender({
       )
     },
     /** Whether the page has the call's sound muted, or waits for a click. */
-    setHearing(h: { muted?: boolean; blocked?: boolean }) {
+    setHearing(h: Hearing) {
       hearing = h
     },
     /** The shared screen quick (30 fps, no playout delay) or as usual. */
