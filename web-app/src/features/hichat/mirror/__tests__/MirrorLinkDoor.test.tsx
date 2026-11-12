@@ -19,6 +19,7 @@ vi.mock('@/features/hichat/camera/useCameraSender', async (actual) => ({
       devices: [],
       setFastScreen: () => {},
       setLightScreen: () => {},
+      setHearing: () => {},
       screenStats: async () => null,
     }
   },

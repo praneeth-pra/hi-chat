@@ -116,6 +116,7 @@ export function useCameraSender({
         onScreen: setScreen,
         onCall: setCall,
       })
+      sender.current.setHearing(hearing.current)
       store(AUTOSTART, '1')
       setAutostartState(true)
     } catch (e) {
@@ -136,6 +137,15 @@ export function useCameraSender({
   }, [])
 
   // A slow laptop here: the shared screen comes smaller
+  // What the page does with the call's sound, for the server's sound report
+  const hearing = useRef<{ muted?: boolean; blocked?: boolean }>({})
+  const setHearing = useCallback(
+    (h: { muted?: boolean; blocked?: boolean }) => {
+      hearing.current = h
+      sender.current?.setHearing(h)
+    },
+    []
+  )
   const setLightScreen = useCallback((on: boolean) => {
     sender.current?.setLightScreen(on)
   }, [])
@@ -241,6 +251,7 @@ export function useCameraSender({
     screen,
     setFastScreen,
     setLightScreen,
+    setHearing,
     screenStats,
     call,
     autostart,

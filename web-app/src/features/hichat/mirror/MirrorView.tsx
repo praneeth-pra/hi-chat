@@ -1,4 +1,10 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { IconArrowDown } from '@tabler/icons-react'
 import { AccuracyProgress } from '@/containers/AccuracyProgress'
 import {
@@ -103,6 +109,11 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   const [callMuted, setCallMuted] = useState(() => stored(CALL_MUTED) === '1')
   const [callBlocked, setCallBlocked] = useState(false)
   const blockCall = useCallback(() => setCallBlocked(true), [])
+  // For the server's sound report: whether the call is muted or blocked here
+  const { setHearing } = cam
+  useEffect(() => {
+    setHearing({ muted: callMuted, blocked: callBlocked })
+  }, [setHearing, callMuted, callBlocked])
   const empty = state.msgs.length === 0 && !streaming
 
   // On a laptop the shared screen sits left of the text, sized by a divider

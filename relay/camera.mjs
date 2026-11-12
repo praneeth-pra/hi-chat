@@ -155,6 +155,35 @@ export function createCameraHub({
     return null
   }
 
+  // Sound reports ({ t: 'diag' }): what a Meet tab's extension has of the
+  // call's sound, and what /mirror hears of it. They go to the log only,
+  // when something changes (and once a minute), so a call where /mirror
+  // was silent shows where the sound stopped. Known fields, short values.
+  const DIAG_FIELDS = {
+    view: ['v', 'host', 'tracks', 'ctx', 'sound', 'lane', 'pc'],
+    send: ['tabs', 'tracks', 'sound', 'muted', 'blocked', 'playing'],
+  }
+  const clean = (v) =>
+    typeof v === 'number' || typeof v === 'boolean'
+      ? String(v)
+      : typeof v === 'string'
+        ? v.replace(/[^\w.:-]/g, '').slice(0, 40)
+        : ''
+  function diag(ws, who, m) {
+    if (m?.t !== 'diag') return false
+    const line = DIAG_FIELDS[who]
+      .filter((k) => m[k] !== undefined)
+      .map((k) => `${k}=${clean(m[k])}`)
+      .join(' ')
+    const at = Date.now()
+    if (line !== ws.diagLine || at - (ws.diagAt ?? 0) >= 60_000) {
+      ws.diagLine = line
+      ws.diagAt = at
+      log(`camera: ${who === 'view' ? 'meet tab' : 'mirror'} sound ${line}`)
+    }
+    return true
+  }
+
   function joinSender(ws, list) {
     // A newer camera page replaces the old one; it hears 4000 and stays off
     // (rather than reconnecting and taking the camera back, over and over)
@@ -169,6 +198,7 @@ export function createCameraHub({
     ws.onmessage = (raw) => {
       const m = parse(raw)
       pong(ws, m)
+      if (diag(ws, 'send', m)) return
       const out = m && signal(m)
       const to = m && viewers.get(m.to)
       if (out && to) to.send(JSON.stringify(out))
@@ -199,6 +229,7 @@ export function createCameraHub({
     ws.onmessage = (raw) => {
       const m = parse(raw)
       pong(ws, m)
+      if (diag(ws, 'view', m)) return
       const out = m && signal(m)
       if (out && sender) sender.send(JSON.stringify({ ...out, from: id }))
     }

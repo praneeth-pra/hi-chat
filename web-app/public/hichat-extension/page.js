@@ -159,7 +159,21 @@
     // Keyed by the track itself, not its id: a connection Meet opens again
     // can bring a track with the same id as one still in the mix (the id
     // comes from the other side), and that new track must be heard
-    mix = { ctx, out: ctx.createMediaStreamDestination(), sources: new Map() }
+    mix = {
+      ctx,
+      out: ctx.createMediaStreamDestination(),
+      sources: new Map(),
+      // Listens to the mix, for the sound report (see report below)
+      meter: ctx.createAnalyser(),
+      loud: false,
+    }
+    const wave = new Float32Array(mix.meter.fftSize)
+    setInterval(() => {
+      mix.meter.getFloatTimeDomainData(wave)
+      let sum = 0
+      for (const v of wave) sum += v * v
+      if (Math.sqrt(sum / wave.length) > 0.002) mix.loud = true
+    }, 250)
     // Chrome starts audio only after a click on the page, and can suspend it
     // later (sleep, a speaker change): start it again whenever it can be
     const resume = () =>
@@ -194,6 +208,7 @@
     const stream = new MediaStream([track])
     const source = m.ctx.createMediaStreamSource(stream)
     source.connect(m.out)
+    source.connect(m.meter)
     // Chrome only lets a call's track into Web Audio while something plays
     // it; a muted element does, without a second copy of the sound here
     const keep = new Audio()
@@ -210,6 +225,76 @@
     if (!callSender || !mix) return
     callSender.replaceTrack(mix.out.stream.getAudioTracks()[0]).catch(() => {})
   }
+
+  // Zoom's web client doesn't hand its sound to the page as call tracks: it
+  // decodes it itself and plays it through Web Audio. So there, whatever is
+  // connected to an AudioContext's speakers is also taken into the mix.
+  // (Not on Meet or Teams, whose sound arrives as tracks: taken both ways,
+  // it would be heard twice.)
+  const TAP_WEB_AUDIO = /(^|\.)zoom\.us$/.test(location.hostname)
+  if (TAP_WEB_AUDIO && window.AudioNode && window.AudioDestinationNode) {
+    const taps = new WeakMap() // AudioContext → its tap
+    const realConnect = AudioNode.prototype.connect
+    const realDisconnect = AudioNode.prototype.disconnect
+    const tapOf = (ctx) => {
+      let tap = taps.get(ctx)
+      if (!tap) {
+        tap = ctx.createMediaStreamDestination()
+        taps.set(ctx, tap)
+        addCallAudio(tap.stream.getAudioTracks()[0])
+      }
+      return tap
+    }
+    AudioNode.prototype.connect = function (to, ...rest) {
+      const result = realConnect.call(this, to, ...rest)
+      try {
+        if (
+          to instanceof AudioDestinationNode &&
+          to.context instanceof AudioContext &&
+          to.context !== mix?.ctx
+        )
+          realConnect.call(this, tapOf(to.context), rest[0] ?? 0)
+      } catch {
+        // the page's own connection stands either way
+      }
+      return result
+    }
+    AudioNode.prototype.disconnect = function (...args) {
+      try {
+        const tap =
+          args[0] instanceof AudioDestinationNode && taps.get(args[0].context)
+        if (tap) realDisconnect.call(this, tap, ...args.slice(1, 2))
+      } catch {
+        // wasn't connected to the tap
+      }
+      return realDisconnect.apply(this, args)
+    }
+  }
+
+  // A sound report for Hi-chat's server log, every few seconds while this
+  // tab uses the remote camera: which site this is, how many call tracks are
+  // in the mix, whether the mix is running and has had sound since the last
+  // report, and whether it goes out to /mirror. When /mirror is silent, this
+  // tells where the sound stopped.
+  const VERSION = '1.14.0'
+  setInterval(() => {
+    if (!started) return
+    let live = 0
+    if (mix)
+      for (const track of mix.sources.keys())
+        if (track.readyState === 'live') live++
+    send({
+      t: 'diag',
+      v: VERSION,
+      host: location.hostname,
+      tracks: live,
+      ctx: mix ? mix.ctx.state : 'none',
+      sound: mix ? mix.loud : false,
+      lane: callSender?.track ? 'on' : 'off',
+      pc: pc?.connectionState ?? 'none',
+    })
+    if (mix) mix.loud = false
+  }, 5000)
 
   if (RealPeerConnection) {
     class WatchedPeerConnection extends RealPeerConnection {
