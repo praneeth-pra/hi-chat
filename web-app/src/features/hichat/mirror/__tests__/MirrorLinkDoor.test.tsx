@@ -13,7 +13,6 @@ vi.mock('@/features/hichat/camera/useCameraSender', async (actual) => ({
     camera.ticket = ticket
     return {
       screen: null,
-      call: null,
       stream: null,
       status: null,
       devices: [],

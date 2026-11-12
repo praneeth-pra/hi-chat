@@ -21,7 +21,6 @@ vi.mock('@/features/hichat/camera/useCameraSender', async (actual) => ({
   >()),
   useCameraSender: () => ({
     screen: camera.screen,
-    call: null,
     stream: null,
     status: null,
     devices: [],

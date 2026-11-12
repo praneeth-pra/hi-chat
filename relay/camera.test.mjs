@@ -330,24 +330,22 @@ test('sound reports go to the log, once per change, and to nobody else', () => {
   const before = camera.got.length
   const report = {
     t: 'diag',
-    v: '1.14.0',
-    host: 'meet.google.com',
-    tracks: 3,
-    ctx: 'running',
-    sound: true,
+    v: '1.15.0',
+    host: 'teams.microsoft.com',
+    pc: 'connected',
     extra: 'x'.repeat(500),
   }
   viewer.onmessage(JSON.stringify(report))
   viewer.onmessage(JSON.stringify(report))
-  viewer.onmessage(JSON.stringify({ ...report, sound: false, host: 'a b\n"c' }))
+  viewer.onmessage(JSON.stringify({ ...report, pc: 'failed', host: 'a b\n"c' }))
   camera.onmessage(
-    JSON.stringify({ t: 'diag', tabs: 1, sound: false, muted: true })
+    JSON.stringify({ t: 'diag', tabs: 1, app: true, loud: false, muted: true })
   )
   const sound = lines.filter((l) => l.includes(' sound '))
   assert.deepEqual(sound, [
-    'camera: meet tab sound v=1.14.0 host=meet.google.com tracks=3 ctx=running sound=true',
-    'camera: meet tab sound v=1.14.0 host=abc tracks=3 ctx=running sound=false',
-    'camera: mirror sound tabs=1 sound=false muted=true',
+    'camera: meet tab sound v=1.15.0 host=teams.microsoft.com pc=connected',
+    'camera: meet tab sound v=1.15.0 host=abc pc=failed',
+    'camera: mirror sound tabs=1 app=true loud=false muted=true',
   ])
   assert.equal(camera.got.length, before, 'reports are not passed on')
 })

@@ -61,8 +61,6 @@ export function useCameraSender({
   const [replaced, setReplaced] = useState(false)
   // The screen the computer in Meet is presenting, while it presents
   const [screen, setScreen] = useState<MediaStream | null>(null)
-  // The Meet call's sound (the other participants), while connected
-  const [call, setCall] = useState<MediaStream | null>(null)
   const [autostart, setAutostartState] = useState(
     () => stored(AUTOSTART) === '1'
   )
@@ -115,7 +113,6 @@ export function useCameraSender({
           if (s.replaced) setReplaced(true)
         },
         onScreen: setScreen,
-        onCall: setCall,
       })
       sender.current.setHearing(hearing.current)
       store(AUTOSTART, '1')
@@ -161,7 +158,6 @@ export function useCameraSender({
     setStream(null)
     setStatus(null)
     setScreen(null)
-    setCall(null)
   }, [stream])
 
   // Taken over by another page: let the camera go here
@@ -251,7 +247,6 @@ export function useCameraSender({
     setLightScreen,
     setHearing,
     screenStats,
-    call,
     autostart,
     setAutostart,
     starting,

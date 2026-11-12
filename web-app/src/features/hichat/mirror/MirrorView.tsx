@@ -34,8 +34,7 @@ import {
   useWide,
 } from './view/layout'
 import { mirrorStatus } from './view/connectionStatus'
-import { CALL_MUTED } from './view/CallSound'
-import { createCallSoundPlayer, type SoundSource } from './lib/callSound'
+import { CALL_MUTED, createCallSoundPlayer } from './lib/callSound'
 import { MirrorHeader } from './view/MirrorHeader'
 import { useFollowScroll } from './view/useFollowScroll'
 import { Divider } from './view/Divider'
@@ -107,22 +106,18 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
     direct,
   })
   const camera = cameraState(cam)
-  // The Meet call's sound: on unless muted here (remembered)
+  // The call's sound: on unless muted here (remembered)
   const [callMuted, setCallMuted] = useState(() => stored(CALL_MUTED) === '1')
   const [callBlocked, setCallBlocked] = useState(false)
   const blockCall = useCallback(() => setCallBlocked(true), [])
   // The call's sound as the Hi-chat app records it from its computer
-  // (lib/callSound.ts), beside the extension's copy: which one is heard,
-  // and whether the app's is arriving at all
-  const [heard, setHeard] = useState<{ source: SoundSource; app: boolean }>({
-    source: 'extension',
-    app: false,
-  })
+  // (lib/callSound.ts): whether it is arriving, and holds any sound lately
+  const [sound, setSound] = useState({ arriving: false, loud: false })
   const player = useRef<ReturnType<typeof createCallSoundPlayer> | null>(null)
   useEffect(() => {
     if (typeof AudioContext === 'undefined') return
     const p = createCallSoundPlayer({
-      onSource: (source, app) => setHeard({ source, app }),
+      onState: setSound,
       onBlocked: blockCall,
     })
     player.current = p
@@ -133,9 +128,6 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       p.close()
     }
   }, [soundTo, blockCall])
-  useEffect(() => {
-    player.current?.setExtension(cam.call ?? null)
-  }, [cam.call])
   // The viewer's own voice comes back in the computer's sound only while
   // its mic goes to a call there
   const micSent = cam.status?.viewers ? cam.stream : null
@@ -145,18 +137,17 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
   useEffect(() => {
     player.current?.setMuted(callMuted)
   }, [callMuted])
-  const appHeard = heard.app && heard.source === 'app'
   // For the server's sound report: whether the call is muted or blocked
-  // here, and which copy of it is heard
+  // here, and whether the app's sound arrives
   const { setHearing } = cam
   useEffect(() => {
     setHearing({
       muted: callMuted,
       blocked: callBlocked,
-      app: heard.app,
-      heard: heard.source,
+      app: sound.arriving,
+      loud: sound.loud,
     })
-  }, [setHearing, callMuted, callBlocked, heard])
+  }, [setHearing, callMuted, callBlocked, sound])
   const empty = state.msgs.length === 0 && !streaming
 
   // On a laptop the shared screen sits left of the text, sized by a divider
@@ -235,9 +226,7 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
       <MirrorHeader
         title={state.title}
         mirror={mirror}
-        call={cam.call}
-        appSound={heard.app}
-        callSilenced={appHeard}
+        callSound={sound.arriving}
         callMuted={callMuted}
         callBlocked={callBlocked}
         onToggleMute={() =>
@@ -250,7 +239,6 @@ export function MirrorViewer({ link }: { link?: string } = {}) {
           player.current?.resume()
           setCallBlocked(false)
         }}
-        onCallBlocked={blockCall}
         panelOpen={panelOpen}
         onTogglePanel={togglePanel}
         camera={camera}
