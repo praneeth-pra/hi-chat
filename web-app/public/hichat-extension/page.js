@@ -156,19 +156,41 @@
   function callMix() {
     if (mix) return mix
     const ctx = new AudioContext()
+    // Keyed by the track itself, not its id: a connection Meet opens again
+    // can bring a track with the same id as one still in the mix (the id
+    // comes from the other side), and that new track must be heard
     mix = { ctx, out: ctx.createMediaStreamDestination(), sources: new Map() }
-    // Chrome starts audio only after a click on the page
+    // Chrome starts audio only after a click on the page, and can suspend it
+    // later (sleep, a speaker change): start it again whenever it can be
     const resume = () =>
-      ctx.state === 'suspended' && ctx.resume().catch(() => {})
+      ctx.state !== 'running' &&
+      ctx.state !== 'closed' &&
+      ctx.resume().catch(() => {})
     addEventListener('pointerdown', resume, true)
     addEventListener('keydown', resume, true)
+    document.addEventListener('visibilitychange', resume)
+    ctx.addEventListener('statechange', resume)
+    setInterval(() => {
+      resume()
+      // A connection Meet closed doesn't always say its tracks ended
+      for (const [track, s] of mix.sources)
+        if (track.readyState === 'ended') dropCallAudio(track, s)
+        else if (s.keep.paused) s.keep.play().catch(() => {})
+    }, 2000)
     resume()
     return mix
   }
 
+  function dropCallAudio(track, s) {
+    if (mix.sources.get(track) !== s) return
+    s.source.disconnect()
+    s.keep.srcObject = null
+    mix.sources.delete(track)
+  }
+
   function addCallAudio(track) {
     const m = callMix()
-    if (m.sources.has(track.id)) return
+    if (m.sources.has(track)) return
     const stream = new MediaStream([track])
     const source = m.ctx.createMediaStreamSource(stream)
     source.connect(m.out)
@@ -178,12 +200,9 @@
     keep.muted = true
     keep.srcObject = stream
     keep.play().catch(() => {})
-    m.sources.set(track.id, { source, keep })
-    track.addEventListener('ended', () => {
-      source.disconnect()
-      keep.srcObject = null
-      m.sources.delete(track.id)
-    })
+    const s = { source, keep }
+    m.sources.set(track, s)
+    track.addEventListener('ended', () => dropCallAudio(track, s))
     sendCall()
   }
 
