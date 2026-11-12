@@ -67,6 +67,26 @@ export function StatusPill({
   )
 }
 
+// Chrome lists the system's default device twice more: as "Default - …"
+// (and on Windows "Communications - …"), beside its own entry. With our own
+// "Default" choice on top, one microphone showed up three times. These
+// stand-ins are left out, and the default choice names the device it means.
+const STAND_INS = new Set(['default', 'communications'])
+
+/** The devices to pick from, and what "Default" is right now. */
+export function devicePicks(devices: MediaDeviceInfo[]) {
+  const stand = devices.find((d) => d.deviceId === 'default')
+  const list: MediaDeviceInfo[] = []
+  const seen = new Set<string>()
+  for (const d of devices) {
+    if (STAND_INS.has(d.deviceId) || seen.has(d.deviceId)) continue
+    seen.add(d.deviceId)
+    list.push(d)
+  }
+  const now = stand?.label.replace(/^Default\s*-\s*/i, '').trim()
+  return { list, defaultName: now || undefined }
+}
+
 function DeviceSelect({
   icon,
   label,
@@ -82,6 +102,9 @@ function DeviceSelect({
   devices: MediaDeviceInfo[]
   fallback: string
 }) {
+  const { list, defaultName } = devicePicks(devices)
+  // A choice saved as one of the stand-ins means the default
+  const picked = STAND_INS.has(value) ? '' : value
   return (
     <label className="flex flex-col gap-1.5">
       <span className="flex items-center gap-1.5 text-xs font-medium text-main-view-fg/60">
@@ -90,11 +113,15 @@ function DeviceSelect({
       </span>
       <select
         className="h-9 w-full truncate rounded-md border border-main-view-fg/10 bg-main-view px-2 text-sm text-main-view-fg outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-        value={value}
+        value={picked}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="">Default {fallback}</option>
-        {devices.map((d) => (
+        <option value="">
+          {defaultName
+            ? `Default (${defaultName})`
+            : `Default ${fallback}`}
+        </option>
+        {list.map((d) => (
           <option key={d.deviceId} value={d.deviceId}>
             {d.label || fallback}
           </option>
