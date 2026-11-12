@@ -1,10 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  EXTENSION_SILENT_MS,
   KEEPALIVE_MS,
   SOUND_RATE,
+  createCallSoundPlayer,
   createSoundPacker,
-  createSourcePicker,
   unpackSound,
 } from '../callSound'
 
@@ -53,55 +52,155 @@ describe('the computer sound on its way to /mirror', () => {
   })
 })
 
-describe('which copy of the call is heard', () => {
-  const quiet = {
-    appAlive: true,
-    appLoud: false,
-    extensionLoud: false,
-    talking: false,
-  }
+describe("playing the app's sound on /mirror", () => {
+  afterEach(() => vi.useRealTimers())
 
-  it("is the extension's without the app's, as before", () => {
-    const pick = createSourcePicker()
-    expect(pick(50, { ...quiet, appAlive: false })).toBe('extension')
-  })
-
-  it("starts on the app's, and moves to the extension's once it brings sound", () => {
-    const pick = createSourcePicker()
-    expect(pick(50, quiet)).toBe('app')
-    expect(pick(50, { ...quiet, appLoud: true })).toBe('app')
-    expect(pick(50, { ...quiet, appLoud: true, extensionLoud: true })).toBe(
-      'extension'
-    )
-    // Pauses in the call change nothing
-    for (let i = 0; i < 100; i++) expect(pick(50, quiet)).toBe('extension')
-  })
-
-  it("goes back to the app's when the extension falls silent though the call is not", () => {
-    const pick = createSourcePicker()
-    pick(50, { ...quiet, appLoud: true, extensionLoud: true })
-    let heard = 'extension'
-    let ms = 0
-    while (heard === 'extension' && ms < 10_000) {
-      heard = pick(50, { ...quiet, appLoud: true })
-      ms += 50
+  // A stand-in for Web Audio: analysers report the level set on them
+  const fakeAudio = (startState = 'running') => {
+    const made = {
+      state: startState,
+      started: [] as number[],
+      gain: [] as number[],
+      levels: [] as { level: number }[],
+      resumed: 0,
     }
-    expect(heard).toBe('app')
-    expect(ms).toBe(EXTENSION_SILENT_MS)
-    // And returns when the extension's sound does
-    expect(pick(50, { ...quiet, appLoud: true, extensionLoud: true })).toBe(
-      'extension'
-    )
+    class Ctx {
+      currentTime = 0
+      destination = {}
+      get state() {
+        return made.state
+      }
+      createGain() {
+        return {
+          connect() {},
+          gain: {
+            value: 1,
+            setTargetAtTime(v: number) {
+              this.value = v
+              made.gain.push(v)
+            },
+          },
+        }
+      }
+      createAnalyser() {
+        const a = {
+          level: 0,
+          fftSize: 8,
+          getFloatTimeDomainData(buf: Float32Array) {
+            buf.fill(a.level)
+          },
+        }
+        made.levels.push(a)
+        return a
+      }
+      createBuffer(_c: number, n: number, rate: number) {
+        return { duration: n / rate, copyToChannel() {} }
+      }
+      createBufferSource() {
+        return {
+          buffer: null,
+          connect() {},
+          start(at: number) {
+            made.started.push(at)
+          },
+        }
+      }
+      createMediaStreamSource() {
+        return { connect() {}, disconnect() {} }
+      }
+      resume() {
+        made.resumed++
+        return Promise.resolve()
+      }
+      close() {
+        return Promise.resolve()
+      }
+    }
+    return { made, Ctx: Ctx as unknown as typeof AudioContext }
+  }
+  const mic = {
+    getAudioTracks: () => [{}],
+  } as unknown as MediaStream
+
+  it('plays packets one after another, and says when they arrive and stop', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('MediaStream', class {})
+    const { made, Ctx } = fakeAudio()
+    const states: { arriving: boolean; loud: boolean }[] = []
+    const player = createCallSoundPlayer({
+      onState: (s) => states.push(s),
+      onBlocked: () => {},
+      AudioContextImpl: Ctx,
+    })
+    const pack = createSoundPacker(() => 0)
+    player.push(pack(tone(1920), 48000))
+    player.push(pack(tone(1920), 48000))
+    expect(made.started).toHaveLength(2)
+    expect(made.started[1] - made.started[0]).toBeCloseTo(0.04, 5)
+    made.levels[0].level = 0.1 // the app's sound
+    vi.advanceTimersByTime(60)
+    expect(states.at(-1)).toEqual({ arriving: true, loud: true })
+    // The same packet again, or an older one, is not played twice
+    const again = pack(tone(1920), 48000)
+    player.push(again)
+    player.push(again)
+    expect(made.started).toHaveLength(3)
+    // Nothing more comes: the sound is gone
+    made.levels[0].level = 0
+    vi.advanceTimersByTime(7000)
+    expect(states.at(-1)).toEqual({ arriving: false, loud: false })
+    player.close()
+    vi.unstubAllGlobals()
   })
 
-  it("doesn't take the viewer's own voice coming back for the call", () => {
-    const pick = createSourcePicker()
-    pick(50, { ...quiet, appLoud: true, extensionLoud: true })
-    // Only the app's copy holds the viewer's voice: that is no sign the
-    // extension stopped working
-    for (let i = 0; i < 200; i++)
-      expect(pick(50, { ...quiet, appLoud: true, talking: true })).toBe(
-        'extension'
-      )
+  it('turns the sound down while the viewer talks, and off when muted', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('MediaStream', class {})
+    const { made, Ctx } = fakeAudio()
+    const player = createCallSoundPlayer({
+      onState: () => {},
+      onBlocked: () => {},
+      AudioContextImpl: Ctx,
+    })
+    player.setMic(mic)
+    vi.advanceTimersByTime(60)
+    expect(made.gain.at(-1)).toBe(1)
+    made.levels[1].level = 0.2 // the viewer's mic
+    vi.advanceTimersByTime(60)
+    expect(made.gain.at(-1)).toBeLessThan(0.1)
+    made.levels[1].level = 0
+    vi.advanceTimersByTime(500)
+    expect(made.gain.at(-1)).toBeLessThan(0.1)
+    vi.advanceTimersByTime(600)
+    expect(made.gain.at(-1)).toBe(1)
+    player.setMuted(true)
+    expect(made.gain.at(-1)).toBe(0)
+    player.setMuted(false)
+    expect(made.gain.at(-1)).toBe(1)
+    player.close()
+    vi.unstubAllGlobals()
+  })
+
+  it('asks for a click when the browser holds the sound back', () => {
+    vi.useFakeTimers()
+    const { made, Ctx } = fakeAudio('suspended')
+    let blocked = 0
+    const player = createCallSoundPlayer({
+      onState: () => {},
+      onBlocked: () => blocked++,
+      AudioContextImpl: Ctx,
+    })
+    vi.advanceTimersByTime(200)
+    expect(blocked).toBe(0) // no sound to hold back yet
+    player.push(createSoundPacker(() => 0)(tone(1920), 48000))
+    vi.advanceTimersByTime(200)
+    expect(blocked).toBe(1)
+    expect(made.started).toHaveLength(0)
+    made.state = 'running'
+    player.resume()
+    player.push(createSoundPacker(() => 5)(tone(1920), 48000))
+    vi.advanceTimersByTime(200)
+    expect(blocked).toBe(1)
+    player.close()
   })
 })

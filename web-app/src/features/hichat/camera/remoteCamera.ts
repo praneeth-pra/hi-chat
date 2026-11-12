@@ -3,15 +3,17 @@
 // over WebRTC. relay/camera.mjs passes the connection setup between them.
 // Each connection also has one video lane the other way: a Meet tab that is
 // presenting sends its shared screen back on it, for /mirror to show.
+// The call's sound doesn't come this way: the Hi-chat app sends what its
+// computer plays (mirror/lib/callSound.ts).
 
 /** What /mirror does with the call's sound, for the server's sound report. */
 export type Hearing = {
   muted?: boolean
   blocked?: boolean
-  /** The Hi-chat app's copy of the sound is arriving */
+  /** The Hi-chat app's sound is arriving */
   app?: boolean
-  /** The copy heard now */
-  heard?: string
+  /** It has had sound since the last report */
+  loud?: boolean
 }
 
 export type CameraStatus = {
@@ -177,7 +179,6 @@ export function startCameraSender({
   location = globalThis.location,
   onStatus = () => {},
   onScreen = () => {},
-  onCall = () => {},
   WebSocketImpl = globalThis.WebSocket,
   PeerConnection = globalThis.RTCPeerConnection,
 }: {
@@ -191,8 +192,6 @@ export function startCameraSender({
   onStatus?: (s: CameraStatus) => void
   /** The screen a Meet tab is presenting, or null when none is. */
   onScreen?: (screen: MediaStream | null) => void
-  /** The sound of the Meet call (other participants), or null */
-  onCall?: (call: MediaStream | null) => void
   WebSocketImpl?: typeof WebSocket
   PeerConnection?: typeof RTCPeerConnection
 }) {
@@ -229,53 +228,18 @@ export function startCameraSender({
   // The last stats read, to measure the time between two reads
   let lastStats: { id: string; at: number; s: ScreenCounters } | null = null
   let shown: MediaStream | null = null
-  // Each Meet tab's call sound. All of them are heard, as one stream with a
-  // track per tab: with only the latest tab heard, a second tab or frame
-  // that connected later and has no call of its own left /mirror silent
-  const calls = new Map<string, MediaStreamTrack>()
-  const callReceivers = new Map<string, RTCRtpReceiver>()
-  // What the page does with the call's sound (muted here, or waiting for a
-  // click), for the sound report
+  // What the page does with the call's sound (lib/callSound.ts: it comes
+  // from the Hi-chat app, not through here), for the server's log
   let hearing: Hearing = {}
-  let lastEnergy = 0
-  /** How much sound has arrived on the call lanes so far, all tabs. */
-  async function callEnergy() {
-    let total = 0
-    for (const r of callReceivers.values()) {
-      const report = await r.getStats().catch(() => null)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      report?.forEach((s: any) => {
-        if (s.type === 'inbound-rtp' && s.kind === 'audio')
-          total += s.totalAudioEnergy ?? 0
-      })
-    }
-    return total
-  }
-  // A sound report for the server's log every few seconds while a Meet tab
-  // is connected: whether the call's sound arrives here, and whether this
-  // page plays it. With the Meet tab's own report, a silent call shows
-  // where the sound stopped
-  const report = setInterval(async () => {
+  const report = setInterval(() => {
     if (!peers.size || ws?.readyState !== WebSocketImpl.OPEN) return
-    const energy = await callEnergy()
-    const sound = energy - lastEnergy > 1e-7
-    lastEnergy = energy
     send({
       t: 'diag',
       tabs: [...peers.values()].filter((p) => p.connectionState === 'connected')
         .length,
-      tracks: calls.size,
-      sound,
       ...hearing,
     })
   }, 5000)
-  let heard = ''
-  function hearCall() {
-    const key = [...calls.keys()].join(' ')
-    if (key === heard) return
-    heard = key
-    onCall(calls.size ? new MediaStream([...calls.values()]) : null)
-  }
 
   function showScreen() {
     let next: MediaStream | null = null
@@ -303,8 +267,6 @@ export function startCameraSender({
     screenReceivers.delete(id)
     presenting = presenting.filter((p) => p !== id)
     showScreen()
-    callReceivers.delete(id)
-    if (calls.delete(id)) hearCall()
     status()
   }
 
@@ -343,8 +305,6 @@ export function startCameraSender({
     for (const track of current.getTracks()) pc.addTrack(track, current)
     // The lane a presenting Meet tab sends its screen back on
     const lane = pc.addTransceiver('video', { direction: 'recvonly' })
-    // And the lane the Meet call's sound comes back on
-    const callLane = pc.addTransceiver('audio', { direction: 'recvonly' })
     pc.ontrack = (e) => {
       if (peers.get(id) !== pc) return
       if (e.transceiver === lane) {
@@ -352,11 +312,6 @@ export function startCameraSender({
         screenReceivers.set(id, e.receiver)
         tuneScreen(id)
         showScreen()
-      } else if (e.transceiver === callLane) {
-        calls.set(id, e.track)
-        if (e.receiver) callReceivers.set(id, e.receiver)
-        heard = '' // the same tab again brings a new track
-        hearCall()
       }
     }
     pc.onicecandidate = (e) =>

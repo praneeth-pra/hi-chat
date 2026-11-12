@@ -1,17 +1,17 @@
-// The call's sound from the computer itself: the Hi-chat app records what
+// The call's sound, from the computer itself: the Hi-chat app records what
 // the computer's speakers play (lib/computerAudio.ts) and sends it straight
 // to each /mirror viewer on a data channel of the direct connection
 // (lib/mirrorDirect.ts), where it is played. It works whatever the call runs
-// in (Meet, Teams, Zoom, their desktop apps), as it doesn't look inside the
-// call's page the way the camera extension has to.
+// in (Meet, Teams, Zoom, their desktop apps), as nothing looks inside the
+// call's page for it; the camera extension has no part in the sound.
 //
 // The computer's sound also holds the /mirror viewer's own voice, which the
 // extension plays there for the people at that computer. So while the
 // viewer talks (and for a moment after, as the voice takes that long to
-// come back), this sound is turned down for them. The extension's own copy
-// of the call (the camera connection's call lane) has no such echo, so
-// while that one is seen to work it is the one heard, and this one takes
-// over whenever it is silent though the computer is not.
+// come back), the sound is turned down for them.
+
+/** Whether the viewer muted the call's sound (remembered). */
+export const CALL_MUTED = 'hichat-mirror-call-muted'
 
 /** The rate the sound travels at: plenty for voices, half the data of 48 kHz. */
 export const SOUND_RATE = 24000
@@ -69,43 +69,6 @@ export function unpackSound(
   return { seq: view.getUint32(0, true), rate, samples }
 }
 
-export type SoundSource = 'extension' | 'app'
-
-/** How long the app's sound alone must go on before the extension counts as silent. */
-export const EXTENSION_SILENT_MS = 1500
-
-/**
- * Which copy of the call is heard. The extension's has no echo of the
- * viewer's own voice, so it is heard while it works: from the first sound it
- * brings, until the computer's sound has gone on for EXTENSION_SILENT_MS
- * without it (not counting the viewer's own voice coming back, which only
- * the computer's sound holds).
- */
-export function createSourcePicker() {
-  let works = false
-  let alone = 0
-  return (
-    ms: number,
-    s: {
-      /** The app's sound is arriving at all */
-      appAlive: boolean
-      appLoud: boolean
-      extensionLoud: boolean
-      /** The viewer is talking, or was a moment ago */
-      talking: boolean
-    }
-  ): SoundSource => {
-    if (s.extensionLoud) {
-      works = true
-      alone = 0
-    } else if (s.appLoud && !s.talking) {
-      alone += ms
-      if (alone >= EXTENSION_SILENT_MS) works = false
-    }
-    return works || !s.appAlive ? 'extension' : 'app'
-  }
-}
-
 /** The app's sound counts as arriving for this long after its last packet. */
 const ALIVE_MS = 2500
 /** Played this far behind arrival, to ride out uneven delivery. */
@@ -119,6 +82,8 @@ export const TALK_HOLD_MS = 900
 const LOUD = 0.004
 const TALKING = 0.02
 const TICK_MS = 50
+/** The sound counts as heard lately for this long after its last sound. */
+const LOUD_HOLD_MS = 6000
 
 const level = (analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>) => {
   analyser.getFloatTimeDomainData(buf)
@@ -128,17 +93,16 @@ const level = (analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>) => {
 }
 
 /**
- * Plays the app's sound on /mirror and decides, every TICK_MS, which copy
- * of the call is heard (`onSource`). The extension's copy keeps playing on
- * its own players (view/CallSound.tsx), muted while the app's is heard;
- * here it is only listened to.
+ * Plays the app's sound on /mirror, turned down while the viewer talks.
+ * `onState` says whether the sound is arriving, and whether it has been
+ * anything but silence lately.
  */
 export function createCallSoundPlayer({
-  onSource,
+  onState,
   onBlocked,
   AudioContextImpl = globalThis.AudioContext,
 }: {
-  onSource: (source: SoundSource, appAlive: boolean) => void
+  onState: (state: { arriving: boolean; loud: boolean }) => void
   /** The browser wants a click before any sound plays */
   onBlocked: () => void
   AudioContextImpl?: typeof AudioContext
@@ -147,27 +111,21 @@ export function createCallSoundPlayer({
   const out = ctx.createGain()
   out.connect(ctx.destination)
   const appMeter = ctx.createAnalyser()
-  const extMeter = ctx.createAnalyser()
   const micMeter = ctx.createAnalyser()
   const buf = new Float32Array(appMeter.fftSize)
   let lastSeq = 0
   let lastPacket = -Infinity
+  let lastLoud = -Infinity
   let playAt = 0
   let muted = false
-  let source: SoundSource = 'extension'
-  let alive = false
+  let state = { arriving: false, loud: false }
   let talkingUntil = -Infinity
-  let extNodes: {
-    node: MediaStreamAudioSourceNode
-    track: MediaStreamTrack
-  }[] = []
   let micNode: MediaStreamAudioSourceNode | null = null
   let blockedTold = false
   let lastResume = -Infinity
-  const pick = createSourcePicker()
 
   const setGain = (talking: boolean) => {
-    const to = muted || source !== 'app' ? 0 : talking ? DUCKED : 1
+    const to = muted ? 0 : talking ? DUCKED : 1
     out.gain.setTargetAtTime(
       to,
       ctx.currentTime,
@@ -177,35 +135,27 @@ export function createCallSoundPlayer({
 
   const tick = setInterval(() => {
     const now = performance.now()
-    if (ctx.state !== 'running') {
+    const arriving = now - lastPacket < ALIVE_MS
+    if (ctx.state === 'running') {
+      blockedTold = false
+      if (micNode && level(micMeter, buf) > TALKING)
+        talkingUntil = now + TALK_HOLD_MS
+      if (level(appMeter, buf) > LOUD) lastLoud = now
+      setGain(now < talkingUntil)
+    } else {
       if (now - lastResume > 1000) {
         lastResume = now
         ctx.resume().catch(() => {})
       }
-      // Nothing can be measured or played: the extension's players carry on
-      if (now - lastPacket < ALIVE_MS && !blockedTold) {
+      // The sound is here but the browser holds it back until a click
+      if (arriving && !blockedTold) {
         blockedTold = true
         onBlocked()
       }
-      return
     }
-    blockedTold = false
-    if (micNode && level(micMeter, buf) > TALKING)
-      talkingUntil = now + TALK_HOLD_MS
-    const talking = now < talkingUntil
-    const appAlive = now - lastPacket < ALIVE_MS
-    const next = pick(TICK_MS, {
-      appAlive,
-      appLoud: level(appMeter, buf) > LOUD,
-      extensionLoud: extNodes.length > 0 && level(extMeter, buf) > LOUD,
-      talking,
-    })
-    if (next !== source || appAlive !== alive) {
-      source = next
-      alive = appAlive
-      onSource(source, alive)
-    }
-    setGain(talking)
+    const loud = now - lastLoud < LOUD_HOLD_MS
+    if (arriving !== state.arriving || loud !== state.loud)
+      onState((state = { arriving, loud }))
   }, TICK_MS)
 
   return {
@@ -231,21 +181,6 @@ export function createCallSoundPlayer({
       node.start(playAt)
       playAt += audio.duration
     },
-    /** The extension's copy of the call (one track per Meet tab), or null. */
-    setExtension(stream: MediaStream | null) {
-      const tracks = stream?.getAudioTracks() ?? []
-      if (
-        tracks.length === extNodes.length &&
-        tracks.every((t, i) => extNodes[i].track === t)
-      )
-        return
-      for (const { node } of extNodes) node.disconnect()
-      extNodes = tracks.map((track) => {
-        const node = ctx.createMediaStreamSource(new MediaStream([track]))
-        node.connect(extMeter)
-        return { node, track }
-      })
-    },
     /** This computer's mic, to hear when its user talks; null when not sent. */
     setMic(stream: MediaStream | null) {
       micNode?.disconnect()
@@ -267,7 +202,6 @@ export function createCallSoundPlayer({
     },
     close() {
       clearInterval(tick)
-      for (const { node } of extNodes) node.disconnect()
       micNode?.disconnect()
       ctx.close().catch(() => {})
     },

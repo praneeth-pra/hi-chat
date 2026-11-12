@@ -160,8 +160,17 @@ export function createCameraHub({
   // when something changes (and once a minute), so a call where /mirror
   // was silent shows where the sound stopped. Known fields, short values.
   const DIAG_FIELDS = {
-    view: ['v', 'host', 'tracks', 'ctx', 'sound', 'lane', 'pc'],
-    send: ['tabs', 'tracks', 'sound', 'muted', 'blocked', 'app', 'heard'],
+    view: ['v', 'host', 'pc', 'tracks', 'ctx', 'sound', 'lane'],
+    send: [
+      'tabs',
+      'app',
+      'loud',
+      'muted',
+      'blocked',
+      'tracks',
+      'sound',
+      'heard',
+    ],
   }
   const clean = (v) =>
     typeof v === 'number' || typeof v === 'boolean'

@@ -95,7 +95,6 @@ describe('remote camera', () => {
 
   it('shows the screen a Meet tab presents, and drops it when it stops', async () => {
     const onScreen = vi.fn()
-    const onCall = vi.fn()
     const stream = { getTracks: () => [] } as unknown as MediaStream
     globalThis.MediaStream ??= class {
       constructor(public tracks: unknown[]) {}
@@ -105,7 +104,6 @@ describe('remote camera', () => {
       key: 'k',
       location: { protocol: 'https:', host: 'hi.example' },
       onScreen,
-      onCall,
       WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
       PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
     })
@@ -113,14 +111,9 @@ describe('remote camera', () => {
     ws.hear({ t: 'join', from: 'm1' })
     await flush()
     const pc = FakePeer.all.at(-1)!
-    // The offer asks for two lanes back: the presented screen, the call's sound
-    expect(pc.lanes).toEqual([
-      { kind: 'video', direction: 'recvonly' },
-      { kind: 'audio', direction: 'recvonly' },
-    ])
-    // The call's sound plays as soon as it arrives, presenting or not
-    pc.ontrack?.({ transceiver: pc.lanes[1], track: { kind: 'audio' } })
-    expect(onCall.mock.lastCall?.[0]).not.toBeNull()
+    // The offer asks for one lane back, the presented screen: the call's
+    // sound comes from the Hi-chat app, not from the Meet tab
+    expect(pc.lanes).toEqual([{ kind: 'video', direction: 'recvonly' }])
     pc.ontrack?.({ transceiver: pc.lanes[0], track: { kind: 'video' } })
     // Connected but not presenting: nothing to show yet
     expect(onScreen).not.toHaveBeenCalled()
@@ -141,7 +134,6 @@ describe('remote camera', () => {
     ws.hear({ t: 'leave', from: 'm1' })
     await flush()
     expect(onScreen).toHaveBeenLastCalledWith(null)
-    expect(onCall).toHaveBeenLastCalledWith(null)
     cam.stop()
   })
 
@@ -233,42 +225,21 @@ describe('remote camera', () => {
     cam.stop()
   })
 
-  it('hears every Meet tab, and stops knocking once its link has ended', async () => {
-    const onCall = vi.fn()
-    globalThis.MediaStream ??= class {
-      constructor(public tracks: unknown[]) {}
-    } as unknown as typeof MediaStream
+  it('stops knocking once its link has ended', async () => {
     const cam = startCameraSender({
       stream: { getTracks: () => [] } as unknown as MediaStream,
       key: '',
       link: 'l',
       ticket: 't',
       location: { protocol: 'https:', host: 'hi.example' },
-      onCall,
       WebSocketImpl: FakeSocket as unknown as typeof WebSocket,
       PeerConnection: FakePeer as unknown as typeof RTCPeerConnection,
     })
     const ws = FakeSocket.last
-    const sound = (id: string) => {
-      const pc = FakePeer.all.at(-1)!
-      const track = { kind: 'audio', id }
-      pc.ontrack?.({ transceiver: pc.lanes[1], track })
-      return track
-    }
     ws.hear({ t: 'join', from: 'tab-a' })
     await flush()
-    const a = sound('a')
-    // A second tab (or frame) connects later, with no call of its own
     ws.hear({ t: 'join', from: 'tab-b' })
     await flush()
-    const b = sound('b')
-    const heard = onCall.mock.lastCall?.[0] as unknown as { tracks: unknown[] }
-    expect(heard.tracks).toEqual([a, b])
-    ws.hear({ t: 'leave', from: 'tab-b' })
-    await flush()
-    expect(
-      (onCall.mock.lastCall?.[0] as unknown as { tracks: unknown[] }).tracks
-    ).toEqual([a])
 
     // The link ends: no reconnecting with a ticket that is refused now
     vi.useFakeTimers()
@@ -280,7 +251,7 @@ describe('remote camera', () => {
     cam.stop()
   })
 
-  it('reports whether the call sound arrives and is played', async () => {
+  it("reports whether the app's sound arrives and is played", async () => {
     vi.useFakeTimers()
     const cam = startCameraSender({
       stream: { getTracks: () => [] } as unknown as MediaStream,
@@ -292,38 +263,21 @@ describe('remote camera', () => {
     const ws = FakeSocket.last
     ws.hear({ t: 'join', from: 'tab-s' })
     await vi.advanceTimersByTimeAsync(0)
-    const pc = FakePeer.all.at(-1)!
-    pc.connectionState = 'connected'
-    let energy = 0
-    const receiver = {
-      getStats: async () =>
-        new Map([
-          [
-            'a',
-            { type: 'inbound-rtp', kind: 'audio', totalAudioEnergy: energy },
-          ],
-        ]),
-    }
-    pc.ontrack?.({
-      transceiver: pc.lanes[1],
-      track: { kind: 'audio', id: 's' },
-      receiver,
-    } as never)
-    cam.setHearing({ muted: true, blocked: false })
-    energy = 0.5
+    FakePeer.all.at(-1)!.connectionState = 'connected'
+    cam.setHearing({ muted: true, blocked: false, app: true, loud: true })
     await vi.advanceTimersByTimeAsync(5000)
     const reports = () => ws.sent.filter((m) => m.t === 'diag')
     expect(reports().at(-1)).toEqual({
       t: 'diag',
       tabs: 1,
-      tracks: 1,
-      sound: true,
       muted: true,
       blocked: false,
+      app: true,
+      loud: true,
     })
-    // Nothing more arrives: silent
+    cam.setHearing({ muted: false, blocked: false, app: false, loud: false })
     await vi.advanceTimersByTimeAsync(5000)
-    expect(reports().at(-1)?.sound).toBe(false)
+    expect(reports().at(-1)?.app).toBe(false)
     cam.stop()
     const n = reports().length
     await vi.advanceTimersByTimeAsync(20_000)

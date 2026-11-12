@@ -7,7 +7,6 @@ import {
 import { StatusPill, toneDot } from '@/features/hichat/camera/RemoteCameraPanel'
 import type { cameraState } from '@/features/hichat/camera/useCameraSender'
 import { cn } from '@/lib/utils'
-import { CallSound } from './CallSound'
 import type { mirrorStatus } from './connectionStatus'
 
 /**
@@ -17,32 +16,24 @@ import type { mirrorStatus } from './connectionStatus'
 export function MirrorHeader({
   title,
   mirror,
-  call,
-  appSound = false,
-  callSilenced = false,
+  callSound,
   callMuted,
   callBlocked,
   onToggleMute,
   onUnblockCall,
-  onCallBlocked,
   panelOpen,
   onTogglePanel,
   camera,
 }: {
   title: string
   mirror: ReturnType<typeof mirrorStatus>
-  /** The Meet call's sound, while there is a call */
-  call: MediaStream | null | undefined
-  /** The call's sound also comes from the Hi-chat app (lib/callSound.ts) */
-  appSound?: boolean
-  /** The app's copy is the one heard now: the extension's players stay quiet */
-  callSilenced?: boolean
+  /** The call's sound is arriving from the Hi-chat app (lib/callSound.ts) */
+  callSound: boolean
   callMuted: boolean
   /** The browser wants a click before it plays the call */
   callBlocked: boolean
   onToggleMute: () => void
   onUnblockCall: () => void
-  onCallBlocked: () => void
   panelOpen: boolean
   onTogglePanel: () => void
   camera: ReturnType<typeof cameraState>
@@ -67,7 +58,7 @@ export function MirrorHeader({
         label={mirror.label}
         className="hidden sm:inline-flex"
       />
-      {(call || appSound) &&
+      {callSound &&
         (callBlocked ? (
           <button
             type="button"
@@ -96,14 +87,6 @@ export function MirrorHeader({
             <span className="hidden sm:inline">Call</span>
           </button>
         ))}
-      {call && (
-        <CallSound
-          stream={call}
-          muted={callMuted || callSilenced}
-          blocked={callBlocked}
-          onBlocked={onCallBlocked}
-        />
-      )}
       <button
         type="button"
         onClick={onTogglePanel}
